@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.8
+# DESIGN.md — 自动化性能优化管线（最小集）v0.9
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -10,6 +10,7 @@
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
 > v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
+> v0.9 变更：实验4 定论——**双源采集架构定型**（渲染计数唯一通路=1Hz 轮询；GC/内存=按帧注入采样 handle 构造，实测真值；离线 .data 补 marker 时间线）；档位重编号 A/A2/A3；§2.2.1 增事实 7/8
 > v0.8 变更：**A 档采集通路更换**——注入式 `ProfilerRecorder` 取不到渲染读数（构造成功但恒为 0），主力改为轮询内置 `diagnostics get_performance`（~1.05 次/秒 ⇒ 秒级抽样，统计口径帧→秒并新增 `poll_rate`）；§2.2.1 扩为六条；新增方法学陷阱（静止场景噪声带退化 ⇒ `k·σ` 失效）作为 M1 交付判据；幂等判据改用心跳文件新鲜度
 
 ---
@@ -106,20 +107,20 @@ Detector = {
 | 档 | 手段 | 得到什么 | 实测状态 |
 |---|---|---|---|
 | **A（主力，已换）** | **轮询 `unity command "diagnostics get_performance"`** | `render`：drawCalls / batches / setPassCalls / triangles / vertices；`memory`：totalAllocated / totalReserved / monoUsed / monoHeap；`frameTiming`：cpuFrameTimeMs / gpuFrameTimeMs / cpuMainThreadFrameTimeMs | ✅ 可用，且**不依赖 Play Mode**（编辑态同值）。硬约束：CLI 往返使实际速率仅 **~1.05 次/秒** ⇒ 这是"按秒抽样"，不是逐帧采样 |
-| **A′（逐帧，扩展位）** | `diagnostics profiler_record --frames N` → `ProfilerCaptures/*.data` | 真·逐帧数据（实测 60 帧 / 11.5MB，`status=completed framesSaved=60`） | ⚠️ 录制成功但产物为**二进制、无结构化导出接口**。解析成本另计，列 M8 之后 |
-| **A″（注入式采样器，降为备选）** | `script eval_file` + `ProfilerRecorder` | 自定义 `ProfilerMarker`、逐帧 GC alloc | ❌ 渲染读数取不到。仅在未来需要自定义 marker 时重探；其实现约束（§2.2.1 事实 2/3/5/6）仍成立，代码保留于 `probe/sampler_v3.cs` |
+| **A3（离线 .data，补充源）** | `profiler_record` 录制 → `ProfilerDriver.LoadProfile` + `GetCounterValuesBatch`（反射自 Profile Analyzer 源码发现；AnalysisDataSource 与官方包 `Load(.data)` 实测均不可用，须经编辑器会话中转） | 逐帧 Memory / **GC Allocated In Frame**（实测 120 帧，稳态 ~150KB/帧有分布）；渲染列 = **-1 哨兵**（counter 不存在，与 A2 同因） | ✅ 可用但覆盖窄：marker 级深挖与逐帧时间线；`-1` 必须在解析层显式过滤，禁止当 0 统计 |
+| **A2（逐帧注入采样，已复活）** | `script eval_file` 装常驻回调 + `ProfilerRecorder(handle 构造)`——句柄从 `ProfilerRecorderHandle.GetAvailable` 反查，禁静态名猜测 | **GC Allocated In Frame**（实测 last=166,423 / max=508,397 B 每帧）、Total/Mono 内存（实测 1.8GB） | ✅ 可用。⚠️ 渲染计数**不在此体系**：5023 句柄精确匹配 Draw Calls/SetPass/Batches 全落空；构造不存在名称→**静默读 0 不抛异常**（§2.2.1 事实 7），渲染类指标一律禁用 A2/A3 |
 | **B（半真机）** | PC Standalone Player + `runtime *` 命令（实测有 `runtime status/set_time_scale/simulate_key`） | 无 Editor 开销的播放器数据 | 需 `unity build`，覆盖 REQ-3 的 IL2CPP/Mono 面。扩展位 M8 |
 | **C（兜底）** | 资产静态扫描（`.mat`/`.shader`/`.controller`）+ `unity logs` / Editor.log 解析 | 材质实例数、Shader 指令与 keyword、状态机拓扑规模、同步 Load 调用点计数 | 精度低，须标 `static_estimate`，禁止与实测混列或跨档对比 |
 
 **换通路带来两个统计口径必须跟着改**（属 §3 前提，不是细节）：
 1. **采样单位从"帧"变"秒"**：`window_frames` → `window_samples`，`n_samples` 语义改为轮询次数（默认 ≥30 次 ≈ 30 秒），并把实测 `poll_rate` 入指纹——1Hz 与 10Hz 的样本不可互比。
-2. **帧粒度指标 A 档给不出**：帧率、掉帧率、逐帧 GC alloc 尖峰一律标 `unavailable_frame_granularity`，改由 A′/B 承接。**禁止用秒级抽样冒充帧级结论**（违者按 I1 处理）。
+2. **帧粒度指标按源分工，不留空白**：逐帧 GC alloc / 内存尖峰 → **A2 已实测覆盖**；帧率与掉帧率仍需逐帧 frame time，A 档给不出时标 `unavailable_frame_granularity`，由 A3 时间线或 B 档承接。**禁止用秒级抽样冒充帧级结论**（违者按 I1 处理）。
 
 四条链路取数分配（按新通路重排）：
-- `F-CPU-01` → A 的 `cpuFrameTimeMs`（实测 40 样本 40 个唯一值，分布成立）+ C 扫分配点；逐帧 GC alloc 需 A′。
-- `F-GPU-01` → A 的 `render.*`（实测有效）+ C 数材质实例与 Shader 复杂度。
-- `F-ANIM-01` → A 的 `frameTiming` 分段 + C 的状态机拓扑规模；Animation 分项需 A′。
-- `F-LOAD-01` → A 的 `memory.*`（实测 40 样本 23 个唯一值）+ C 的同步 Load 调用点计数。
+- `F-CPU-01` → **A2 逐帧 GC Allocated In Frame（✅ 已解锁，"解释力"定量基础成立）** + A 的 `cpuFrameTimeMs`（40 样本 40 唯一值）+ C 扫分配点。
+- `F-GPU-01` → A 的 `render.*`（实测有效，**唯一通路**——A2/A3 均无渲染 counter）+ C 数材质实例与 Shader 复杂度。
+- `F-ANIM-01` → A 的 `frameTiming` 分段 + A3 逐帧时间线（Anim/System 类目耗时 marker，recorder 体系存在）+ C 的状态机拓扑规模。
+- `F-LOAD-01` → A 的 `memory.*` + **A3 逐帧时间线**（加载窗口分配/内存尖峰定位；实测首帧 1.9MB 域重载开销可辨）+ C 的同步 Load 调用点计数。
 
 `SamplingBundle` 协议指纹：`scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × environment_fingerprint`（环境指纹=Unity/URP 版本 × GPU 驱动 × 电源计划 × 散热状态，理由见 §8.6）。`editor_mode` 保留——无头模式渲染值仍恒为 0（§2.2.1 事实 1）。指纹任一字段不同即禁止对比（AGENTS G7）。
 
@@ -146,7 +147,11 @@ Detector = {
 5. **域重载会销毁内存场景物体。** 退出 Play Mode 后探针物体消失（重建时 `cameras=2` 说明上轮物体已没了）。
    ⇒ 每轮录制前必须在**编辑态重建场景**（`probe/build_scene.cs`），否则采到空场景、指标全 0。
 6. **`ProfilerRecorder` 这条路在本机取不到渲染读数**：构造 7/7 成功（`skipped=[]`）、300 帧窗口正常落盘，但 `Render/Draw Calls`、`Render/SetPass Calls`、`Render/Batches`、`Render/Frame Time`、`Scripts/Update Time`、`Memory/Mono Used Memory` 的 median **全为 0**，仅 `Memory/Total Used Memory` 有真值（≈1.36GB）。`diagnostics profiler_connect --target editor` + `Profiler.enabled=true` 均无效；单独新开 recorder 即时采样也 `last=0 count=0`。反射候选入口 `GraphicsStats` / `GetCounterNames` / `GetFrameStatistic` 实测均不可用。
-   ⇒ 内置 `get_performance` 与 `ProfilerRecorder` 不是同一后端。**A 档主力换为轮询内置命令**（§2.1），注入式采样器降为 A″ 备选。
+   ⇒ 内置 `get_performance` 与 `ProfilerRecorder` 不是同一后端（成因见事实 7）。**渲染计数主力=轮询内置命令**（§2.1 A 档）；注入式采样器经事实 7 澄清后按指标分工复活为 A2。
+
+7. **渲染计数不属于 counter/recorder 体系（实验4 定论）。** 启用 Profiler 后端（`profileEditor=true` + `enabled=true`）后枚举全部 **5023** 个 recorder 句柄，精确匹配 `Draw Calls` / `SetPass Calls` / `Batches` **全部落空**（仅 `GC Allocated In Frame` 命中，类目=Memory）；`ProfilerCategory.Render + "Draw Calls"` 构造不抛异常但恒读 0 ⇒ **"构造成功 ≠ 名称有效"，不存在的名称静默返回 0**。`get_performance` 读到 184 说明它走的是 Frame Stats（引擎直读），与 counter 体系是两条道。
+   ⇒ 双源定型：渲染计数唯一走 A（1Hz 轮询）；GC/内存走 A2（按帧，handle 从 GetAvailable 反查）；A3 补 marker 级时间线。同一指标禁止跨源混用，归属由检测器注册表按指标声明数据源。
+8. **`GC Allocated In Frame` 实测可用（F-CPU-01 阻塞解除）**：A2 按帧读到 last=166,423 / max=508,397 B；A3 离线 120 帧序列显示首帧 1.9MB（域重载）稳态 ~150KB——分布真实，"30 次 new List → +X B/帧"这类定量预测从此可验证。
 
 **⚠️ 由此暴露一个方法学陷阱（必须在 M1 之前解决，不能留到调参时再说）**：静止场景下 `drawCalls` 的真实分布是**退化的**——40 次轮询全部等于 184（唯一值数=1），MAD=0 ⇒ `noise_band=0` ⇒ §3 的 `k·noise_band` 判据对这类指标完全失效，**任何改动都会被判"统计显著"**。
 ⇒ 三条对策作为 M1 交付判据：① 夹具回放脚本**必须含动态**（相机/物体运动、动画或粒子驱动），让指标本身有抖动；② 对退化指标（`unique/n < 0.1`）禁用 MAD 噪声带，改用 `min_magnitude` 绝对门限并显式标 `degenerate_distribution`；③ 检出阈值一律来自 clean 变体的噪声标定（§8.1），禁止以"该指标零方差所以改一点就算显著"为由放过改动。
@@ -228,7 +233,7 @@ Detector = {
    ⚠️ **分布退化例外（G17，实测）**：静止场景 `drawCalls` 40 次全等于 184 ⇒ MAD=0 ⇒ 噪声带判据失效，任何改动都会"统计显著"。此时禁用相对判据、只走 `min_magnitude`，并标 `degenerate_distribution`；夹具回放必须含动态（§2.2.1）。
 4. **双门限**：统计显著 + 业务显著（`deviation_ratio` ≥ 1.5，或该指标占回退总量 `explains_share` ≥ 20%）。
 5. 基线版本化 `baselines/<hash>.json`，失效判定用"采样协议指纹 + 场景 GUID + 资产清单哈希"三元组。
-6. **档位不可跨比**：A/A2/A3/B/C 任意两档之间（含 A 档 Play 与 A 档 Player）一律拒绝并报错；A3（注入式）实测取不到渲染读数，其数据不得用于任何链路判定。
+6. **档位不可跨比**：A/A2/A3/B/C 任意两档之间（含 A 档 Play 与 A 档 Player）一律拒绝并报错。**指标归属制**：渲染计数类只认 A（A2/A3 无此 counter，A3 中表现为 -1 哨兵、A2 中表现为静默 0——两者都必须被解析层拒绝而非当 0 统计）；逐帧 GC/内存类只认 A2/A3。-1 哨兵与静默 0 是"该源无此项"的信号，不是测量值（I1）。
 
 误报率来源：**重采样不复现的 Issue 自动记一次 FP**；被 Review 判定"改后数据无显著变化但 Detect 曾判异常"也记一次 FP。按 `detector.id + version` 分桶统计。
 

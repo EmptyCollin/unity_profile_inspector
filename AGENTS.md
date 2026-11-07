@@ -122,7 +122,7 @@ RunState:
   run_id, fixture, fixture_split,        # fixture_split: tuning | holdout（§8.1）
   scene, replay_script, quality_tier
   sampling_protocol: { min_samples, warmup_samples, window_samples, poll_rate,
-                       aggregation: median, data_tier: A|A2|A3|B|C,
+                       aggregation: median, data_tier: A|A2|A3|B|C,   # A=轮询(渲染唯一源) A2=注入按帧(GC/内存) A3=离线.data(时间线)
                        probe_overhead, instrument_distorted,
                        degenerate_distribution }   # 秒级抽样口径，见 DESIGN §2.1
   protocol_fingerprint          # G7 用；含 environment_fingerprint 与 editor_mode，不一致禁止对比
@@ -220,7 +220,7 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G5 证据链断裂（diff 中有改动无法对应到任何 Evidence）→ 该 attempt 无效。
 - G6 `max_review_rounds`（默认 3）耗尽 → Issue 记 `failed`，禁止继续。审查若判定"本质是感知类改动，不该自动执行"→ 立即 `escalate_human`，**不烧完配额**。
 - G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态）同样触发本门禁（DESIGN §8.6）。
-- G16 **渲染类计数器必须在 GUI Editor + Play Mode 下采集**（实测，DESIGN §2.2.1 事实 1）：`-batchmode -nographics` 下即使场景含 20 个 renderer 且处于播放模式，`drawCalls/batches/triangles` 仍恒为 0、GPU 设备为 `Null Device`。因此：GPU 与动画链路的 A 档采样**禁止在无头模式进行**；同一指标跨 editor_mode 的数值禁止对比（并入 G7 的 `editor_mode` 字段）。CPU / 加载链路无此限制。
+- G16 **渲染类计数器唯一源=GUI Editor 的 `diagnostics get_performance` 轮询**（实测 A2/A3 两源均无渲染 counter：A2 静默读 0，A3 为 -1 哨兵——把这两种当"值为 0/负"参与统计即违反 I1）。且必须在 Play Mode 采集（实测，DESIGN §2.2.1 事实 1）：`-batchmode -nographics` 下即使场景含 20 个 renderer 且处于播放模式，`drawCalls/batches/triangles` 仍恒为 0、GPU 设备为 `Null Device`。因此：GPU 与动画链路的 A 档采样**禁止在无头模式进行**；同一指标跨 editor_mode 的数值禁止对比（并入 G7 的 `editor_mode` 字段）。CPU / 加载链路无此限制。
 - G8 **编译门禁前置于采样**：EditPlan 落地后先 `recompile` 并过滤 `error CS####`；编译失败 → attempt 直接失败并回滚，**不消耗一整轮采样成本**。
 - G9 **回滚不得依赖 Editor 可达**：改出编译错误时 Editor 会进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上。回滚路径只允许依赖 git；回滚后再重启 Editor 验证。Detect/Verify 遇到"连不上"必须先跑 `unity pipeline list` 区分 Safe Mode 与真的没有实例，禁止把"连不上"当作"没有编辑器"进而手改场景 YAML。
 - G10 **停止编辑器只按 PID**：禁止按名字批量杀（`taskkill /IM Unity.exe` 等），会连带关闭其他项目的未保存工作。

@@ -1,0 +1,24 @@
+{
+  "q1_live_sampling": {
+    "n": 120,
+    "frame": 3026,
+    "play": true,
+    "sets": {
+      "cat-Render/Draw Calls": {
+        "last": 0,
+        "max": 0
+      },
+      "handle/GC Alloc": {
+        "last": 166423,
+        "max": 508397
+      },
+      "cat-Memory/TotalUsed": {
+        "last": 1807400575,
+        "max": 1807400575
+      }
+    }
+  },
+  "q2_offline_output": "== 实验1：ProfilerDriver.LoadProfile 离线解析 ==\r\n  文件: upi-fixture_2026-11-07_16-01-58_8805f464.data\r\n  LoadProfile -> True\r\n  帧区间 0..119\r\n  [Render/Draw Calls] max=0.0 非零=30/30 前6=-1.0,-1.0,-1.0,-1.0,-1.0,-1.0\r\n  [Render/SetPass Calls] max=0.0 非零=30/30 前6=-1.0,-1.0,-1.0,-1.0,-1.0,-1.0\r\n  [Render/Batches] max=0.0 非零=30/30 前6=-1.0,-1.0,-1.0,-1.0,-1.0,-1.0\r\n  [Memory/Total Used Memory] max=1835440000.0 非零=30/30 前6=1835440000.0,1419402000.0,1422352000.0,1423891000.0,1425579000.0,1427213000.0\r\n  [Memory/GC Allocated In Frame] max=1908325.0 非零=30/30 前6=1908325.0,99942.0,162023.0,166389.0,158023.0,141395.0\r\n  [Scripts/Update Time] max=0.0 非零=30/30 前6=-1.0,-1.0,-1.0,-1.0,-1.0,-1.0\r\n  [Rendering/Frame Time] max=0.0 非零=30/30 前6=-1.0,-1.0,-1.0,-1.0,-1.0,-1.0\r\n== 实验2：分配 recorder 类型探测（反射，不猜名字）==\r\n  Unity.Profiling.ProfilerRecorderOptions  [UnityEngine.CoreModule]\r\n  Unity.Profiling.ProfilerRecorderSample  [UnityEngine.CoreModule]\r\n  Unity.Profiling.ProfilerRecorder  [UnityEngine.CoreModule]\r\n     ctor(String statName,Int32 capacity,ProfilerRecorderOptions options)\r\n  Unity.Profiling.LowLevel.Unsafe.ProfilerRecorderDescription  [UnityEngine.CoreModule]\r\n  Unity.Profiling.LowLevel.Unsafe.ProfilerRecorderHandle  [UnityEngine.CoreModule]\r\n     static ProfilerRecorderDescription GetDescription(ProfilerRecorderHandle handle)\r\n     static Void GetAvailable(List`1 outRecorderHandleList)\r\n  UnityEngine.Profiling.Recorder  [UnityEngine.CoreModule]\r\n     static Recorder Get(String samplerName)\r\n  UnityEngine.AnimatorRecorderMode  [UnityEngine.AnimationModule]\r\n  UnityEditor.Animations.GameObjectRecorder  [UnityEditor.CoreModule]\r\n     ctor(GameObject root)\r\n  UnityEngine.Rendering.RenderGraphModule.IRenderGraphRecorder  [Unity.RenderPipelines.Core.Runtime]\r\n== 对照：当前会话（非离线）批量读数 ==\r\n  区间 0..119\r\n  [Render/Draw Calls] max=0.0 非零=20/20\r\n  [Memory/GC Allocated In Frame] max=1908325.0 非零=20/20\r\n",
+  "newest_capture": "upi-fixture_2026-11-07_16-01-58_8805f464.data",
+  "collected_at": "2026-11-07T16:02:08"
+}
