@@ -54,3 +54,7 @@ Thumbs.db
 Desktop.ini
 
 # 注意：runs/（trace.jsonl 与证据链）与 knowledge/*.json 属于统计唯一数据源，需要跟踪，不在此忽略
+
+# 探针临时产物（常驻回调锁定的文件，非正式 run 数据）
+runs/_sampler_probe.json
+runs/_probe/
