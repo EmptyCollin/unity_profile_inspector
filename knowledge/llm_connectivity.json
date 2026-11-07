@@ -1,0 +1,55 @@
+{
+  "passed_at": "2026-11-07T05:39:46+00:00",
+  "channel": "dev",
+  "provider": "deepseek-official",
+  "model": "deepseek-flash",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "UNITY_PROFILE_INSPECTOR",
+  "steps": [
+    {
+      "name": "list_models",
+      "ok": true,
+      "duration_ms": 514,
+      "detail": {
+        "model_count": 2,
+        "target_in_list": true,
+        "measured_meta": {
+          "context_window": 1048576,
+          "max_output_tokens": 393216
+        }
+      }
+    },
+    {
+      "name": "minimal_chat",
+      "ok": true,
+      "duration_ms": 901,
+      "detail": {
+        "reply_len": 0,
+        "reply_sha256_8": "e3b0c442"
+      }
+    },
+    {
+      "name": "tool_call_smoke",
+      "ok": true,
+      "duration_ms": 1021,
+      "detail": {
+        "tool_name": "echo"
+      }
+    },
+    {
+      "name": "json_mode_smoke",
+      "ok": true,
+      "duration_ms": 523,
+      "detail": {
+        "json_parsed": true
+      }
+    }
+  ],
+  "capability_backfill": {
+    "context_window": 1048576,
+    "max_output_tokens": 393216,
+    "supports_tool_calling": true,
+    "supports_json_mode": true
+  },
+  "all_passed": true
+}

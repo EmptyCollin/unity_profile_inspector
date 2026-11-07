@@ -1,0 +1,56 @@
+# Unity
+Library/
+Temp/
+Obj/
+Object/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+AssetStoreTools*
+ExportedObj/
+consulo*
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+sysinfo.txt
+crashlytics.properties
+crashlytics-build.properties
+Fabric/
+.vs/
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 本地知识库：SQLite 二进制不入版本控制；JSON 记录（无凭据）跟踪
+*.sqlite
+*.sqlite3
+*.db
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# 注意：runs/（trace.jsonl 与证据链）与 knowledge/*.json 属于统计唯一数据源，需要跟踪，不在此忽略

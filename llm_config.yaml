@@ -1,0 +1,102 @@
+# llm_config.yaml — 模型服务配置（默认配置）
+#
+# 安全约定（DESIGN §2.3.2 / AGENTS I12）：
+#   1. 本文件只存【环境变量名】引用，绝不存密钥值。本文件可以入仓库。
+#   2. 密钥注入方式 = **系统级持久环境变量**（Windows 用户级），由用户本人设置：
+#        推荐 设置 → 系统 → 高级系统设置 → 环境变量 → 「用户变量」新建 UNITY_PROFILE_INSPECTOR
+#        （走图形界面可避免密钥进入任何命令历史或进程参数列表）
+#      设置后需重启终端/新建会话才生效；管线的 Agent 进程只读取该变量，不经手也不回显其值。
+#   3. 连通性测试时机 = **第一次使用时跑**（见 connectivity_check），未通过不得进入任何真实推理阶段。
+#   4. 本文件字段非法时管线启动即失败并报出具体字段，不静默回退内置默认值。
+#
+# 现状：这是「默认配置」分支 —— 单一服务商 + 单一模型，全部 Agent 使用同一个模型。
+#       API Key 需自行在系统环境变量中补上 UNITY_PROFILE_INSPECTOR（本文件只引用变量名）。
+
+schema_version: 1
+
+# ─────────────────────────────────────────────
+# 表一：providers —— 描述"能连什么"
+# ─────────────────────────────────────────────
+providers:
+  deepseek-official:
+    display_name: DeepSeek 官方
+    # OpenAI 兼容协议端点（经官方文档核实，2026-11-07）
+    base_url: https://api.deepseek.com
+    protocol: openai_compatible          # 一律走 /v1/chat/completions，不用厂商专用 SDK
+    api_key_env: UNITY_PROFILE_INSPECTOR        # ← 只存变量名；值留在环境变量里
+    timeout_s: 60
+    max_retries: 2
+    rate_limit_backoff_s: [1, 4, 10]
+
+    models:
+      # 校正依据：2026-11-07 实测 GET /models 仅返回 deepseek-flash、deepseek-v4-pro 两项，
+      # 不存在 "deepseekv41flash" 这一 id。按"flash 档"的意图选用 deepseek-flash。
+      # 下列能力字段一律留 null：实测值写入 knowledge/llm_connectivity.json，
+      # 由 settings 在加载时合并（§2.3.4），配置文件不保存第二份真相，也不允许手填猜测值。
+      - id: deepseek-flash
+        display_name: DeepSeek Flash
+        context_window: null
+        max_output_tokens: null
+        supports_tool_calling: null      # 由 tool_call_smoke 实测判定
+        supports_json_mode: null         # 由 json_mode_smoke 实测判定
+        verified_at: null
+
+# ─────────────────────────────────────────────
+# 表二：agent_model_parameters —— 描述"谁用什么"
+#        model/provider 引用自表一，不重复写地址与密钥
+# ─────────────────────────────────────────────
+agent_model_parameters:
+  defaults:
+    provider: deepseek-official
+    model: deepseek-flash
+    temperature: 0.2
+    top_p: 0.9
+    max_output_tokens: 4096
+    json_mode: true                      # 结构化输出契约依赖（AGENTS I7）
+
+  agents:
+    detect:      {}                      # 继承 defaults
+    diagnose:    {}
+    fix:         {}
+    verify:      {}
+    review:
+      # 同模型下的隔离手段（DESIGN §2.3.5）：独立 prompt 模板 + 独立温度。
+      # 温度压低以减少自由发挥，配合输入字段白名单裁剪实现"弱隔离"。
+      # ⚠️ 这是弱隔离，不是模型级隔离，报告必须如实标注。
+      temperature: 0.0
+      prompt_profile: review_isolated
+    knowledge:   {}
+    reporter:    {}
+
+# ─────────────────────────────────────────────
+# 引导与校验行为（DESIGN §2.3.3 / §2.3.4）
+# ─────────────────────────────────────────────
+bootstrap:
+  on_missing_file: ask                   # 询问：自建配置 / 使用默认配置
+  on_default_selected: prompt_api_key    # 选默认 → 提示为 api_key_env 指向的变量名设置系统级持久环境变量
+  on_invalid_schema: report_and_offer    # 报具体字段 + 给「重建/手改/切默认」三选，不覆盖用户文件
+  config_version: default-single-model-v1
+  # 首次使用时的完整顺序（M0 内完成，一次搞定，不逐条重复问）：
+  #   读配置 → 校验 schema → 检查 api_key_env 指向的变量是否存在（只判存在性，绝不回显值）
+  #   → 缺失则停在引导，等用户设置并重启终端 → 存在则跑 connectivity_check → 全绿才放开真实调用
+  # ⚠️ 双通道（DESIGN §2.3.3）：终端用户只在"要用时"配置；维护者可在开发期预置，
+  #    此时跑出的结果记 channel: dev，不得当作用户通道已完成引导。
+
+connectivity_check:
+  # 已确认：测试在【第一次使用时】跑，而非每次改 Key 都自动跑
+  run_on: [first_use]
+  also_run_when: [user_requests_recheck, model_id_or_base_url_changed]   # 配置内容变了才需要再验
+  persist_result_to: knowledge/llm_connectivity.json                     # 记录通过时间、channel 与回填的能力字段
+  steps:
+    - list_models        # 确认地址与 Key 可用；回填能力字段；校正 model id
+    - minimal_chat       # 确认该 model id 真能推理；记录首 token 延迟与往返耗时（入 trace span）
+    - tool_call_smoke    # tool calling 冒烟
+    - json_mode_smoke    # json mode 冒烟（结构化契约依赖）
+  cost_note: "steps 2~4 会向服务商发起真实推理请求并产生费用，属首次使用的预期开销，量级为几条极短请求"
+  fail_modes:
+    auth_error: "401/403 → Key 无效或额度不足，检查 UNITY_PROFILE_INSPECTOR 指向的值"
+    unknown_model: "404/invalid model → model id 不在 /models 列表内"
+    unreachable: "timeout/连接失败 → 检查 base_url 与网络"
+    rate_limited: "429 → 限流，退避后重试"
+    capability_missing: "schema 解析失败 → 声明支持但实测不支持，属能力缺失非服务故障"
+  redact_in_outputs: [logs, trace_spans, reports, git]   # 测试结果只留摘要与哈希，不落凭据
