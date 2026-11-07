@@ -2,6 +2,10 @@
 // G17 交付判据要求：所有夹具场景必须有真实动态（指标本身有抖动），
 // 否则静止场景 drawCalls 唯一值=1 ⇒ MAD=0 ⇒ k·σ 判据失效（DESIGN §2.2.1 陷阱）。
 // 本文件属夹具脚本，blocked 档，仅人工可改。
+// M2a/T2 修改（人工指令开工）：时基从 Time.time（墙钟累加）切换为
+// ReplayDriver.ReplayTime（帧索引虚拟时基）——墙钟使同一相对帧的 t 跨运行
+// 不可复现；帧索引时基每重放逐帧相等。非 Play 状态自动回退墙钟，编辑态行为不变。
+using Upi.Fixtures.Drivers;
 using UnityEngine;
 
 namespace Upi.Fixtures.Drivers
@@ -21,7 +25,7 @@ namespace Upi.Fixtures.Drivers
 
         private void Update()
         {
-            float t = Time.time * speed;
+            float t = ReplayDriver.ReplayTime * speed;
             transform.position = new Vector3(Mathf.Cos(t) * radius, 1.5f, Mathf.Sin(t) * radius);
             if (_target != null) transform.LookAt(_target);
             else transform.LookAt(Vector3.zero);
@@ -36,7 +40,7 @@ namespace Upi.Fixtures.Drivers
 
         private void Update()
         {
-            float t = Time.time * speed;
+            float t = ReplayDriver.ReplayTime * speed;
             transform.position = new Vector3(Mathf.Cos(t) * radius, 1f + Mathf.Sin(t * 2.3f) * 0.4f, Mathf.Sin(t) * radius);
         }
     }
