@@ -10,7 +10,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-DataTier = Literal["A", "A2", "A3", "B", "C"]
+DataTier = Literal["A", "A2", "A3", "A4", "B", "C"]
+FindingType = Literal["waterline", "episode", "potential", "conflict", "perception"]
 
 
 class Thresholds(BaseModel):
@@ -40,7 +41,9 @@ class Detector(BaseModel):
     fixture: str                            # 绑定的夹具机制（机制级，非场景实例）
     metric: str                             # 判定指标名（get_performance / a2 的键）
     unit: str
-    source_tier: DataTier                   # 指标归属制（G16/G17）：渲染=A，GC=A2
+    source_tier: DataTier                   # 指标归属制（G16/G17）：水位=A，GC=A2，逐帧计时=A4
+    ptype: FindingType = "waterline"        # §3A/G19：episode 必须逐帧源（A2/A4/probe）
+    attribution_source: Literal["auto", "human"] = "auto"   # G19：无自动归因源必须 human
     direction: Literal["higher_worse", "lower_worse"] = "higher_worse"
     thresholds: Thresholds
     anchor_patterns: list[str] = Field(default_factory=list)   # 机制级归因锚点，禁标识符
@@ -62,6 +65,33 @@ class Detector(BaseModel):
         for p in self.playbooks:
             if p.side_effect == "may_affect_perception" and self.default_tier == "auto":
                 raise ValueError(f"{self.id}: 感知层 playbook 与 auto 档冲突（AGENTS §3 维度一）")
+        return self
+
+    @model_validator(mode="after")
+    def _episode_needs_frame_source(self):
+        # G19：判"发作"必须建在逐帧源上。A 档秒级抽样判发作 = 漏检 + 把被跳过的
+        # 异常值当正常（最危险失效）；C 档静态估算更不允许。
+        # （探针自计时 frameTime 属于 A4/probe 通路的实现细节，注册表以 A2/A4 声明源）
+        if self.ptype == "episode" and self.source_tier not in {"A2", "A4"}:
+            raise ValueError(
+                f"{self.id}: ptype=episode 但 source_tier={self.source_tier} 不是逐帧源"
+                "（G19：A 秒级判发作=漏检+把异常当正常；禁止注册）")
+        # G19：渲染计数无任何逐帧源（A2 静默0 / A3 -1 / FD 程序侧不可解读）
+        # ⇒ GPU 逐笔 spike detector 物理上不存在，禁止注册（虚报检出能力按 I1 处理）
+        render_metrics = {"drawCalls", "setPassCalls", "batches", "triangles", "vertices"}
+        if self.metric in render_metrics and self.ptype == "episode":
+            raise ValueError(
+                f"{self.id}: 渲染计数 {self.metric} 无逐帧源，禁止注册 GPU 逐笔 spike detector"
+                "（G19/DESIGN §12 ①-⑫；GPU 发作 detector 只能建在 A4 gpuFrameTime 上）")
+        return self
+
+    @model_validator(mode="after")
+    def _gpu_a4_episode_is_fact_only(self):
+        # A4 上注册的 GPU 发作 detector：逐笔归因无源，attribution_source 必须 human
+        if self.ptype == "episode" and self.link == "gpu" and self.attribution_source != "human":
+            raise ValueError(
+                f"{self.id}: GPU 发作的逐笔归因当前无自动源（D13），必须 attribution_source=human"
+                "——finding 只给越线事实，根因转人工（G19）")
         return self
 
 

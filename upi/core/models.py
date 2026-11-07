@@ -11,8 +11,11 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-DataTier = Literal["A", "A2", "A3", "B", "C"]   # A=内置轮询(秒级·渲染唯一源) A2=注入式按帧(GC/内存) A3=离线.data(marker时间线,-1哨兵) B=Player C=静态估算；跨档禁止对比，指标归属制见 DESIGN §3 第 6 条（G7/G16）
+DataTier = Literal["A", "A2", "A3", "A4", "B", "C"]   # A=内置轮询(秒级·水位唯一源) A2=注入式按帧(GC/内存) A3=离线.data(marker时间线,-1哨兵) A4=FrameTimingManager(逐帧CPU/GPU计时，固定4帧延迟，未回填帧按哨兵拒收) B=Player C=静态估算；跨档禁止对比，指标归属制见 DESIGN §3 第 6 条（G7/G16/G19）
 Link = Literal["cpu", "gpu", "anim", "loading"]
+FindingKind = Literal["issue", "potential"]                              # G18 归属判据
+FindingType = Literal["waterline", "episode", "potential", "conflict", "perception"]  # DESIGN §3A 五类
+AttributionSource = Literal["auto", "human"]                             # G19；无自动归因源时 human
 IssueState = Literal["candidate", "confirmed", "fixing", "resolved", "failed",
                      "needs_human", "false_positive"]
 PermissionTier = Literal["auto", "semi", "blocked"]
@@ -59,12 +62,107 @@ class Issue(BaseModel):
     explains_share_of_regression: float = 0.0
     state: IssueState = "candidate"
     low_confidence: bool = False     # n_samples < min_samples 时强制 True（§1.2）
+    ptype: FindingType = "waterline"                   # §3A：waterline|episode|conflict|perception
+    attribution_source: AttributionSource = "auto"     # G19：无自动归因源必须 human（finding 只给越线事实）
 
     @model_validator(mode="after")
     def _needs_evidence_for_confirmed(self):
         if self.state in ("confirmed", "fixing", "resolved") and self.low_confidence:
             raise ValueError("low_confidence 的 Issue 不得进入修复循环（AGENTS §1.2）")
         return self
+
+    @model_validator(mode="after")
+    def _episode_needs_frame_source(self):
+        # G19：判"发作"必须建在逐帧源上；A 档秒级抽样判发作 = 漏检+把被跳过的异常当正常
+        if self.ptype == "episode":
+            tiers = {e.data_tier for e in self.evidence}
+            if not (tiers & {"A2", "A4"}) :
+                raise ValueError(
+                    f"ptype=episode 的 Issue 必须有逐帧源证据（A2/A4/探针），当前={tiers or '无'}（G19）")
+            if self.attribution_source == "auto":
+                raise ValueError("episode 自动归因需归因源在场；GPU 逐笔归因当前无源，"
+                                 "必须 attribution_source=human（G19/DESIGN D13）")
+        return self
+
+
+class PotentialFinding(BaseModel):
+    """P3 潜在风险（DESIGN §3A）。断言"规模到 S 才发作"在当前规模下不可证伪，
+    故 G18：不得进入 Issue 通道 / 修复循环 / 成功率与 FP 分母。
+
+    三字段缺一即 Pydantic 拒收（pattern + slope_source + scale_assumption）。
+    """
+
+    pattern: str                       # 机制级模式（如 per_frame_heap_alloc_in_hot_path）
+    location: str                      # 代码/资产位置，供人查；不进签名
+    slope_source: Evidence             # 必须指向实测斜率证据（A2/A4/BreachSample），禁止估算（I1）
+    scale_assumption: str              # "规模到 S 时预测越线"——S 是假设不是事实
+    link: Link
+    status: Literal["shadow", "reported", "stress_pending", "promoted", "retracted"] = "shadow"
+
+    @model_validator(mode="after")
+    def _never_an_issue(self):
+        # 构造期兜底：potential 永不能"看起来像" issue
+        if self.status == "promoted":
+            raise ValueError("potential 转 confirmed 必须经 T5 压测另立 Issue，本对象不承载升级态（G18）")
+        return self
+
+
+class Finding(BaseModel):
+    """G18 归属容器：Finding = Issue ∪ Potential。potentials 只进报告不进循环。"""
+
+    kind: FindingKind
+    issue: Optional[Issue] = None
+    potential: Optional[PotentialFinding] = None
+
+    @model_validator(mode="after")
+    def _kind_matches_payload(self):
+        if self.kind == "issue" and (self.issue is None or self.potential is not None):
+            raise ValueError("kind=issue 必须且只能带 issue 载荷")
+        if self.kind == "potential" and (self.potential is None or self.issue is not None):
+            raise ValueError("kind=potential 不得携带 Issue（G18：potential 不进修复循环/分母）")
+        return self
+
+
+class A4Frame(BaseModel):
+    """A4 逐帧计时的一帧（DESIGN §2.1 A4 行）。"""
+
+    frame_idx: int
+    cpu_frame_time_ms: float
+    gpu_frame_time_ms: Optional[float] = None    # 未回填(None)=非法值，不得当 0 统计
+    complete_ts: int = 0
+
+    @model_validator(mode="after")
+    def _unfilled_is_not_zero(self):
+        # 实测：gpu=0 且 completeTs=0 = 时间戳未回填，按 -1 哨兵同规则拒收（G19/I1）
+        if self.gpu_frame_time_ms == 0.0 and self.complete_ts == 0:
+            raise ValueError("未回填帧(gpu=0 且 completeTs=0)不得作为读数入统计（哨兵规则）")
+        return self
+
+
+class BreachSample(BaseModel):
+    """P2 发作证据单元（DESIGN §2.4 T2w，M2a）。越界那一刻 + 前后原始序列 + A4 窗口。"""
+
+    frame_idx: int
+    metric: str
+    value: float
+    threshold_abs: float
+    deviation_ratio: float
+    ring_before: list[float] = Field(default_factory=list)   # 前 N 帧（默认 10，D17）
+    ring_after: list[float] = Field(default_factory=list)    # 后 M 帧（M≥14 覆盖 A4 固定 4 帧延迟）
+    a4_window: list[A4Frame] = Field(default_factory=list)
+    data_tier: Literal["A2", "A4"] = "A2"                    # 发作必须有逐帧源（G19）
+    protocol_fingerprint: str = ""
+    replay_seed: int = -1                                    # T2：可复现回放种子；-1=不可复现，禁进修复循环
+
+    @model_validator(mode="after")
+    def _after_depth_covers_a4(self):
+        if len(self.ring_after) > 0 and len(self.ring_after) < 14:
+            raise ValueError(f"ring_after 深度 {len(self.ring_after)} < 14，接不住 A4 的 4 帧固定延迟（D17）")
+        return self
+
+    def replayable(self) -> bool:
+        """T2 前提：不可复现的样本允许记录，但禁止进入修复循环（消费方必须检查）。"""
+        return self.replay_seed >= 0
 
 
 class AttributionFactors(BaseModel):
@@ -124,10 +222,20 @@ class Perception(BaseModel):
     passed: bool = False
 
 
+class Conflict(BaseModel):
+    """P4 跨指标矛盾（DESIGN §3A / T7）。违反规则=视同守护劣化，记进 Review，不自行解释成因。"""
+
+    rule_id: str
+    metrics: dict = Field(default_factory=dict)     # {指标名: 实测值}
+    expected: str = ""                              # 规则期望的关系
+    observed: str = ""                              # 实测到的关系
+
+
 class Verdict(BaseModel):
     target: dict                    # {before, after, delta, sigma, significant}
     guards: list[GuardMetric] = Field(default_factory=list)
     perception: Perception
+    conflicts: list[Conflict] = Field(default_factory=list)   # P4；非空即进 Review（AGENTS §1.5）
     compile_ok: bool = False        # G8 前置于采样
     realized_over_expected: float = 0.0
     status: VerdictStatus
@@ -148,9 +256,11 @@ class SamplingProtocol(BaseModel):
     poll_rate: float = 1.0          # 实测 ~1.05 次/秒，入指纹；1Hz 与 10Hz 不可互比
     aggregation: Literal["median"] = "median"
     data_tier: DataTier = "A"
-    degenerate_distribution: bool = False   # unique/n<0.1 ⇒ MAD 失效，改走 min_magnitude
+    degenerate_distribution: bool = False   # unique/n<0.1 或 MAD==0 ⇒ MAD 失效，改走 min_magnitude（G17）
     probe_overhead: float = 0.0
     instrument_distorted: bool = False   # 开销超预算则禁止用于异常判定（§1.2）
+    scale_factor: float = 1.0            # 常态=1；≠1 为压测档（10×/100×，D15）。禁与常态混比（G7）
+    ring_after_depth: int = 14           # D17：接住 A4 的 4 帧固定延迟的向后深度下限
 
 
 class Fingerprint(BaseModel):
@@ -170,6 +280,8 @@ class Fingerprint(BaseModel):
     data_tier: DataTier
     editor_mode: Literal["gui", "headless"] = "gui"
     environment_fingerprint: str
+    scale_factor: float = 1.0
+    graphics_api: str = "unknown"   # EX-1 预留：切 DX11 前后数值禁止对比靠它兜底（AGENTS G7）
 
     # 注意：这里**不**按 editor_mode 拒绝构造。实测 memory / Scripts / Loading 计数器在
     # 无头模式同样出真值（§2.2.1 事实 1 仅适用于渲染类目），拦掉会误伤 CPU/加载链路。

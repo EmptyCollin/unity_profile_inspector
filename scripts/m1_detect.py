@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
-from upi.core.models import Evidence, Issue, IssueSignature       # noqa: E402
+from upi.core.models import Evidence, Fingerprint, Issue, IssueSignature  # noqa: E402
 from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
 
 BASELINES = ROOT / "baselines"
@@ -151,6 +151,36 @@ def load_multwin() -> dict | None:
     return d
 
 
+def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
+                              windows_target: int = 4) -> Fingerprint:
+    """从数据/阈值文件自带的 protocol 块构造 G7 指纹（B5 债：模型早已有、流程一直没接）。
+
+    scene_guid v0 用来源文件内容 sha256 前 8 位（稳定可跨 run 复现；不用
+    Python __hash__——那会随进程盐漂移，指纹本身就不可比了）。M2a 接上
+    Unity 场景查询后换成真 guid，届时旧指纹自然失配、按 G7 禁止新旧混比，
+    这正是指纹字段该有的行为。replay_script_hash v0="none"：回放基建（T2）
+    未建，如实标注，不假装有回放。
+    """
+    import hashlib
+    try:
+        blob = Path(source_path).read_bytes()
+    except Exception:  # noqa: BLE001
+        blob = source_path.encode("utf-8", "replace")
+    return Fingerprint(
+        scene_guid="sha256:" + hashlib.sha256(blob).hexdigest()[:8],
+        replay_script_hash="none-v0",              # T2 未建，如实缺省
+        quality_tier=proto.get("quality_tier", "urp-balanced"),
+        warmup_samples=int(proto.get("warmup", 8)),
+        window_samples=int(proto.get("window_polls", 20)),
+        n_samples=int(windows_target),
+        poll_rate=float(proto.get("poll_interval_s", 1.0)),
+        data_tier="A",                              # 本文件主源=A 轮询；A2 序列同源同窗
+        editor_mode="gui",                          # G16：渲染值只在 GUI 有效
+        environment_fingerprint=env_fp,
+        scale_factor=float(proto.get("scale_factor", 1.0)),
+    )
+
+
 def main() -> int:
     mw = load_multwin()
     if mw is None:
@@ -171,6 +201,25 @@ def main() -> int:
     if cal is None:
         print("!! 无标定文件（先跑 m1_multiwin --merge）；§8.1 禁止未标定检测")
         return 1
+
+    # G7 真实落点：**阈值源指纹 × 数据源指纹** 必须一致才可拿阈值比数据。
+    # 同一次 merge 链里两者同源必然一致；换错标定文件（如 n 或窗口长度不同）
+    # 在这里被拦下，而不是无声混比。协议字段一致即可比，scene_guid 在 v0
+    # 只反映来源文件（数据文件与阈值文件哈希必然不同），故对比取协议子集。
+    env_fp = tracer.env_fingerprint
+    fp_data = fingerprint_from_protocol(mw.get("protocol", {}), mw.get("_path", ""),
+                                        env_fp, int(mw.get("windows_target", 4)))
+    fp_th = fingerprint_from_protocol(cal.get("protocol", {}), cal.get("_path", ""),
+                                      env_fp, int(mw.get("windows_target", 4)))
+    compare_fields = ["replay_script_hash", "quality_tier", "warmup_samples",
+                      "window_samples", "n_samples", "poll_rate", "data_tier",
+                      "editor_mode", "scale_factor", "environment_fingerprint"]
+    mism = [f for f in compare_fields
+            if getattr(fp_data, f) != getattr(fp_th, f)]
+    if mism:
+        print("!! 阈值与数据协议不一致，禁止套用（G7）：", mism)
+        return 1
+    print(f"G7 校验: 阈值源×数据源协议一致（{'|'.join(str(getattr(fp_data,f)) for f in ('warmup_samples','window_samples','poll_rate','scale_factor'))}）")
     n_applied = apply_calibration(DEFAULT_REGISTRY, cal)
     print(f"标定应用: {n_applied}/{len(DEFAULT_REGISTRY)} 项阈值来自 {Path(cal['_path']).name}")
     if n_applied != len(DEFAULT_REGISTRY):
@@ -195,21 +244,25 @@ def main() -> int:
                 detail["magnitude"] = issue.magnitude
             results[fid] = detail
 
-    # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
-    fp_check = {}
-    for det in DEFAULT_REGISTRY:
-        _, d = compare(det, clean_stats, clean_stats)
-        fp_check[det.id] = d.get("verdict")
-    fp_hits = [k for k, v in fp_check.items() if v == "detected"]
+        # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
+        fp_check = {}
+        for det in DEFAULT_REGISTRY:
+            _, d = compare(det, clean_stats, clean_stats)
+            fp_check[det.id] = d.get("verdict")
+        fp_hits = [k for k, v in fp_check.items() if v == "detected"]
 
-    out = {"run_id": run_id, "data_source": mw.get("_path"),
-           "thresholds_source": cal.get("_path"),
-           "band_basis": "between_windows", "fp_selfcheck": fp_check,
-           "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
-    (RUNS / run_id).mkdir(parents=True, exist_ok=True)
-    det_fp = RUNS / run_id / "detection.json"
-    det_fp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    ctx["evidence_refs"] = [str(det_fp)]
+        out = {"run_id": run_id, "data_source": mw.get("_path"),
+               "thresholds_source": cal.get("_path"),
+               "protocol_fingerprint": fp_data.model_dump(),   # G7：本轮判定挂靠的指纹
+               "replayable": fp_data.replay_script_hash != "none-v0",  # T2 未建 → False，如实标注
+               "band_basis": "between_windows", "fp_selfcheck": fp_check,
+               "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
+        (RUNS / run_id).mkdir(parents=True, exist_ok=True)
+        det_fp = RUNS / run_id / "detection.json"
+        det_fp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        # A1 债修复：evidence_refs 必须在 stage 块**内**赋值——span 在块退出时已写出，
+        # 块外再赋 ctx 是无效写入（旧版 evidence_refs 恒空的根因）
+        ctx["evidence_refs"] = [str(det_fp)]
 
     print(f"数据源: {Path(mw['_path']).name}（窗口间 σ，与阈值同源）")
     detected = sum(1 for r in results.values() if r.get("verdict") == "detected")
