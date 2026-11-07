@@ -23,6 +23,7 @@ from upi.core.models import Evidence, Issue, IssueSignature       # noqa: E402
 from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
 
 BASELINES = ROOT / "baselines"
+CALDIR = ROOT / "calibration"
 RUNS = ROOT / "runs"
 
 
@@ -105,18 +106,62 @@ def latest_calibration() -> dict | None:
     return cal
 
 
+def stats_from_windows(fx: dict) -> dict:
+    """多窗口数据 → compare() 所需的统计形状。
+
+    clean 与缺陷夹具**必须走同一个函数**，否则两相对照就是跨协议比较。
+    窗口间 σ 才是 §3 定义的噪声带（旧单窗口 MAD 度量的是窗口内抖动）。
+    """
+    import statistics as st
+    wins = fx.get("windows", [])
+    out: dict[str, list[float]] = {}
+    for w in wins:
+        for k, m in (w.get("metrics") or {}).items():
+            out.setdefault(k, []).append(float(m["median"]))
+    # A2：每窗口取逐帧序列中位数，再跨窗口统计
+    A2MAP = {"gc": "gc_alloc_per_frame", "anim": "animator_process_animations_ns",
+             "graph": "animator_process_graph_ns", "mem": "total_used_per_frame"}
+    for src, kname in A2MAP.items():
+        vals = []
+        for w in wins:
+            seq = (w.get("a2") or {}).get(src) or []
+            if len(seq) >= 50:
+                vals.append(float(st.median(seq)))
+        if vals:
+            out[kname] = vals
+
+    stats = {}
+    for k, vals in out.items():
+        if len(vals) < 3:
+            continue
+        med = st.median(vals)
+        mad = st.median([abs(x - med) for x in vals]) * 1.4826
+        uniq = len(set(vals))
+        stats[k] = {"n": len(vals), "median": med, "noise_band_mad": mad, "unique": uniq,
+                    "degenerate_distribution": uniq / len(vals) < 0.1 or mad == 0.0}
+    return stats
+
+
+def load_multwin() -> dict | None:
+    fp = CALDIR / "multiwin_full.json"
+    if not fp.exists():
+        return None
+    d = json.loads(fp.read_text(encoding="utf-8"))
+    d["_path"] = str(fp)
+    return d
+
+
 def main() -> int:
-    bp = latest_baseline()
-    base = json.loads(bp.read_text(encoding="utf-8"))
-    fixs = base.get("fixtures", {})
+    mw = load_multwin()
+    if mw is None:
+        print("!! 缺 calibration/multiwin_full.json（先跑 m1_multiwin --session full）")
+        print("   检测与标定必须来自同一多窗口数据源，禁止回退旧单窗口基线（G7/§3）")
+        return 1
+    fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items() if "windows" in v}
     if "CLEAN" not in fixs:
         print("!! 缺 CLEAN 变体，无法对照（§8.1）")
         return 1
-    clean_stats = {**fixs["CLEAN"].get("A_stats", {})}
-    a2c = fixs["CLEAN"].get("A2_stats", {})
-    for k2 in ("gc_alloc_per_frame", "animator_process_animations_ns", "animator_process_graph_ns"):
-        if a2c.get(k2):
-            clean_stats[k2] = a2c[k2]
+    clean_stats = fixs["CLEAN"]
 
     run_id = time.strftime("m1detect_%Y%m%d_%H%M%S")
     tracer = Tracer(run_id, root=str(RUNS), channel="dev",
@@ -124,7 +169,7 @@ def main() -> int:
 
     cal = latest_calibration()
     if cal is None:
-        print("!! 无标定文件（先跑 m1_calibrate）；§8.1 禁止未标定检测")
+        print("!! 无标定文件（先跑 m1_multiwin --merge）；§8.1 禁止未标定检测")
         return 1
     n_applied = apply_calibration(DEFAULT_REGISTRY, cal)
     print(f"标定应用: {n_applied}/{len(DEFAULT_REGISTRY)} 项阈值来自 {Path(cal['_path']).name}")
@@ -133,44 +178,47 @@ def main() -> int:
         return 1
 
     with tracer.stage("detect") as ctx:
-        tracer.tool_call(ctx, kind="sqlite", name="read_baseline", args=str(bp),
-                         exit_status=0)
-        tracer.tool_call(ctx, kind="sqlite", name="read_calibration", args=cal.get("_path", ""),
-                         exit_status=0)
+        tracer.tool_call(ctx, kind="sqlite", name="read_calibration_windows", args=mw.get("_path", ""), exit_status=0)
+        tracer.tool_call(ctx, kind="sqlite", name="read_thresholds", args=cal.get("_path", ""), exit_status=0)
         results = {}
         for det in DEFAULT_REGISTRY:
             fid = det.fixture
-            if fid not in fixs or "error" in fixs[fid]:
-                results[fid] = {"verdict": "insufficient_evidence", "why": "基线缺该夹具"}
+            if fid not in fixs:
+                results[fid] = {"verdict": "insufficient_evidence", "why": "标定数据缺该夹具"}
                 continue
-            fix_stats = {**fixs[fid].get("A_stats", {})}
-            a2 = fixs[fid].get("A2_stats", {})
-            for k2 in ("gc_alloc_per_frame", "animator_process_animations_ns", "animator_process_graph_ns"):
-                if a2.get(k2):
-                    fix_stats[k2] = a2[k2]
-            issue, detail = compare(det, fix_stats, clean_stats)
+            issue, detail = compare(det, fixs[fid], clean_stats)
             detail["detector"] = det.id
             detail["detector_version"] = det.version
+            detail["window_n"] = clean_stats.get(det.metric, {}).get("n")
             if issue:
                 detail["issue_signature"] = issue.signature.model_dump()
                 detail["magnitude"] = issue.magnitude
             results[fid] = detail
 
-    out = {"run_id": run_id, "baseline_file": str(bp),
+    # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
+    fp_check = {}
+    for det in DEFAULT_REGISTRY:
+        _, d = compare(det, clean_stats, clean_stats)
+        fp_check[det.id] = d.get("verdict")
+    fp_hits = [k for k, v in fp_check.items() if v == "detected"]
+
+    out = {"run_id": run_id, "data_source": mw.get("_path"),
+           "thresholds_source": cal.get("_path"),
+           "band_basis": "between_windows", "fp_selfcheck": fp_check,
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
     (RUNS / run_id).mkdir(parents=True, exist_ok=True)
     det_fp = RUNS / run_id / "detection.json"
     det_fp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    ctx_refs = [str(det_fp)]
+    ctx["evidence_refs"] = [str(det_fp)]
 
-    print(f"基线: {bp.name}")
+    print(f"数据源: {Path(mw['_path']).name}（窗口间 σ，与阈值同源）")
     detected = sum(1 for r in results.values() if r.get("verdict") == "detected")
     for fid, r in results.items():
         mark = "检出" if r.get("verdict") == "detected" else ("证据不足" if "insufficient" in str(r.get("verdict")) else "未检出")
         print(f"  [{mark:4s}] {fid:10s} {r.get('metric','')} fx={r.get('fixture')} clean={r.get('clean')} "
-              f"delta={r.get('delta','')} ratio={r.get('deviation_ratio','')} {r.get('reason','')}")
-    # FP 自检：clean 对 clean 的任何"检出"都是误报
-    print(f"检出 {detected}/{len(results)}；CLEAN 对照自身零检出是 FP 率口径的下界")
+              f"delta={r.get('delta','')} ratio={r.get('deviation_ratio','')} n窗口={r.get('window_n','')} {r.get('reason','')}")
+    print(f"检出 {detected}/{len(results)}；CLEAN 自检误报 {len(fp_hits)}/{len(fp_check)}"
+          + (f" !!{fp_hits}" if fp_hits else "（FP=0，下界成立）"))
     print("trace:", tracer.path)
     return 0
 

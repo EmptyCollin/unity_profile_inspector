@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-11-07T18:58:28",
+  "method": "三层会话对照（none=无采样器 / idle=装入不录 / full=装入且录），各层窗口间中位数",
+  "caveat": "三层来自同一编辑器会话的连续链（none→idle→full 依次执行，full 层复用 idle 层已装回调）；层间差值同会话可比，会话绝对值与历史会话不可比（G7 含 environment/editor 会话）。",
+  "windows": {
+    "none": 4,
+    "idle": 4,
+    "full": 4
+  },
+  "protocol": {
+    "warmup": 8,
+    "window_polls": 20,
+    "poll_interval_s": 1.0
+  },
+  "layers": [
+    {
+      "fixture": "F-CPU-01",
+      "n_none": 4,
+      "n_idle": 4,
+      "n_full": 4,
+      "none_ms": 1.515,
+      "idle_ms": 1.486,
+      "full_ms": 1.522,
+      "install_pct": -1.88,
+      "record_pct": 2.34,
+      "total_pct": 0.46
+    },
+    {
+      "fixture": "F-GPU-01",
+      "n_none": 4,
+      "n_idle": 4,
+      "n_full": 4,
+      "none_ms": 1.322,
+      "idle_ms": 1.381,
+      "full_ms": 1.346,
+      "install_pct": 4.48,
+      "record_pct": -2.65,
+      "total_pct": 1.83
+    }
+  ],
+  "verdict": {
+    "install_dominant": false,
+    "max_total_pct": 1.83,
+    "limit_pct": 5.0,
+    "within_budget": true
+  },
+  "key_findings": [
+    "节流后合计开销 0.46%~1.83%（预算 5% 内）；分项出现负值 ⇒ 各分项成本已低于会话间噪声，\"开销≈0\"而非精确 0",
+    "CLEAN 的 gc_alloc_per_frame 中位数从 16762B 降到 8371B 恰好发生在移除每帧心跳写盘之后 ⇒ 旧采样器把自身分配写进了 F-CPU-01 正在测的指标（观察者污染了被观测量本身，不止拖慢帧时间）",
+    "窗口间 n=4 时 unique/n 退化比例规则永不触发 ⇒ 已补 band==0 判退化（G17 小样本漏洞）"
+  ],
+  "session": "single-session chain"
+}

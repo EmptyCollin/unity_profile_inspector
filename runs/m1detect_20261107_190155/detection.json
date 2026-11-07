@@ -1,0 +1,67 @@
+{
+  "run_id": "m1detect_20261107_190155",
+  "data_source": "D:\\unity_profile_inspector\\calibration\\multiwin_full.json",
+  "thresholds_source": "D:\\unity_profile_inspector\\baselines\\thresholds_e1ec18a592ed.json",
+  "band_basis": "between_windows",
+  "fp_selfcheck": {
+    "DET-CPU-GC-FRAMEALLOC": "not_found",
+    "DET-GPU-BATCHBREAK": "not_found",
+    "DET-ANIM-PARAMRTT": "not_found",
+    "DET-LOAD-SYNCPEAK": "not_found"
+  },
+  "created_at": "2026-11-07T19:01:55",
+  "results": {
+    "F-CPU-01": {
+      "metric": "gc_alloc_per_frame",
+      "fixture": 76947.0,
+      "clean": 8371.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 68576.0,
+      "deviation_ratio": 9.192,
+      "verdict": "detected",
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 68576.0
+    },
+    "F-GPU-01": {
+      "metric": "drawCalls",
+      "fixture": 127.0,
+      "clean": 47.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 80.0,
+      "deviation_ratio": 2.702,
+      "verdict": "detected",
+      "detector": "DET-GPU-BATCHBREAK",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "drawCalls",
+        "metric": "drawCalls",
+        "mechanism": "per_renderer_material_instantiation",
+        "threshold": 10.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 80.0
+    },
+    "F-ANIM-01": {
+      "verdict": "insufficient_evidence",
+      "why": "标定数据缺该夹具"
+    },
+    "F-LOAD-01": {
+      "verdict": "insufficient_evidence",
+      "why": "标定数据缺该夹具"
+    }
+  }
+}

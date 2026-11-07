@@ -1,0 +1,216 @@
+{
+  "source": "multiwin_full.json",
+  "created_at": "2026-11-07T18:05:07",
+  "protocol": {
+    "warmup": 8,
+    "window_polls": 20,
+    "poll_interval_s": 1.0
+  },
+  "thresholds": {
+    "setPassCalls": {
+      "metric": "setPassCalls",
+      "clean_median": 9.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 8,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "drawCalls": {
+      "metric": "drawCalls",
+      "clean_median": 47.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 10,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "vertices": {
+      "metric": "vertices",
+      "clean_median": 6018.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "totalAllocatedBytes": {
+      "metric": "totalAllocatedBytes",
+      "clean_median": 696335045.75,
+      "clean_band": 80578.93935,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 2000000,
+      "deviation_ratio": 1.0003,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "monoUsedBytes": {
+      "metric": "monoUsedBytes",
+      "clean_median": 95966208.0,
+      "clean_band": 1741355.2128,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 10448131.2768,
+      "deviation_ratio": 1.0544,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "monoHeapBytes": {
+      "metric": "monoHeapBytes",
+      "clean_median": 147062784.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "cpuFrameTimeMs": {
+      "metric": "cpuFrameTimeMs",
+      "clean_median": 4.1072,
+      "clean_band": 0.149112,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.8947,
+      "deviation_ratio": 1.1089,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "gpuFrameTimeMs": {
+      "metric": "gpuFrameTimeMs",
+      "clean_median": 1.0263,
+      "clean_band": 0.007211,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0433,
+      "deviation_ratio": 1.0211,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "batches": {
+      "metric": "batches",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 5,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "totalReservedBytes": {
+      "metric": "totalReservedBytes",
+      "clean_median": 1856446464.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "cpuMainThreadFrameTimeMs": {
+      "metric": "cpuMainThreadFrameTimeMs",
+      "clean_median": 0.5889,
+      "clean_band": 0.006783,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.3,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "available": {
+      "metric": "available",
+      "clean_median": 1.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "triangles": {
+      "metric": "triangles",
+      "clean_median": 2166.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "gc_alloc_per_frame": {
+      "metric": "gc_alloc_per_frame",
+      "clean_median": 16762.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 20000,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "animator_process_animations_ns": {
+      "metric": "animator_process_animations_ns",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 50000,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "animator_process_graph_ns": {
+      "metric": "animator_process_graph_ns",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 50000,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    },
+    "total_used_per_frame": {
+      "metric": "total_used_per_frame",
+      "clean_median": 1206192152.5,
+      "clean_band": 1849503.4698,
+      "band_basis": "between_windows(n=4)",
+      "min_magnitude": 11097020.8188,
+      "deviation_ratio": 1.0046,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "窗口间 σ + 指标地板（§8.1，M1' 多窗口标定）"
+    }
+  },
+  "probe_overhead": {
+    "rows": [
+      {
+        "fixture": "F-CPU-01",
+        "a_only_ms": 1.489,
+        "full_ms": 4.093,
+        "overhead_pct": 174.95
+      },
+      {
+        "fixture": "F-GPU-01",
+        "a_only_ms": 1.327,
+        "full_ms": 4.055,
+        "overhead_pct": 205.63
+      }
+    ],
+    "max_overhead_pct": 205.63,
+    "limit_pct": 5.0
+  }
+}
