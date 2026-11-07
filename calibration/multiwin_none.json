@@ -1,0 +1,808 @@
+{
+  "session": "none",
+  "windows_target": 4,
+  "protocol": {
+    "warmup": 8,
+    "window_polls": 20,
+    "poll_interval_s": 1.0
+  },
+  "created_at": "2026-11-07T18:42:03",
+  "fixtures": {
+    "F-CPU-01": {
+      "fixture": "F-CPU-01",
+      "scene": "Scene_F-CPU-01.unity",
+      "windows": [
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 47.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 2166.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "vertices": {
+              "n": 20,
+              "median": 6018.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 681615107.0,
+              "mad": 114498.97409999999,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1585848320.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 80271360.0,
+              "mad": 4976601.907199999,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 146178048.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.5298,
+              "mad": 0.11964581999999999,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.415744,
+              "mad": 0.006831820800000001,
+              "unique": 12,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.71865,
+              "mad": 0.08258082000000004,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 47.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 2166.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "vertices": {
+              "n": 20,
+              "median": 6018.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 681589673.0,
+              "mad": 16161.0813,
+              "unique": 19,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1585848320.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 79384576.0,
+              "mad": 4011037.9008,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 146178048.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.50115,
+              "mad": 0.10170635999999998,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.398336,
+              "mad": 0.023531827199999994,
+              "unique": 17,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.7255,
+              "mad": 0.058117919999999934,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 47.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 2166.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "vertices": {
+              "n": 20,
+              "median": 6018.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 682132425.5,
+              "mad": 21975.838499999998,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1585848320.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 79697920.0,
+              "mad": 4123383.3984,
+              "unique": 19,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 146178048.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.5282,
+              "mad": 0.15181824000000005,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.41472,
+              "mad": 0.008350003199999956,
+              "unique": 16,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.7213499999999999,
+              "mad": 0.06857024999999993,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 47.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 2166.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "vertices": {
+              "n": 20,
+              "median": 6018.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 682172709.5,
+              "mad": 17026.1784,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1585848320.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 79872000.0,
+              "mad": 5371329.3312,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 146178048.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.5002499999999999,
+              "mad": 0.09755507999999995,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.410624,
+              "mad": 0.01062727680000001,
+              "unique": 15,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.72195,
+              "mad": 0.059600519999999935,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        }
+      ]
+    },
+    "F-GPU-01": {
+      "fixture": "F-GPU-01",
+      "scene": "Scene_F-GPU-01.unity",
+      "windows": [
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 127.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 3126.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "vertices": {
+              "n": 20,
+              "median": 7938.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 684388377.0,
+              "mad": 341613.279,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1587945472.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 95035392.0,
+              "mad": 9701185.536,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 147226624.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.3266499999999999,
+              "mad": 0.06864438,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.35584,
+              "mad": 0.01062727679999997,
+              "unique": 14,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.5589999999999999,
+              "mad": 0.04173518999999993,
+              "unique": 19,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 127.0,
+              "mad": 0.0,
+              "unique": 4,
+              "degenerate": false
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 3126.0,
+              "mad": 0.0,
+              "unique": 4,
+              "degenerate": false
+            },
+            "vertices": {
+              "n": 20,
+              "median": 7938.0,
+              "mad": 0.0,
+              "unique": 4,
+              "degenerate": false
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 684305566.5,
+              "mad": 301647.5721,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1587945472.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 96659456.0,
+              "mad": 4232692.5312,
+              "unique": 19,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 147226624.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.30695,
+              "mad": 0.05181687000000005,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.359424,
+              "mad": 0.009109094399999974,
+              "unique": 14,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.5506500000000001,
+              "mad": 0.01541904000000003,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 127.0,
+              "mad": 0.0,
+              "unique": 5,
+              "degenerate": false
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 3126.0,
+              "mad": 0.0,
+              "unique": 5,
+              "degenerate": false
+            },
+            "vertices": {
+              "n": 20,
+              "median": 7938.0,
+              "mad": 0.0,
+              "unique": 5,
+              "degenerate": false
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 684281534.5,
+              "mad": 227200.2957,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1587945472.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 88223744.0,
+              "mad": 282381.9264,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 147226624.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.3193000000000001,
+              "mad": 0.07042349999999997,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.359424,
+              "mad": 0.012145459199999965,
+              "unique": 18,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.5595000000000001,
+              "mad": 0.045071039999999805,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        },
+        {
+          "wall_s": 20.01,
+          "poll_n": 20,
+          "metrics": {
+            "drawCalls": {
+              "n": 20,
+              "median": 127.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "batches": {
+              "n": 20,
+              "median": 0.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "setPassCalls": {
+              "n": 20,
+              "median": 9.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "triangles": {
+              "n": 20,
+              "median": 3126.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "vertices": {
+              "n": 20,
+              "median": 7938.0,
+              "mad": 0.0,
+              "unique": 6,
+              "degenerate": false
+            },
+            "totalAllocatedBytes": {
+              "n": 20,
+              "median": 684305657.5,
+              "mad": 285522.0732,
+              "unique": 20,
+              "degenerate": false
+            },
+            "totalReservedBytes": {
+              "n": 20,
+              "median": 1587945472.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "monoUsedBytes": {
+              "n": 20,
+              "median": 94443520.0,
+              "mad": 1563727.872,
+              "unique": 20,
+              "degenerate": false
+            },
+            "monoHeapBytes": {
+              "n": 20,
+              "median": 147226624.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "available": {
+              "n": 20,
+              "median": 1.0,
+              "mad": 0.0,
+              "unique": 1,
+              "degenerate": true
+            },
+            "cpuFrameTimeMs": {
+              "n": 20,
+              "median": 1.3248,
+              "mad": 0.06538266000000004,
+              "unique": 20,
+              "degenerate": false
+            },
+            "gpuFrameTimeMs": {
+              "n": 20,
+              "median": 0.362496,
+              "mad": 0.011386367999999989,
+              "unique": 18,
+              "degenerate": false
+            },
+            "cpuMainThreadFrameTimeMs": {
+              "n": 20,
+              "median": 0.5555,
+              "mad": 0.036323699999999945,
+              "unique": 20,
+              "degenerate": false
+            }
+          },
+          "a2": null
+        }
+      ]
+    }
+  }
+}

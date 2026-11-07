@@ -86,6 +86,7 @@ public static class UpiSampler5 {
   static readonly List<long> Anim = new List<long>();
   static readonly List<long> Graph = new List<long>();
   static int _lastFrame = -1; static bool _rec; static string _nonce = "";
+  static DateTime _lastCtl = DateTime.MinValue; static DateTime _lastBeat = DateTime.MinValue;
 
   static bool Alive() {
     try { if (!File.Exists(HB)) return false;
@@ -121,11 +122,21 @@ public static class UpiSampler5 {
   static void Tick() {
     if (UnityEngine.Time.frameCount == _lastFrame) return;
     _lastFrame = UnityEngine.Time.frameCount;
-    try { File.WriteAllText(HB, DateTime.UtcNow.Ticks.ToString()); } catch (Exception) {}
-    string ctl = "";
-    try { if (File.Exists(CTL)) { ctl = File.ReadAllText(CTL).Trim(); File.Delete(CTL); } } catch (Exception) {}
-    if (ctl.Length > 6 && ctl.Substring(0, 5) == "start") { Gc.Clear(); Mem.Clear(); Anim.Clear(); Graph.Clear(); _nonce = ctl.Substring(6); _rec = true; }
-    else if (ctl.Length > 5 && ctl.Substring(0, 4) == "stop" && _rec) { _rec = false; Dump(); }
+    var now = DateTime.UtcNow;
+    // probe_overhead 三层归因（M1'）：开销主体是每帧文件 stat（install 6.26%），录制边际≈0。
+    // ⇒ 控制检查与心跳改时间驱动：10 次/秒 / 1 次/秒（窗口 20s、预热 8s 下 0.1s 响应延迟无影响；
+    //    心跳 1s 间隔满足 Alive 3s 判据）。未录制时不碰 recorder。
+    if ((now - _lastCtl).TotalMilliseconds >= 100) {
+      _lastCtl = now;
+      string ctl = "";
+      try { if (File.Exists(CTL)) { ctl = File.ReadAllText(CTL).Trim(); File.Delete(CTL); } } catch (Exception) {}
+      if (ctl.Length > 6 && ctl.Substring(0, 5) == "start") { Gc.Clear(); Mem.Clear(); Anim.Clear(); Graph.Clear(); _nonce = ctl.Substring(6); _rec = true; }
+      else if (ctl.Length > 5 && ctl.Substring(0, 4) == "stop" && _rec) { _rec = false; Dump(); }
+    }
+    if ((now - _lastBeat).TotalSeconds >= 1.0) {
+      _lastBeat = now;
+      try { File.WriteAllText(HB, now.Ticks.ToString()); } catch (Exception) {}
+    }
     if (_rec) {
       if (_gc != null && _gc.ok) Gc.Add((long)_gc.rec.LastValue);
       if (_mem != null && _mem.ok) Mem.Add((long)_mem.rec.LastValue);
