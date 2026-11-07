@@ -1,3 +1,7 @@
+// ⚠️ 已废弃（2026-11-07 M0' 实跑）：本文件的"幂等标志必须放 SessionState"结论已被推翻
+//    —— SessionState 跨域重载存活而回调注册不跨 ⇒ 会留下"标记已装、实际无人采样"的死状态。
+//    现行实现见 probe/sampler_v3.cs（心跳文件新鲜度判据）；采集主力通路另见 DESIGN §2.1。
+//    本文件仅作历史记录保留，不参与管线运行。
 // probe/sampler_v2.cs —— 常驻采样器 v2（DESIGN §2.1 A 档 / I9 实测修正版）
 //
 // 三条实测结论决定了这里的写法：
@@ -52,13 +56,21 @@ public static class UpiSamplerV2
         LastLine = $"alive play={Application.isPlaying} frame={Time.frameCount} recording={_recording} written={_writtenFrames}";
     }
 
+    // 实测：ProfilerCategory 是 struct（不是 enum），Enum.Parse 会抛
+    // "Type provided must be an Enum"。必须从 GetCategories() 的表里按 Name 取实例。
+    static ProfilerCategory CatOf(string name)
+    {
+        foreach (var c in ProfilerCategory.GetCategories())
+            if (c.Name == name) return c;
+        throw new ArgumentException("未知 ProfilerCategory: " + name);
+    }
+
     static void Install()
     {
         EditorApplication.update += Tick;
         foreach (var t in Targets)
         {
-            var cat = (ProfilerCategory)Enum.Parse(typeof(ProfilerCategory), t[0]);
-            var r = new ProfilerRecorder(cat, t[1], 3000);
+            var r = new ProfilerRecorder(CatOf(t[0]), t[1], 3000);
             Rec[t[0] + "/" + t[1]] = r;
             Samples[t[0] + "/" + t[1]] = new List<long>();
         }
@@ -68,8 +80,12 @@ public static class UpiSamplerV2
     static void Tick()
     {
         string cmd = ReadCmd();
-        if (cmd.StartsWith("start")) { Start(cmd); WriteStatus("started"); }
-        else if (cmd == "stop") { Stop(); WriteStatus("stopped"); ClearCmd(); }
+        if (cmd.StartsWith("start"))
+        {
+            if (!_recording) { Start(cmd); WriteStatus("started"); }
+            ClearCmd();   // 实测修正：start 不清理会每 tick 重置窗口，永远攒不满 N 帧
+        }
+        else if (cmd == "stop") { if (_recording) { Stop(); WriteStatus("stopped"); } ClearCmd(); }
         else if (cmd == "dump") { WriteData("dump"); ClearCmd(); }
 
         if (_recording && Time.frameCount != _lastFrameCount)

@@ -11,7 +11,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-DataTier = Literal["A", "B", "C"]
+DataTier = Literal["A", "A2", "A3", "B", "C"]   # A=内置轮询(秒级) A2=profiler_record(逐帧二进制) A3=注入式Recorder B=Player C=静态估算；跨档禁止对比（G7）
 Link = Literal["cpu", "gpu", "anim", "loading"]
 IssueState = Literal["candidate", "confirmed", "fixing", "resolved", "failed",
                      "needs_human", "false_positive"]
@@ -142,31 +142,46 @@ class Verdict(BaseModel):
 
 class SamplingProtocol(BaseModel):
     min_samples: int = 5
-    warmup_frames: int = 60
-    window_frames: int = 600
+    # 实测修正（DESIGN §2.1）：A 档为轮询内置命令的秒级抽样，单位是"次/秒"而非帧
+    warmup_samples: int = 10
+    window_samples: int = 30
+    poll_rate: float = 1.0          # 实测 ~1.05 次/秒，入指纹；1Hz 与 10Hz 不可互比
     aggregation: Literal["median"] = "median"
     data_tier: DataTier = "A"
+    degenerate_distribution: bool = False   # unique/n<0.1 ⇒ MAD 失效，改走 min_magnitude
     probe_overhead: float = 0.0
     instrument_distorted: bool = False   # 开销超预算则禁止用于异常判定（§1.2）
 
 
 class Fingerprint(BaseModel):
-    """G7：指纹一致才可对比。A 档与 C 档永远不可互比。"""
+    """G7：指纹一致才可对比。A 档与 C 档永远不可互比。
+
+    editor_mode 是实测补入的必要字段（AGENTS G16 / DESIGN §2.2.1 事实 1）：
+    无头模式下渲染计数器恒为 0，GUI 下同场景实测 drawCalls=195。
+    """
 
     scene_guid: str
     replay_script_hash: str
     quality_tier: str
-    warmup_frames: int
-    window_frames: int
+    warmup_samples: int
+    window_samples: int
     n_samples: int
+    poll_rate: float
     data_tier: DataTier
+    editor_mode: Literal["gui", "headless"] = "gui"
     environment_fingerprint: str
+
+    # 注意：这里**不**按 editor_mode 拒绝构造。实测 memory / Scripts / Loading 计数器在
+    # 无头模式同样出真值（§2.2.1 事实 1 仅适用于渲染类目），拦掉会误伤 CPU/加载链路。
+    # G16 的约束由 Detector 按 counter 归属类目校验；本模型只负责"跨 editor_mode 禁止对比"。
 
     def same_for_compare(self, other: "Fingerprint") -> tuple[bool, list[str]]:
         diffs = [f for f in self.model_fields_set | other.model_fields_set
                  if getattr(self, f, None) != getattr(other, f, None)]
         if self.data_tier != other.data_tier:
             diffs.append("data_tier（跨档禁止对比）")
+        if self.editor_mode != other.editor_mode:
+            diffs.append("editor_mode（gui/headless 数值不可比，G16）")
         return (not diffs), diffs
 
 

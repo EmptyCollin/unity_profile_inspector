@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.6
+# DESIGN.md — 自动化性能优化管线（最小集）v0.8
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -9,6 +9,8 @@
 > v0.4 变更：新增 REQ-9 与 §2.3 模型服务配置层（llm_config.yaml 双表 + 首次引导 + 连通性测试 + 密钥仅环境变量引用）；D4 收口
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
+> v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
+> v0.8 变更：**A 档采集通路更换**——注入式 `ProfilerRecorder` 取不到渲染读数（构造成功但恒为 0），主力改为轮询内置 `diagnostics get_performance`（~1.05 次/秒 ⇒ 秒级抽样，统计口径帧→秒并新增 `poll_rate`）；§2.2.1 扩为六条；新增方法学陷阱（静止场景噪声带退化 ⇒ `k·σ` 失效）作为 M1 交付判据；幂等判据改用心跳文件新鲜度
 
 ---
 
@@ -97,31 +99,59 @@ Detector = {
 
 **分层的唯一理由**：把"数值"和"语言"彻底分开。所有数字只能从 Tool Layer 出来；LLM 只在四处参与——Detect 的阈值解释、Diagnose 的因子判定、Fix 的方案生成、Review 的裁定——且四处都被结构化 schema 框住（AGENTS I7）。
 
-### 2.1 采集层：已定"不写独立插件"，改用 CLI 自带能力（D1）
+### 2.1 采集层（D1 定"不写独立插件"；M0' 实跑后二次修正）
 
-关键事实修正：**"只用 Unity CLI 现有能力"不等于拿不到 Profiler 计数器**。`com.unity.pipeline` 包自带 `eval` / `eval_file`，可在常驻 Editor 内执行任意 C#，`ProfilerRecorder` 属于 UnityEngine 公开 API，因此核心计数器不需要自建程序集就能取到。据此定三档：
+⚠️ **实跑推翻了 D1 的实现方式。** 原设想"用 `script eval_file` 注入 `ProfilerRecorder` 常驻采样器"已被验证走不通：7/7 计数器**构造成功**（`skipped=[]`）、300 帧窗口正常落盘，但渲染类**读数恒为 0**；`diagnostics profiler_connect --target editor` 与 `UnityEngine.Profiling.Profiler.enabled=true` 都打开后，新开 recorder 即时采样仍 `last=0 count=0`。同一状态下 Pipeline 内置的 `diagnostics get_performance` 直接给出真值（`drawCalls=184`）⇒ 内置通路不走 `ProfilerRecorder`（其三个反射候选入口 `GraphicsStats`/`GetCounterNames`/`GetFrameStatistic` 实测均不可用，无法确认它到底用什么）。据此重排五档：
 
-| 档 | 手段 | 得到什么 | 说明 |
+| 档 | 手段 | 得到什么 | 实测状态 |
 |---|---|---|---|
-| **A（主力）** | **注入式常驻采样器**：`unity command eval_file probe/sampler_install.cs` 一次性在 Editor 内安装常驻采样器（`EditorApplication.update` 回调 + `ProfilerRecorder` + 写 JSON 结果文件），后续只做 `start / stop / read` 三个动作 | 帧时间序列、Draw Calls / SetPass / Batches / SRP Batcher、三角形与顶点数、GC Alloc per frame、Total Reserved Memory、自定义 `ProfilerMarker` | **跨 eval 状态问题**：每次 eval 是新编译的临时程序集，静态字段不跨调用存活。所以采样器必须"一次性注入并自己活下来"，把结果落盘，Python 侧只轮询文件。这是本档成立的技术前提 |
-| **B（半真机，可选）** | PC Standalone Player + Pipeline `RuntimeOnly` 命令，经 `unity command <cmd> --runtime` 取数 | 无 Editor 开销的播放器循环数据，接近真机行为 | 需要 `unity build`，且能顺带覆盖 REQ-3 的 IL2CPP/Mono 排查面。列为扩展位 M8，不进第一轮 |
-| **C（兜底）** | 资产静态扫描（`.mat`/`.shader`/`.controller` 解析）+ `unity logs` / Editor.log 解析 | 材质实例数、Shader 指令与 keyword 数、AnimatorController 状态与跨层 Transition 数、加载调用静态计数 | 精度低，**必须显式标注 `static_estimate`**，禁止与实测值混列、禁止跨档对比 |
+| **A（主力，已换）** | **轮询 `unity command "diagnostics get_performance"`** | `render`：drawCalls / batches / setPassCalls / triangles / vertices；`memory`：totalAllocated / totalReserved / monoUsed / monoHeap；`frameTiming`：cpuFrameTimeMs / gpuFrameTimeMs / cpuMainThreadFrameTimeMs | ✅ 可用，且**不依赖 Play Mode**（编辑态同值）。硬约束：CLI 往返使实际速率仅 **~1.05 次/秒** ⇒ 这是"按秒抽样"，不是逐帧采样 |
+| **A′（逐帧，扩展位）** | `diagnostics profiler_record --frames N` → `ProfilerCaptures/*.data` | 真·逐帧数据（实测 60 帧 / 11.5MB，`status=completed framesSaved=60`） | ⚠️ 录制成功但产物为**二进制、无结构化导出接口**。解析成本另计，列 M8 之后 |
+| **A″（注入式采样器，降为备选）** | `script eval_file` + `ProfilerRecorder` | 自定义 `ProfilerMarker`、逐帧 GC alloc | ❌ 渲染读数取不到。仅在未来需要自定义 marker 时重探；其实现约束（§2.2.1 事实 2/3/5/6）仍成立，代码保留于 `probe/sampler_v3.cs` |
+| **B（半真机）** | PC Standalone Player + `runtime *` 命令（实测有 `runtime status/set_time_scale/simulate_key`） | 无 Editor 开销的播放器数据 | 需 `unity build`，覆盖 REQ-3 的 IL2CPP/Mono 面。扩展位 M8 |
+| **C（兜底）** | 资产静态扫描（`.mat`/`.shader`/`.controller`）+ `unity logs` / Editor.log 解析 | 材质实例数、Shader 指令与 keyword、状态机拓扑规模、同步 Load 调用点计数 | 精度低，须标 `static_estimate`，禁止与实测混列或跨档对比 |
 
-四条链路对应的取数分配：
-- `F-CPU-01` → A（GC Alloc / 帧时间）为主，C 扫分配点。
-- `F-GPU-01` → A（Draw Calls / SetPass / Batches）为主，C 数材质实例与 Shader 复杂度。
-- `F-ANIM-01` → A（Animation 类目计数器、帧时间分段）+ C（状态机拓扑规模）。
-- `F-LOAD-01` → A（加载窗口帧时间、内存峰值曲线）+ C（同步 Load 调用点计数）。
+**换通路带来两个统计口径必须跟着改**（属 §3 前提，不是细节）：
+1. **采样单位从"帧"变"秒"**：`window_frames` → `window_samples`，`n_samples` 语义改为轮询次数（默认 ≥30 次 ≈ 30 秒），并把实测 `poll_rate` 入指纹——1Hz 与 10Hz 的样本不可互比。
+2. **帧粒度指标 A 档给不出**：帧率、掉帧率、逐帧 GC alloc 尖峰一律标 `unavailable_frame_granularity`，改由 A′/B 承接。**禁止用秒级抽样冒充帧级结论**（违者按 I1 处理）。
 
-`SamplingBundle` 必须把"协议指纹"作为一等公民：`scene_guid × replay_script_hash × quality_tier × warmup_frames × window_frames × n_samples × data_tier × environment_fingerprint`（环境指纹=Unity/URP 版本 × GPU 驱动 × 电源计划 × 机器散热状态，理由见 §8.6）。指纹不一致的两次采样禁止对比（AGENTS G7）。
+四条链路取数分配（按新通路重排）：
+- `F-CPU-01` → A 的 `cpuFrameTimeMs`（实测 40 样本 40 个唯一值，分布成立）+ C 扫分配点；逐帧 GC alloc 需 A′。
+- `F-GPU-01` → A 的 `render.*`（实测有效）+ C 数材质实例与 Shader 复杂度。
+- `F-ANIM-01` → A 的 `frameTiming` 分段 + C 的状态机拓扑规模；Animation 分项需 A′。
+- `F-LOAD-01` → A 的 `memory.*`（实测 40 样本 23 个唯一值）+ C 的同步 Load 调用点计数。
 
-### 2.2 采集层的三个已核实约束（会直接影响实现，不是假设）
+`SamplingBundle` 协议指纹：`scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × environment_fingerprint`（环境指纹=Unity/URP 版本 × GPU 驱动 × 电源计划 × 散热状态，理由见 §8.6）。`editor_mode` 保留——无头模式渲染值仍恒为 0（§2.2.1 事实 1）。指纹任一字段不同即禁止对比（AGENTS G7）。
 
-1. **必须有常驻 Editor。** `unity command/list/eval` 只连已运行的 Editor，不会自己启动。GUI Editor 会被 `unity status` 列为 `ready`；**batch 模式常驻 Editor 不出现在 `unity status` 里**，只能用 `unity command --project-path <p>` 探测。管线统一用 `--project-path` 判可达，不用 `unity status` 当唯一门禁。
-2. **Safe Mode 死锁是本管线最现实的失效模式。** 一旦 Fix Agent 改出 C# 编译错误，Editor 进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上——此时"重采样验证"和"通过 CLI 回滚"两条路同时断掉。对策（写进 AGENTS §4 G8）：**回滚只依赖 git，绝不依赖 Editor 可达**；回滚后重启 Editor 再验证。且 P3 编译门禁必须在采样之前，省掉一整轮采样成本。
+### 2.2 采集层的已核实约束（会直接影响实现，不是假设）
+
+1. **必须有常驻 Editor。** `unity command/list` 只连已运行的 Editor，不会自己启动。GUI Editor 会被 `unity status` 列为 `ready`；**batch 模式常驻 Editor 不出现在 `unity status` 里**，只能用 `unity command --project-path <p>` 探测。管线统一用 `--project-path` 判可达，不用 `unity status` 当唯一门禁。
+2. **Safe Mode 死锁是本管线最现实的失效模式。** 一旦 Fix Agent 改出 C# 编译错误，Editor 进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上——此时"重采样验证"和"通过 CLI 回滚"两条路同时断掉。对策（写进 AGENTS §4 G9）：**回滚只依赖 git，绝不依赖 Editor 可达**；回滚后重启 Editor 再验证。且 P3 编译门禁必须在采样之前，省掉一整轮采样成本。
 3. **Runtime 采样档位受限。** 本机两个 Editor 的 `modules` 字段均为空（未装 Android/iOS 模块），因此 B 档若要做，需先装模块并 `unity build`，属新增授权与耗时项，不进第一轮。
+4. **命令名不可假设，且存在"重命名提示"这一好设计。** 实测 `editor_play` 已不存在，服务器直接回 `It was renamed: run 'unity command editor.playmode start'`——包含空格的组前缀名整体加引号传入。参数名同样会纠正（`primitiveType`→`primitive`、`scenePath`→`path`）。所有调用一律走运行时探测 + 失败回读，不写死名字（AGENTS I8）。
 
 **为什么不用 Frame Debugger / Perfdog 直接取数**：Frame Debugger 无稳定程序接口，只作为**证据截图**（`unity command screenshot`，给人工批准时看画面差异），不作数值源；Perfdog 是真机工具，本 demo 无真机（📌 §9）。我们用"帧预算模型"把 Editor 侧采样映射到中低端机型预算线，映射函数与误差必须在报告里交代，不能假装是真机数据。
+
+#### 2.2.1 采集层实测修正（M0' 实跑结论，2026-11-07）
+
+这六条是**跑出来的**，不是推的，每条都改变了实现形状：
+
+1. **无头编辑器（`-batchmode -nographics`）的渲染读数恒为 0。** 场景含 20 个 Cube + 1 个相机、`isPlaying=True`、层级里 20 个 renderer 都在，`get_performance` 仍返回 `drawCalls=0 batches=0 triangles=0`，GPU 型号显示 `Null Device`；换带界面编辑器（`gpu=NVIDIA GeForce RTX 4060 Ti`）同场景立即得 `drawCalls≈184~195 setPass≈40~41`。memory 类不受影响（无头实测 570MB 真值）。
+   ⇒ **渲染类指标必须 GUI Editor 采集**（AGENTS G16）；无头仅适用于 CPU/内存/加载链路。第一轮无法全程无人值守，需接受桌面窗口与 license 占用。
+2. **回调跨 eval 存活，静态字段不存活，且旧回调卸不掉。** 第一次 eval 装的采样器在后续 eval 中持续写盘（`frames` 162480→270180）；但新 eval 返回 `frames=0`（新程序集、新静态状态），旧委托无法从新程序集摘除 ⇒ **两个回调争抢同一文件**。
+   ⇒ `EditorApplication.update` 无 `IsRegistered`；`SessionState` 也不行（它跨域重载存活，而回调注册不跨，会留下"标记已装、实际没人采样"的死状态）⇒ **v3 改用"心跳文件新鲜度"作为唯一可观测判据**。清理残留回调的唯一手段是重启编辑器。
+3. **`EditorApplication.update` 频率 ≠ 帧率。** 实测约 **2100 次/秒**；且 eval 内 `Thread.Sleep` 会阻塞主线程使 `frameCount` 不推进——**这是测量假象**，改成 Python 侧间隔两次独立 eval 后才看到帧正常推进（4 秒 Δ≈1700，空转约 427fps）。
+   ⇒ 采样写入按 `Time.frameCount` 变化门控；并固定 `targetFrameRate=60`，300 帧窗口才对应 ~5 秒。
+4. **`get_performance` 读的是上一帧快照，静置时不刷新。** 静置 8 秒三次取值 `drawCalls` 恒定、而 `cpuFrameTimeMs` 在变。
+5. **域重载会销毁内存场景物体。** 退出 Play Mode 后探针物体消失（重建时 `cameras=2` 说明上轮物体已没了）。
+   ⇒ 每轮录制前必须在**编辑态重建场景**（`probe/build_scene.cs`），否则采到空场景、指标全 0。
+6. **`ProfilerRecorder` 这条路在本机取不到渲染读数**：构造 7/7 成功（`skipped=[]`）、300 帧窗口正常落盘，但 `Render/Draw Calls`、`Render/SetPass Calls`、`Render/Batches`、`Render/Frame Time`、`Scripts/Update Time`、`Memory/Mono Used Memory` 的 median **全为 0**，仅 `Memory/Total Used Memory` 有真值（≈1.36GB）。`diagnostics profiler_connect --target editor` + `Profiler.enabled=true` 均无效；单独新开 recorder 即时采样也 `last=0 count=0`。反射候选入口 `GraphicsStats` / `GetCounterNames` / `GetFrameStatistic` 实测均不可用。
+   ⇒ 内置 `get_performance` 与 `ProfilerRecorder` 不是同一后端。**A 档主力换为轮询内置命令**（§2.1），注入式采样器降为 A″ 备选。
+
+**⚠️ 由此暴露一个方法学陷阱（必须在 M1 之前解决，不能留到调参时再说）**：静止场景下 `drawCalls` 的真实分布是**退化的**——40 次轮询全部等于 184（唯一值数=1），MAD=0 ⇒ `noise_band=0` ⇒ §3 的 `k·noise_band` 判据对这类指标完全失效，**任何改动都会被判"统计显著"**。
+⇒ 三条对策作为 M1 交付判据：① 夹具回放脚本**必须含动态**（相机/物体运动、动画或粒子驱动），让指标本身有抖动；② 对退化指标（`unique/n < 0.1`）禁用 MAD 噪声带，改用 `min_magnitude` 绝对门限并显式标 `degenerate_distribution`；③ 检出阈值一律来自 clean 变体的噪声标定（§8.1），禁止以"该指标零方差所以改一点就算显著"为由放过改动。
+
+另附一条对夹具设计的意外收获：GUI 实测 `drawCalls≈195 / batches=0` —— 20 个立方体产生 195 个 draw call、批次为 0，说明这套 URP 模板默认配置下 **SRP Batcher 与合批都没生效**。`F-GPU-01` 不必自己造异常，默认场景即是一个天然待诊断样本（但为可控与可复现，夹具仍按设计自建显式缺陷版）。
 
 ### 2.3 模型服务配置层（REQ-9）
 
@@ -192,12 +222,13 @@ Detector = {
 
 ## 3. 基线与噪声：先让"异常"这个词站得住
 
-1. **协议化重复采样** N≥5 次，同场景、同脚本、同档位。
+1. **协议化重复采样** N≥5 次，同场景、同脚本、同档位。A 档下"一次"= 一个轮询窗口（`window_samples` ≥30 次 ≈30 秒，实测速率 ~1.05 次/秒），N≥5 指**窗口重复 5 次**，不是轮询 5 次。
 2. 统计量用**中位数 + 稳健 MAD**（不用均值/标准差：GC 尖峰与掉帧是重尾分布，均值会被带偏）。
 3. `noise_band = 1.4826 × MAD`；异常判定 = 偏离 > `k × noise_band`（k 默认 3）**且**绝对量 > `min_magnitude`（避免"合批数从 12 降到 11，统计显著但毫无意义"）。
+   ⚠️ **分布退化例外（G17，实测）**：静止场景 `drawCalls` 40 次全等于 184 ⇒ MAD=0 ⇒ 噪声带判据失效，任何改动都会"统计显著"。此时禁用相对判据、只走 `min_magnitude`，并标 `degenerate_distribution`；夹具回放必须含动态（§2.2.1）。
 4. **双门限**：统计显著 + 业务显著（`deviation_ratio` ≥ 1.5，或该指标占回退总量 `explains_share` ≥ 20%）。
 5. 基线版本化 `baselines/<hash>.json`，失效判定用"采样协议指纹 + 场景 GUID + 资产清单哈希"三元组。
-6. **档位不可跨比**：A 档与 C 档、A 档 Play 与 A 档 Player 的数据，任何对比一律拒绝并报错。
+6. **档位不可跨比**：A/A2/A3/B/C 任意两档之间（含 A 档 Play 与 A 档 Player）一律拒绝并报错；A3（注入式）实测取不到渲染读数，其数据不得用于任何链路判定。
 
 误报率来源：**重采样不复现的 Issue 自动记一次 FP**；被 Review 判定"改后数据无显著变化但 Detect 曾判异常"也记一次 FP。按 `detector.id + version` 分桶统计。
 
@@ -489,11 +520,21 @@ trace: run_id
 | 连通性测试（开发通道） | 四步全通过：`list_models` / `minimal_chat` / `tool_call_smoke` / `json_mode_smoke`，纪录落 `knowledge/llm_connectivity.json`（`channel: dev`，不含凭据） | tool calling 与 json mode **实测可用**，结构化输出契约（AGENTS I7）成立 |
 | 密钥变量可见性 | `HKCU\Environment` 有 `UNITY_PROFILE_INSPECTOR`（REG_SZ，非空），但**已运行的终端进程读不到** | Windows GUI 设置只写注册表、不广播给现有进程。⇒ 代码实现注册表回退（仅开发通道，并标注 `source: registry_fallback`）；用户通道需重启终端 |
 | 通道门禁 | 实测：仅有 `dev` 纪录时 `user` 通道放行判定返回 `False` 并提示需自行完成一次测试 | §2.3.3 双通道语义由代码而非文档保证 |
+| 夹具工程 | 已创建 `fixtures/upi-fixture`（URP 模板 17.2.6，Editor 6000.6.7f1）；`com.unity.pipeline` **0.10.0-exp.1** 已装入 manifest | M0 完成；工程已纳入 git（Library/Temp 等生成物由 .gitignore 排除） |
+| Pipeline 命令面 | 实测 **191 条命令**（`unity command --project-path <p>`），含 `script eval` / `script eval_file` / `script recompile`、`diagnostics get_performance`、`editor.playmode start/stop`、`gameobject *`、`scene *`、`material *`、`animation.animator *`、`capture screenshot` 等；**命令名带组前缀且部分含空格**，须整体加引号；重命名会给提示（`editor_play` → `editor.playmode start`） | I8 落实：全部运行时探测，禁止写死命令名；参数名同样会被服务器纠正（`primitiveType`→`primitive`、`scenePath`→`path`） |
+| `ProfilerRecorder` 可用性（A3 通路） | 15/15 个目标计数器**可构造**（`Unity.Profiling` 命名空间，非 `UnityEngine.Profiling`；`ProfilerCategory` 是 struct 不能用 `Enum.Parse`），但渲染/Scripts/Mono 类目**读数恒为 0**，仅 `Total Used Memory` 有真值 | ⚠️ 构造成功 ≠ 取到数。A 档主力因此改为内置 `get_performance` 轮询（§2.1）；名称写错也不抛异常，属静默失效，必须由 clean 变体标定暴露 |
+| **无头模式渲染不可用** | `-batchmode -nographics` + Play Mode + 场景含 20 Cube/1 相机：`drawCalls=0 batches=0 triangles=0`、`gpu=Null Device`；换 GUI 编辑器（RTX 4060 Ti）同场景：`drawCalls=195 setPass=41 triangles=5357` | **GPU/动画链路必须 GUI Editor 采集（G16）**；CPU/内存/加载链路无头可用（memory 无头实测 570MB 真值）。协议指纹新增 `editor_mode` 字段 |
+| 采样器存活特性（I9 实测） | 回调跨 eval 存活（`frames` 162480→270180 持续增长）；静态字段不跨 eval 存活（第二次 eval 返回 `frames=0`）；**且新 eval 无法卸载旧回调**（`CallbackFunction` 无 `IsRegistered`，重复安装导致多回调争抢同一文件）；`SessionState` 跨域重载存活而回调注册不跨 ⇒ 也不能做幂等标志 | 幂等只能用**心跳文件新鲜度**（v3 实现）；残留回调的唯一清理手段是重启 Editor |
+| update 回调频率 | 实测 ~**2100 次/秒**，且静置时 `Time.frameCount` 不推进 | 采样必须按 `Time.frameCount` 门控，否则窗口长度与噪声带全部失真（§2.2.1 事实 3） |
+| `get_performance` 语义 | 静置 8 秒三次取值 `drawCalls` 恒 195（`cpuFrameTimeMs` 在变）⇒ 读的是**上一帧快照** | 只可用于单点快查/健康探测，帧序列统计必须靠常驻采样器（§2.2.1 事实 4） |
+| 契约门禁自测 | `upi/core/models.py` 六条硬门禁（跨模式禁对比、无头不误伤 CPU/加载、感知层强制非 auto、Verdict 必含全量守护、签名禁标识符、低置信禁入循环）**6/6 拦截生效** | AGENTS 文档约束已落为可执行校验，不是纸面规则 |
 
 ---
 
 ## 13. 变更记录
 
+- **v0.8**（2026-11-07）：M0' 闭环实跑推翻 D1 实现方式——注入式 `ProfilerRecorder` 构造 7/7 成功但渲染读数恒为 0（`profiler_connect` + `Profiler.enabled` 均无效），A 档主力改为**轮询内置 `diagnostics get_performance`**（实测 drawCalls=184 等真值，但速率仅 ~1.05 次/秒 ⇒ 秒级抽样）；统计口径相应从"帧"改"秒"并新增 `poll_rate`；§2.2.1 扩为六条实测事实；**新发现方法学陷阱：静止场景 drawCalls 唯一值=1 ⇒ MAD=0、`k·σ` 判据失效**，M1 须以"回放含动态 + `degenerate_distribution` 走绝对门限"为交付判据；幂等判据由 `SessionState` 改为心跳文件新鲜度。
+- **v0.7**（2026-11-07）：M0/M0' 实跑。夹具工程 `fixtures/upi-fixture` 创建并装入 `com.unity.pipeline` 0.10.0-exp.1；Pipeline 命令面实测 191 条（命令名带组前缀、部分含空格，重命名有提示）；A 档 15/15 计数器可构造。**新增 §2.2.1 四条实测修正**：无头模式（`-nographics`）渲染计数器恒为 0（GUI 下同场景实测 drawCalls=195/setPass=41），据此新增门禁 **G16** 与协议指纹字段 **`editor_mode`**；采样器回调跨 eval 存活而静态字段不存活、且旧回调无法从新 eval 卸载 ⇒ **I9 重写**、幂等标志改用 `SessionState`、文件写入改原子替换；`EditorApplication.update` 实测 ~2100 次/秒 ≠ 帧率 ⇒ 采样按 `Time.frameCount` 门控；`get_performance` 为上一帧快照 ⇒ 仅用于单点快查。代码侧新增 `upi/core/models.py`（六条契约门禁，自测 6/6 拦截生效）、`upi/tooling/unity_cli.py`、`upi/tooling/trace.py`、`probe/sampler_v2.cs`；§12 补记 8 项实测事实。附带发现：URP 模板默认配置下 20 个 renderer 得 `batches=0`，合批与 SRP Batcher 均未生效。
 - **v0.6**（2026-11-07）：配置层代码落地（`upi/config/settings.py` 双表校验 + 加载时合并实测能力字段 + 通道放行门禁；`upi/config/connectivity.py` 四步测试与失败分类；`scripts/bootstrap_llm.py` 引导入口，含 `--dev` 注册表回退）；开发通道连通性测试四步全通过；**model id 按服务商 `/models` 实测校正为 `deepseek-flash`**（原拟用 id 不在列表内）；§2.3.2 补记 Windows 进程环境可见性限制；§12 新增 4 项实测事实；能力字段回归单一真相来源（实测纪录），配置文件不再保存第二份数值。
 - **v0.5**（2026-11-07）：确认密钥注入方式=**系统级持久环境变量**（用户在图形界面自行设置，管线不代设、不收集值，避免密钥进入 shell 历史与进程参数）；确认连通性测试时机=**第一次使用时跑**（`run_on: [first_use]`，另在主动复检或 `model id`/`base_url` 变更时重跑，不随每次改 Key 自动触发）；§2.3.2/§2.3.3/§2.3.4 与 D11、`llm_config.yaml` 同步。
 - **v0.4**（2026-11-07）：新增 REQ-9 与 §2.3 模型服务配置层（`llm_config.yaml` 双表、首次使用三分支引导、连通性测试四步与失败分类、密钥仅环境变量引用）；D4 收口为 DeepSeek 官方 / `deepseekv41flash` 默认单模型，新增 D11；§11 M0 补入配置引导与连通性门禁；AGENTS 新增 I12 凭据安全不变量；同模型下 Review 隔离降级为弱隔离并需在报告标注（§2.3.5）。

@@ -1,0 +1,161 @@
+{
+  "window_frames": 300,
+  "target_fps": 60,
+  "collector": "sampler_v3",
+  "stats": {
+    "Render/Draw Calls": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    },
+    "Render/SetPass Calls": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    },
+    "Render/Batches": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    },
+    "Render/Frame Time": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    },
+    "Memory/Total Used Memory": {
+      "n": 300,
+      "median": 1364412125.5,
+      "noise_band": 6661897.7901,
+      "p5": 1357037789.0,
+      "p95": 1371750822.0
+    },
+    "Memory/Mono Used Memory": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    },
+    "Scripts/Update Time": {
+      "n": 300,
+      "median": 0.0,
+      "noise_band": 0.0,
+      "p5": 0.0,
+      "p95": 0.0
+    }
+  },
+  "sample_head": {
+    "Render/Draw Calls": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "Render/SetPass Calls": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "Render/Batches": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "Render/Frame Time": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "Memory/Total Used Memory": [
+      1364549638,
+      1364562533,
+      1363918206,
+      1364549470,
+      1364572070,
+      1363676856,
+      1363711006,
+      1363744318,
+      1363790454,
+      1363824782,
+      1363902974,
+      1364005174
+    ],
+    "Memory/Mono Used Memory": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "Scripts/Update Time": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "editor_mode": "gui",
+  "play_mode_during_sample": true,
+  "skipped_counters": [],
+  "fingerprint": "sha256:4fbeddebf5cae162|power:381b4222-f694-41f0-9685-ff5bb260df2e|collect:ok",
+  "collected_at": "2026-11-07T14:51:58"
+}

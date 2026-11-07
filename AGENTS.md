@@ -2,7 +2,7 @@
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
 > 适用范围：`upi/`（管线代码）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`llm_config.yaml`（模型服务配置，见 DESIGN §2.3）。
-> 最后更新：2026-11-07（v0.4，新增 I13 密钥注入方式与连通性测试时机约定；DESIGN 同步至 v0.5）
+> 最后更新：2026-11-07（v0.6，I9 幂等判据改为心跳文件新鲜度；采样协议字段改秒级口径（warmup/window_samples + poll_rate + degenerate_distribution）；新增 G17 静止分布门禁；DESIGN 同步至 v0.8）
 
 ---
 
@@ -18,7 +18,7 @@
 | I6 | 一个 Issue 的修复尝试次数受 `max_review_rounds`（默认 N=3）限制，超限即记 `failed`，不得继续消耗。 | 见 §4 G6 |
 | I7 | 所有 Agent 的输入输出必须是本文件 §2 定义的结构化契约（**Pydantic v2** 模型，见 G12），不接受自由文本作为唯一载体。 | 拒收，重试一次 |
 | I8 | **Editor 命令名不得假设**：`eval`/`eval_file`/`screenshot` 等是否存在由 `unity command --format json` 与 `unity list` 在运行时决定；探测不到即降级到 C 档并标注 `static_estimate`。 | 该次采样作废，不得据此判定异常 |
-| I9 | **采样器是一次性注入的常驻体**，跨 `eval` 调用无静态状态存活。任何"依赖上一次 eval 的内存状态"的写法禁止；结果必须落盘由 Python 侧轮询读取。 | 数据视为不可信，重采样 |
+| I9 | **采样器的控制与数据一律走文件，禁止依赖内存状态**（实测修正，DESIGN §2.2.1）：回调（`EditorApplication.update`）**跨 eval 存活**，但 eval 内静态字段**不存活**（每次 eval 是新程序集），且**新 eval 无法卸载旧回调** ⇒ 幂等标志既不能用静态 bool 也不能用 `SessionState`（后者跨域重载存活而回调注册不跨，会留下"标记已装、实际无人采样"的死状态；实测重复安装会让多个回调争抢同一文件）⇒ 只允许用**心跳文件新鲜度**这类外部可观测判据。采样写入必须按 `Time.frameCount` 门控：update 回调频率(~2100/s)≠帧率。结果落盘由 Python 侧轮询读取，文件写入必须原子（先 `.tmp` 再替换）。 | 数据视为不可信，重启 Editor 清残留后重采样 |
 | I10 | **管线自身也是被度量对象**：每个阶段必须产生 trace span（耗时、token、工具调用、证据指针、环境指纹）。无 trace 的运行不得出现在任何统计与报告里。 | 该 run 全部指标标记 `untraced`，不纳入趋势 |
 | I11 | **泛化结论必须由留出集支撑**：阈值、置信度权重、pattern 权限的变更，缺 DESIGN §8.7 体检表或任一项不达标 → 变更 `blocked`。 | 视为过拟合，变更作废 |
 | I12 | **凭据只存环境变量，配置文件只存变量名引用**（DESIGN §2.3）：`llm_config.yaml` 与任何产物（日志、trace span、报告、git 提交）不得出现密钥值；含凭据的参数一律以哈希形式记录；未经用户明确要求，不得把密钥写入文件或命令行参数。连通性测试未通过不得进入真实调用阶段。 | 该 run 标 `credential_leak_risk` 并中止，密钥需人工轮换 |
@@ -121,14 +121,16 @@
 RunState:
   run_id, fixture, fixture_split,        # fixture_split: tuning | holdout（§8.1）
   scene, replay_script, quality_tier
-  sampling_protocol: { min_samples, warmup_frames, window_frames,
-                       aggregation: median, data_tier: A|B|C,
-                       probe_overhead, instrument_distorted }
-  protocol_fingerprint          # G7 用；含 environment_fingerprint，不一致禁止对比
+  sampling_protocol: { min_samples, warmup_samples, window_samples, poll_rate,
+                       aggregation: median, data_tier: A|A2|A3|B|C,
+                       probe_overhead, instrument_distorted,
+                       degenerate_distribution }   # 秒级抽样口径，见 DESIGN §2.1
+  protocol_fingerprint          # G7 用；含 environment_fingerprint 与 editor_mode，不一致禁止对比
   environment_fingerprint       # Unity/URP 版本 × GPU 驱动 × 电源计划 × 散热状态
   budget: { max_issues, max_review_rounds, max_attempts_per_issue,
             max_sample_rounds, wallclock, max_tokens }   # G11
-  editor: { project_path, instance_pid, reachability, safe_mode }  # 可达性由运行时探测，不假设命令名
+  editor: { project_path, instance_pid, reachability, safe_mode,
+            mode: gui|headless, play_mode: bool }  # 可达性与模式由运行时探测，不假设命令名（G16）
   snapshots: { git_ref, asset_manifest_hash, scene_guid }
   trace: TraceRef               # runs/<run_id>/trace.jsonl；见 I10 / G13
   issues: Issue[]
@@ -217,7 +219,8 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G4 无快照 → 禁止写入。
 - G5 证据链断裂（diff 中有改动无法对应到任何 Evidence）→ 该 attempt 无效。
 - G6 `max_review_rounds`（默认 3）耗尽 → Issue 记 `failed`，禁止继续。审查若判定"本质是感知类改动，不该自动执行"→ 立即 `escalate_human`，**不烧完配额**。
-- G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup × window × n_samples × data_tier × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态）同样触发本门禁（DESIGN §8.6）。
+- G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态）同样触发本门禁（DESIGN §8.6）。
+- G16 **渲染类计数器必须在 GUI Editor + Play Mode 下采集**（实测，DESIGN §2.2.1 事实 1）：`-batchmode -nographics` 下即使场景含 20 个 renderer 且处于播放模式，`drawCalls/batches/triangles` 仍恒为 0、GPU 设备为 `Null Device`。因此：GPU 与动画链路的 A 档采样**禁止在无头模式进行**；同一指标跨 editor_mode 的数值禁止对比（并入 G7 的 `editor_mode` 字段）。CPU / 加载链路无此限制。
 - G8 **编译门禁前置于采样**：EditPlan 落地后先 `recompile` 并过滤 `error CS####`；编译失败 → attempt 直接失败并回滚，**不消耗一整轮采样成本**。
 - G9 **回滚不得依赖 Editor 可达**：改出编译错误时 Editor 会进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上。回滚路径只允许依赖 git；回滚后再重启 Editor 验证。Detect/Verify 遇到"连不上"必须先跑 `unity pipeline list` 区分 Safe Mode 与真的没有实例，禁止把"连不上"当作"没有编辑器"进而手改场景 YAML。
 - G10 **停止编辑器只按 PID**：禁止按名字批量杀（`taskkill /IM Unity.exe` 等），会连带关闭其他项目的未保存工作。
