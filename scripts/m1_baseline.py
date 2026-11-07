@@ -63,7 +63,8 @@ def robust(series: list[float]) -> dict:
     med = statistics.median(series)
     mad = statistics.median([abs(x - med) for x in series]) * 1.4826
     uniq = len(set(series))
-    degenerate = uniq / max(1, len(series)) < 0.1          # G17
+    degenerate = uniq / max(1, len(series)) < 0.1 or mad == 0.0
+    # MAD 精确为 0（如窗口间中位数全同）同样禁用相对判据：小样本下比例规则 unique/n≥1/n 永不触发          # G17
     s = sorted(series)
     return {"n": len(series), "median": round(med, 4), "noise_band_mad": round(mad, 6),
             "min": round(s[0], 4), "max": round(s[-1], 4), "unique": uniq,

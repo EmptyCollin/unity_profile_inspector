@@ -80,7 +80,7 @@ def robust(series: list[float]) -> dict:
     mad = statistics.median([abs(x - med) for x in series]) * 1.4826
     uniq = len(set(series))
     return {"n": len(series), "median": med, "mad": mad,
-            "unique": uniq, "degenerate": uniq / max(1, len(series)) < 0.1}
+            "unique": uniq, "degenerate": uniq / max(1, len(series)) < 0.1 or mad == 0.0}
 
 
 def one_window(fixture: str, nonce: str) -> dict | None:
@@ -194,6 +194,22 @@ def main() -> int:
     doc = {"session": args.session, "windows_target": args.windows,
            "protocol": {"warmup": WARMUP, "window_polls": WINDOW, "poll_interval_s": POLL},
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "fixtures": {}}
+    # 增量补采：同会话/同窗口数/同协议的历史场景保留（补漏采的，不覆盖已采的）
+    fp_keep = CALDIR / f"multiwin_{args.session}.json"
+    if fp_keep.exists():
+        try:
+            prev = json.loads(fp_keep.read_text(encoding="utf-8"))
+            same = (prev.get("session") == args.session
+                    and prev.get("windows_target") == args.windows
+                    and prev.get("protocol") == doc["protocol"])
+            if same:
+                for k, v in prev.get("fixtures", {}).items():
+                    if k not in fixtures and "windows" in v:
+                        doc["fixtures"][k] = v
+                if doc["fixtures"]:
+                    print("保留已采场景:", list(doc["fixtures"]))
+        except (json.JSONDecodeError, OSError):
+            pass
     for fx in fixtures:
         print(f"[{fx}]")
         doc["fixtures"][fx] = sample_scene(fx, args.windows)
