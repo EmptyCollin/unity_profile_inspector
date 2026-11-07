@@ -133,9 +133,9 @@ Detector = {
 
 **为什么不用 Frame Debugger / Perfdog 直接取数**：Frame Debugger 无稳定程序接口，只作为**证据截图**（`unity command screenshot`，给人工批准时看画面差异），不作数值源；Perfdog 是真机工具，本 demo 无真机（📌 §9）。我们用"帧预算模型"把 Editor 侧采样映射到中低端机型预算线，映射函数与误差必须在报告里交代，不能假装是真机数据。
 
-#### 2.2.1 采集层实测修正（M0' 实跑结论，2026-11-07）
+#### 2.2.1 采集层实测事实（M0' 实跑 + 实验4 定论，2026-11-07）
 
-这六条是**跑出来的**，不是推的，每条都改变了实现形状：
+这八条是**跑出来的**，不是推的，每条都改变了实现形状：
 
 1. **无头编辑器（`-batchmode -nographics`）的渲染读数恒为 0。** 场景含 20 个 Cube + 1 个相机、`isPlaying=True`、层级里 20 个 renderer 都在，`get_performance` 仍返回 `drawCalls=0 batches=0 triangles=0`，GPU 型号显示 `Null Device`；换带界面编辑器（`gpu=NVIDIA GeForce RTX 4060 Ti`）同场景立即得 `drawCalls≈184~195 setPass≈40~41`。memory 类不受影响（无头实测 570MB 真值）。
    ⇒ **渲染类指标必须 GUI Editor 采集**（AGENTS G16）；无头仅适用于 CPU/内存/加载链路。第一轮无法全程无人值守，需接受桌面窗口与 license 占用。
@@ -521,6 +521,8 @@ trace: run_id
 | Python | 3.14.3（`C:\Python314\python.exe`） | 满足 LangChain 1.x（要求 ≥3.10） |
 | LangChain 依赖 | dry-run 解析通过：`langchain-1.4.9`、`langgraph-1.2.20`、`langchain-openai-1.7.4`、`openai-3.46.0`，纯 v2 pydantic 路径 | ⚠️ 已知坑：**pydantic v1 模型在 3.14 上跑不起来**（上游 issue #34441）。本项目所有模型一律 pydantic v2；若引入任何老三方包携带 pydantic v1，视为阻塞问题 |
 | 真机 | 无 | ⇒ §9 边界声明 |
+| 实验4：recorder 体系边界 | 枚举 5023 个可用 recorder：`GC Allocated In Frame`（类目=Memory）存在且 handle 构造实测读到 166KB/508KB 每帧真值；`Draw Calls/SetPass/Batches` 精确匹配**不存在**；不存在名称的构造静默返回 0 不抛异常 | 双源定型依据（§2.2.1 事实 7/8）；解析层必须把"静默 0"与"-1 哨兵"当非法值拒绝 |
+| 实验4：离线 .data 解析通路 | `ProfilerDriver.LoadProfile` + `GetCounterValuesBatch` 经编辑器会话可解析（120 帧实测，Memory/GC 列真值、渲染列 -1）；Profile Analyzer 的 `Load(.data)` 与 AnalysisDataSource 反射均不可用 | A3 档成立但覆盖窄；-1=counter 不存在的哨兵 |
 | 服务商模型列表 | 2026-11-07 实测 `GET /models` 返回 2 项：`deepseek-flash`、`deepseek-v4-pro`（均 `context_window=1048576`、`max_output_tokens=393216`） | ⚠️ 原拟用的 `deepseekv41flash` 不在列表内，已按实测校正为 `deepseek-flash`。印证 §2.3.4 "model id 必须由列表回填、禁止手填猜测值"这条规定的必要性 |
 | 连通性测试（开发通道） | 四步全通过：`list_models` / `minimal_chat` / `tool_call_smoke` / `json_mode_smoke`，纪录落 `knowledge/llm_connectivity.json`（`channel: dev`，不含凭据） | tool calling 与 json mode **实测可用**，结构化输出契约（AGENTS I7）成立 |
 | 密钥变量可见性 | `HKCU\Environment` 有 `UNITY_PROFILE_INSPECTOR`（REG_SZ，非空），但**已运行的终端进程读不到** | Windows GUI 设置只写注册表、不广播给现有进程。⇒ 代码实现注册表回退（仅开发通道，并标注 `source: registry_fallback`）；用户通道需重启终端 |

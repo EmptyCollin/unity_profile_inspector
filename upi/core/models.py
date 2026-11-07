@@ -11,7 +11,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-DataTier = Literal["A", "A2", "A3", "B", "C"]   # A=内置轮询(秒级·渲染唯一源) A2=注入式按帧(GC/内存) A3=离线.data(marker时间线,-1哨兵) B=Player C=静态估算；跨档禁止对比，指标归属见 DESIGN §3.6（G7/G16）
+DataTier = Literal["A", "A2", "A3", "B", "C"]   # A=内置轮询(秒级·渲染唯一源) A2=注入式按帧(GC/内存) A3=离线.data(marker时间线,-1哨兵) B=Player C=静态估算；跨档禁止对比，指标归属制见 DESIGN §3 第 6 条（G7/G16）
 Link = Literal["cpu", "gpu", "anim", "loading"]
 IssueState = Literal["candidate", "confirmed", "fixing", "resolved", "failed",
                      "needs_human", "false_positive"]
