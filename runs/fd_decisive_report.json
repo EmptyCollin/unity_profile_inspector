@@ -1,0 +1,51 @@
+{
+  "control_advance": true,
+  "fd_advance": true,
+  "read_output": "frame=16632 rendered=16632\nutil.count=0 locallySupported=True\n缓冲为空：无当帧数据可读",
+  "p_off1": {
+    "drawCalls": 127.0,
+    "batches": 0.0,
+    "setPassCalls": 9.0,
+    "triangles": 3126.0,
+    "vertices": 7938.0,
+    "totalAllocatedBytes": 679983832.0,
+    "totalReservedBytes": 1587945472.0,
+    "monoUsedBytes": 94814208.0,
+    "monoHeapBytes": 147369984.0,
+    "available": 1.0,
+    "cpuFrameTimeMs": 1.8237999999999999,
+    "gpuFrameTimeMs": 0.35276799999999997,
+    "cpuMainThreadFrameTimeMs": 0.5405
+  },
+  "p_on": {
+    "drawCalls": 120.0,
+    "batches": 0.0,
+    "setPassCalls": 9.0,
+    "triangles": 3042.0,
+    "vertices": 7770.0,
+    "totalAllocatedBytes": 693017479.5,
+    "totalReservedBytes": 1587945472.0,
+    "monoUsedBytes": 98904064.0,
+    "monoHeapBytes": 147369984.0,
+    "available": 1.0,
+    "cpuFrameTimeMs": 1.84145,
+    "gpuFrameTimeMs": 0.365568,
+    "cpuMainThreadFrameTimeMs": 0.5453
+  },
+  "p_off2": {
+    "drawCalls": 127.0,
+    "batches": 0.0,
+    "setPassCalls": 9.0,
+    "triangles": 3126.0,
+    "vertices": 7938.0,
+    "totalAllocatedBytes": 693199122.0,
+    "totalReservedBytes": 1587945472.0,
+    "monoUsedBytes": 114436096.0,
+    "monoHeapBytes": 147369984.0,
+    "available": 1.0,
+    "cpuFrameTimeMs": 1.83525,
+    "gpuFrameTimeMs": 0.35584,
+    "cpuMainThreadFrameTimeMs": 0.5502
+  },
+  "overhead_pct": 0.7
+}

@@ -2,7 +2,7 @@
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
 > 适用范围：`upi/`（管线代码）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`llm_config.yaml`（模型服务配置，见 DESIGN §2.3）。
-> 最后更新：2026-11-07（v0.6，I9 幂等判据改为心跳文件新鲜度；采样协议字段改秒级口径（warmup/window_samples + poll_rate + degenerate_distribution）；新增 G17 静止分布门禁；DESIGN 同步至 v0.8）
+> 最后更新：2026-11-08（v0.7，范式重排并入（DESIGN v0.12 / DP-1，D12~D17 拍板）：新增 G18 finding 等级归属、G19 逐帧源与归因源、G20 盲区显式声明三条门禁；Detect 输出扩为 `Finding[]`，Verify 顺带跑矛盾规则表；采样三问拆分（水位 A / 发作探针+A4 / 潜在 C+）。承前 v0.6：I9 幂等判据=心跳文件新鲜度；采样协议秒级口径；G17 静止分布门禁）
 
 ---
 
@@ -34,15 +34,17 @@
 - **不可以做**：判断技术方案，修改任何工程文件。
 
 ### 1.2 Detect Agent（检测）
-- **职责**：从采集层拿原始数据 → 建/更新基线 → 产出 `Issue` 列表（含证据链、量级、偏离倍数）。
-- **输入**：`SamplingBundle`（多次采样 + 回放脚本 + 档位配置 + `probe_overhead` 标定值）。
-- **输出**：`Issue[]`，每条必须有 `signature`（症状指纹）、`evidence[]`、`magnitude`。
+- **职责**：从采集层拿原始数据 → 建/更新基线 → 产出 `Finding[] = Issue[] ∪ Potential[]`（Issue 含证据链、量级、偏离倍数；Potential 含模式位置、斜率来源、规模假设）。
+- **输入**：`SamplingBundle`（多次采样 + 回放脚本 + 档位配置 + `probe_overhead` 标定值）；`BreachSample[]`（探针越界样本，DESIGN §2.4 T2w，M2a 后）；C+ 扫描结果（M3.5 后）。
+- **输出**：`Finding[]`，Issue 每条必须有 `signature`（症状指纹）、`evidence[]`、`magnitude`；Potential 每条必须有 `pattern + slope_source + scale_assumption` 三字段（缺一 Pydantic 拒收）。
 - **硬规则**：
   - 采样次数 < `min_samples`（默认 5）时，只允许输出 `low_confidence` 标签，不允许进入修复循环。
   - 判定异常必须使用**中位数 + 噪声带**（同一协议重复采样的 σ），禁止用单次采样值和均值。
   - 重采样不复现的历史 Issue，自动记一次检测误报（FP），写入特征库统计。
   - **FP 率必须与检出率成对输出**（同一阈值下的两个数），禁止只报其一。
   - `instrument_distorted`（采样开销超预算）的 bundle 不得用于判定异常。
+  - **等级归属（G18）**：`potential` 不得进入修复循环、成功率分母、FP 分母；其唯一升级路径 = T5 压测复现→转 `confirmed`，不复现→撤回。
+  - **发作判定必须有逐帧源（G19）**：判"发作（episode）"只能建在逐帧源（A2/A4/探针）上；A 档秒级抽样只允许判"水位（waterline）"。渲染计数无任何逐帧源 ⇒ **禁止注册 GPU 逐笔 spike detector**；GPU 发作 detector 只能建在 A4 `gpuFrameTime` 上，且 finding 只给"越线事实"，逐笔归因 `attribution_source=human`（宁缺毋假，虚报检出能力按 I1 处理）。
 - **不可以做**：推测根因、给出修复代码、写文件。
 
 ### 1.3 Diagnose Agent（归因）
@@ -68,14 +70,15 @@
 - **不可以做**：判定自己的修复是否成功，跳过 verify 直接进入下一个 Issue，扩大改动范围。
 
 ### 1.5 Verify Agent（验证）
-- **职责**：同一采样协议重跑，产出 `Verdict`（目标是否解决、**全量守护指标是否劣化**）。
+- **职责**：同一采样协议重跑，产出 `Verdict`（目标是否解决、**全量守护指标是否劣化**）；**顺带跑跨指标矛盾规则表（P4，DESIGN §3A，M2a 后）**——违反任何一条 = 视同守护劣化，报 `conflict` finding。
 - **输入**：attempt 快照的 baseline bundle + 改后 bundle + 渲染/回放回归结果。
-- **输出**：`Verdict{ target_metric_delta, guard_metrics[], perception[], realized_over_expected, status }`。
+- **输出**：`Verdict{ target_metric_delta, guard_metrics[], perception[], conflicts[], realized_over_expected, status }`。
 - **硬规则**：
   - 必须对比**全量守护指标**，不只是当初的异常指标（防"按下葫芦浮起瓢"）。
   - 改善量必须超过 `k·σ`（k 默认 3），否则判 `not_significant` = 视为未解决 → 触发回滚。
   - 守护指标劣化超过 `guard_tolerance`（默认 1%）→ 无条件 `rollback`，硬规则优先，不走 LLM 判断。
   - 感知门禁失败 → 无条件 `rollback` 并转人工。
+  - 矛盾规则违反（如 drawCalls 升 + triangles 降 + batches 不变 = 合批修复未生效反而碎描）→ 记 `conflicts[]` 进 Review，不自行解释成因。
 - **不可以做**：修改代码，批准自己的结论。
 
 ### 1.6 Review Agent（审查）★ 信息隔离要求最严
@@ -122,7 +125,8 @@ RunState:
   run_id, fixture, fixture_split,        # fixture_split: tuning | holdout（§8.1）
   scene, replay_script, quality_tier
   sampling_protocol: { min_samples, warmup_samples, window_samples, poll_rate,
-                       aggregation: median, data_tier: A|A2|A3|B|C,   # A=轮询(渲染唯一源) A2=注入按帧(GC/内存) A3=离线.data(时间线)
+                       aggregation: median, data_tier: A|A2|A3|A4|B|C,  # A=轮询(水位唯一源) A2=注入按帧(GC/内存) A3=离线.data(时间线) A4=FrameTimingManager(逐帧CPU/GPU计时，固定4帧延迟)
+                       scale_factor,                # 常态=1；≠1 为压测档（10×/100×，D15），数据单独目录，禁与常态混比（G7）
                        probe_overhead, instrument_distorted,
                        degenerate_distribution }   # 秒级抽样口径，见 DESIGN §2.1
   protocol_fingerprint          # G7 用；含 environment_fingerprint 与 editor_mode，不一致禁止对比
@@ -133,9 +137,15 @@ RunState:
             mode: gui|headless, play_mode: bool }  # 可达性与模式由运行时探测，不假设命令名（G16）
   snapshots: { git_ref, asset_manifest_hash, scene_guid }
   trace: TraceRef               # runs/<run_id>/trace.jsonl；见 I10 / G13
-  issues: Issue[]
+  findings: Finding[]           # = issues ∪ potentials（G18；potentials 只进报告不进循环）
+  issues: Issue[]               # 由 findings 中 kind=issue 派生，保持向后兼容
+  breach_samples: BreachSample[] # 探针越界样本（DESIGN §2.4 T2w，M2a 后）
   records: AttemptRecord[]      # 每次 attempt 的完整轨迹
   metrics_summary
+
+Finding:
+  kind                 # issue | potential      （G18 归属判据）
+  ptype                # waterline | episode | potential | conflict | perception（DESIGN §3A 五类）
 
 Issue:
   signature            # dim | metric | 归因对象/代码模式 | 阈值
@@ -143,7 +153,20 @@ Issue:
   link                 # cpu | gpu | anim | loading   （对齐 DESIGN §1 四链路）
   evidence[]: Evidence # 每条 = { tool, args, raw_ref, value, unit, noise_band, data_tier }
   magnitude, deviation_ratio, explains_share_of_regression
+  attribution_source   # 自动源 | human（G19；无源时 finding 只给越线事实，根因转人工）
   state              # candidate | confirmed | fixing | resolved | failed | needs_human | false_positive
+
+PotentialFinding:      # P3 潜在风险；三字段缺一 Pydantic 拒收（G18）
+  pattern, location            # 代码/资产位置（供人查，不进签名）
+  slope_source                 # 必须指向实测斜率证据（A2/A4/BreachSample），禁止估算（I1）
+  scale_assumption             # 明示"规模到 S 时预测越线"，S 是假设不是事实
+  status                       # shadow | reported | stress_pending | promoted | retracted
+
+BreachSample:          # P2 发作证据单元（DESIGN §2.4 T2w）
+  frame_idx, metric, value, threshold_abs, deviation_ratio
+  ring[-N..+M]         # 前后原始序列；N 默认 10，M ≥ 14（覆盖 A4 的 4 帧固定延迟，D17）
+  a4_window            # 该窗口的逐帧 cpuFrameTime/gpuFrameTime；未回填帧已按哨兵过滤（G19）
+  data_tier, protocol_fingerprint, replay_seed
 
 Hypothesis:
   root_cause, code_anchors[]
@@ -162,6 +185,7 @@ Verdict:
   target: { before, after, delta, sigma, significant }
   guards[]: { metric, before, after, delta, regressed }   # 全量守护，不只当初异常项
   perception: { render_diff_score, anim_event_diff, replay_divergence, passed }
+  conflicts[]: { rule_id, metrics{}, expected, observed } # P4 矛盾规则违反（§1.5）；非空即进 Review
   compile_ok                  # G8，先于采样判定
   realized_over_expected
   status            # resolved | not_significant | regressed | perception_failed
@@ -179,7 +203,8 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
              compile_gate_fail_rate, safemode_incidents, marginal_cost_curve }
   quality: { fp_rate, recall, success_rate, auto_rate, ece,
              realized_over_expected, rollback_rate, review_rounds,
-             needs_human_share, shadow_agreement, holdout_pass_rate }
+             needs_human_share, shadow_agreement, holdout_pass_rate,
+             potential_ratification_rate }  # 事后追认率：potential 经 T5 压测/真实运行确认发作的比例（G18 配套的长期指标，<30% 的模式降回影子）
   stability:{ sample_fail_rate, fingerprint_mismatch_count,
               rollback_success_rate, cross_run_verdict_consistency }
 ```
@@ -219,7 +244,7 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G4 无快照 → 禁止写入。
 - G5 证据链断裂（diff 中有改动无法对应到任何 Evidence）→ 该 attempt 无效。
 - G6 `max_review_rounds`（默认 3）耗尽 → Issue 记 `failed`，禁止继续。审查若判定"本质是感知类改动，不该自动执行"→ 立即 `escalate_human`，**不烧完配额**。
-- G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态）同样触发本门禁（DESIGN §8.6）。
+- G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × scale_factor × graphics_api × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**；**常态数据（scale_factor=1）与压测档（10×/100×，D15）永远不可互比**；`graphics_api` 为预留字段——EX-1（切 DX11 验证 RenderDoc）若立项，切换前后数值禁止对比靠它兜底。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态，**以及 `runInBackground`/焦点策略——实测失焦即停出帧**）同样触发本门禁（DESIGN §8.6/§12）。
 - G16 **渲染类计数器唯一源=GUI Editor 的 `diagnostics get_performance` 轮询**（实测 A2/A3 两源均无渲染 counter：A2 静默读 0，A3 为 -1 哨兵——把这两种当"值为 0/负"参与统计即违反 I1）。且必须在 Play Mode 采集（实测，DESIGN §2.2.1 事实 1）：`-batchmode -nographics` 下即使场景含 20 个 renderer 且处于播放模式，`drawCalls/batches/triangles` 仍恒为 0、GPU 设备为 `Null Device`。因此：GPU 与动画链路的 A 档采样**禁止在无头模式进行**；同一指标跨 editor_mode 的数值禁止对比（并入 G7 的 `editor_mode` 字段）。CPU / 加载链路无此限制。
 - G8 **编译门禁前置于采样**：EditPlan 落地后先 `recompile` 并过滤 `error CS####`；编译失败 → attempt 直接失败并回滚，**不消耗一整轮采样成本**。
 - G9 **回滚不得依赖 Editor 可达**：改出编译错误时 Editor 会进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上。回滚路径只允许依赖 git；回滚后再重启 Editor 验证。Detect/Verify 遇到"连不上"必须先跑 `unity pipeline list` 区分 Safe Mode 与真的没有实例，禁止把"连不上"当作"没有编辑器"进而手改场景 YAML。
@@ -229,6 +254,10 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G13 **无 trace 不入统计**：任何出现在报告/控制台里的数字，必须能定位到产生它的 `TraceSpan` 与证据文件；缺 span 的 run 标 `untraced` 并从趋势中剔除。统计开销本身受 `max_probe_overhead_pct` 约束，超限时该 bundle 标 `instrument_distorted`。
 - G14 **过拟合体检表是上线前置条件**：阈值、权重、pattern 权限的任何变更，必须先由 §7 控制台算出 DESIGN §8.7 六项数值并全部达标；缺项或不达标 → 变更 `blocked`，不允许提交人工批准。
 - G15 **指标成对展示**：FP 率必须与检出率同轴同屏；成功率必须与 `n_effective` 和置信区间同屏；成本指标必须与质量指标同轴。只报其一的结论视为无效结论。
+- G17 **静止分布门禁**：重复采样的分布退化时禁用相对判据——`unique/n < 0.1` **或 `MAD == 0`**（小样本下 n=4 时比例判据永不触发，`mad==0` 分支即为此补，实测 drawCalls 类离散整数指标必然撞上）→ 标 `degenerate_distribution`，只走 `min_magnitude` 绝对门限；夹具回放必须含动态（DESIGN §2.2.1）。
+- G18 **finding 等级归属门禁**：`potential`（P3 潜在）不得进入修复循环、成功率分母、FP 分母——其断言"规模到 S 才发作"在当前规模下不可证伪，混入即失真（DESIGN §3A）。升级路径只有一条：T5 压测（10×/100×，D15）复现 → 转 `confirmed`；不复现 → 撤回。代码层：Pydantic 构造期拒绝 `kind=potential` 进入 Issue 通道；负例测试必配。
+- G19 **逐帧源与归因源门禁**：判"发作（episode）"的 detector 必须声明逐帧数据源（`data_tier ∈ {A2, A4, probe}`）——A 档秒级抽样判发作 = 漏检 + 把被跳过的异常值当正常（最危险失效）。渲染计数无逐帧源（A2 静默 0 / A3 -1 / FD 程序侧不可解读，实测 ①-⑫）⇒ **禁止注册 GPU 逐笔 spike detector**；GPU 发作只能建在 A4 `gpuFrameTime`（固定 4 帧延迟，环形缓冲向后 ≥14 承接，D17；未回填帧 `gpu=0 且 completeTs=0` 按 -1 哨兵同规则拒收）。episode detector 必须带 `attribution_source` 字段，无自动化归因源时填 `human`——finding 只给"哪帧/哪个指标/越多少"，根因转人工。**虚报检出能力按 I1 处理。**
+- G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前三项：GPU 尖峰逐笔归因→EX-1/B 档；未放大的代码风险→M3.5 C+；感知类退化→M7 T8）。缺该清单的报告无效。
 
 ---
 
@@ -238,4 +267,6 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - 每个 Issue 一份证据链 JSON（`runs/<run_id>/issues/<id>/`），整轮一份 HTML 汇总报告 + 一份统计控制台（DESIGN §7.3 七视图，含成本轴）。
 - `runs/<run_id>/trace.jsonl` 与聚合表是统计的唯一数据源，不得手写或事后补记；缺失即该 run 标 `untraced`。
 - 需要人工批准的条目，必须同时给出：证据、方案、预期效应、回滚方式、失败时我该怎么办。
-- 本 demo 的诚实边界必须在产物中显式声明：PC Editor 采样 + 帧预算模拟，不等于真机中低端机型数据；样本量不足时，趋势与泛化结论一律标注为"方法学示范"（DESIGN §8.8）。
+- **潜在风险（potential）单列一章**（`runs/<run_id>/potentials/`），与 Issue 章节物理分开，报告模板不得把两者混排进同一张"检出表"（G18 的产物层落实）；章首固定一句："以下条目在当前规模下未发作、不可证伪，仅供决策参考，不计入检出率与误报率"。
+- **FD 人工下钻操作单**（D16=A 形态）附在 GPU 类 Issue 证据链末尾：目标帧号（可复现回放对齐后）、疑似 SetPass 组、建议查看的逐笔字段；不自动截图。
+- 本 demo 的诚实边界必须在产物中显式声明：PC Editor 采样 + 帧预算模拟，不等于真机中低端机型数据；样本量不足时，趋势与泛化结论一律标注为"方法学示范"（DESIGN §8.8）；**"不可检出清单"缺失的报告无效（G20）**。

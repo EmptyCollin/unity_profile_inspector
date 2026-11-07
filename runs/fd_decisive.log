@@ -1,0 +1,27 @@
+[1] 退出停摆实例
+    常规退出被拒（Play Mode 中），改 --discard
+    {"quitting": true, "exitCode": 0, "saved": [], "discarded": []}
+    实例已退出
+[2] 重启 GUI 编辑器
+    就绪（第 1 轮）
+[3] 载入 F-GPU-01 进 Play，解除 vsync 与后台暂停
+    Entered play mode
+    runBg=true fps=-1 play=True
+[4] p_off1：未开 Frame Debugger
+    控制组: frame 4801 → 7064  推进=True
+    cpuFrameTimeMs = 1.824 mainThread = 0.54 | drawCalls = 127.0 setPass = 9.0
+[5] 开启 Frame Debugger
+    set true, FrameDebugger.enabled=False
+    开 FD 后: frame 14302 → 16559  推进=True
+    读取当帧事件：
+frame=16632 rendered=16632
+util.count=0 locallySupported=True
+缓冲为空：无当帧数据可读
+[6] p_on：FD 开着时帧时间
+    cpuFrameTimeMs = 1.841 mainThread = 0.545
+[7] 关闭 FD → p_off2 复测（验证 off 段可重复）
+    set false, FrameDebugger.enabled=False
+    cpuFrameTimeMs = 1.835
+
+    ⇒ 开启抓取开销 = 1.841 vs off基线均值 1.830 → 0.7%（off 两段自身差异 0.011ms 视为噪声）
+报告: D:\unity_profile_inspector\runs\fd_decisive_report.json

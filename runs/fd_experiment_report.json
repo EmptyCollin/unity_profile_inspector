@@ -1,0 +1,13 @@
+{
+  "C1_base_events": 0,
+  "C2_opened_events": 0,
+  "C2_after_events": 0,
+  "C2_extra_hits": 0,
+  "C3_with_obj": 0,
+  "C3_samples": [],
+  "C5_triggered": false,
+  "C5_detail": null,
+  "C4_overhead_pct": null,
+  "C4_on_median_ms": -1,
+  "C4_off_median_ms": -1
+}
