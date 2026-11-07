@@ -1,0 +1,1 @@
+{"fixtures":[{"id":"F-CPU-01","enabled":true,"scale":100,"dynamic":true,"holdout":0},{"id":"F-GPU-01","enabled":true,"scale":40,"dynamic":true,"holdout":0},{"id":"F-ANIM-01","enabled":true,"scale":128,"dynamic":true,"holdout":1},{"id":"F-LOAD-01","enabled":true,"scale":400,"dynamic":true,"holdout":1},{"id":"CLEAN","enabled":false,"scale":0,"dynamic":true,"holdout":0}]}

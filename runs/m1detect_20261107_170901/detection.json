@@ -1,0 +1,83 @@
+{
+  "run_id": "m1detect_20261107_170901",
+  "baseline_file": "D:\\unity_profile_inspector\\baselines\\baseline_02306ff9c8b3bd18.json",
+  "created_at": "2026-11-07T17:09:01",
+  "results": {
+    "F-CPU-01": {
+      "metric": "gc_alloc_per_frame",
+      "fixture": 85338.0,
+      "clean": 16762.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": false,
+      "delta": 68576.0,
+      "deviation_ratio": 5.091,
+      "verdict": "not_found",
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "detector_version": "v1"
+    },
+    "F-GPU-01": {
+      "metric": "drawCalls",
+      "fixture": 124.0,
+      "clean": 47.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 77.0,
+      "deviation_ratio": 2.638,
+      "verdict": "detected",
+      "detector": "DET-GPU-BATCHBREAK",
+      "detector_version": "v1",
+      "issue_signature": {
+        "dim": "drawCalls",
+        "metric": "drawCalls",
+        "mechanism": "per_renderer_material_instantiation",
+        "threshold": 30.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 77.0
+    },
+    "F-ANIM-01": {
+      "metric": "cpuMainThreadFrameTimeMs",
+      "fixture": 0.7966,
+      "clean": 0.5732,
+      "stat_ok": true,
+      "biz_ok": true,
+      "ratio_ok": true,
+      "delta": 0.2234,
+      "deviation_ratio": 1.39,
+      "verdict": "detected",
+      "detector": "DET-ANIM-PARAMRTT",
+      "detector_version": "v1",
+      "issue_signature": {
+        "dim": "cpuMainThreadFrameTimeMs",
+        "metric": "cpuMainThreadFrameTimeMs",
+        "mechanism": "cross_layer_state_query_per_frame",
+        "threshold": 0.15,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 0.2234
+    },
+    "F-LOAD-01": {
+      "metric": "totalAllocatedBytes",
+      "fixture": 798121900.5,
+      "clean": 716594158.0,
+      "stat_ok": true,
+      "biz_ok": true,
+      "ratio_ok": true,
+      "delta": 81527742.5,
+      "deviation_ratio": 1.114,
+      "verdict": "detected",
+      "detector": "DET-LOAD-SYNCPEAK",
+      "detector_version": "v1",
+      "issue_signature": {
+        "dim": "totalAllocatedBytes",
+        "metric": "totalAllocatedBytes",
+        "mechanism": "sync_resources_load_in_start",
+        "threshold": 5000000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 81527742.5
+    }
+  }
+}

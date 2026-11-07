@@ -1,0 +1,1 @@
+{"run_id": "m1detect_20261107_170937", "stage": "detect", "seq": 1, "wallclock_ms": 0, "exit_status": 0, "issue_id": null, "attempt_id": null, "tool_calls": [], "llm": null, "evidence_refs": [], "environment_fingerprint": "sha256:c05cf02f54e79f41|power:381b4222-f694-41f0-9685-ff5bb260df2e|collect:ok", "channel": "dev", "schema_version": 1}

@@ -1,0 +1,26 @@
+[F-CPU-01]
+  打开 Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity
+  进 Play: Entered play mode
+  A2: ready gc=1 mem=1
+    A2 逐帧样本: gc=1891 mem=1891
+[F-GPU-01]
+  打开 Assets/UpiFixtures/Scenes/Scene_F-GPU-01.unity
+  进 Play: Entered play mode
+  A2: alive hb_fresh
+    A2 逐帧样本: gc=1891 mem=1891
+[F-ANIM-01]
+  打开 Assets/UpiFixtures/Scenes/Scene_F-ANIM-01.unity
+  进 Play: Entered play mode
+  A2: alive hb_fresh
+    A2 逐帧样本: gc=1890 mem=1890
+[F-LOAD-01]
+  打开 Assets/UpiFixtures/Scenes/Scene_F-LOAD-01.unity
+  进 Play: Entered play mode
+  A2: alive hb_fresh
+    A2 逐帧样本: gc=1890 mem=1890
+[CLEAN]
+  打开 Assets/UpiFixtures/Scenes/Scene_CLEAN_clean.unity
+  进 Play: Entered play mode
+  A2: alive hb_fresh
+    A2 逐帧样本: gc=1891 mem=1891
+基线写入: D:\unity_profile_inspector\baselines\baseline_58c44d606a22ab87.json

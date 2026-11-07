@@ -1,0 +1,1135 @@
+{
+  "created_at": "2026-11-07T17:28:39",
+  "fixtures": {
+    "F-CPU-01": {
+      "fixture": "F-CPU-01",
+      "scene": "Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity",
+      "protocol": {
+        "warmup_samples": 8,
+        "window_samples": 30,
+        "poll_rate": 1.0,
+        "data_tier": "A+A2",
+        "editor_mode": "gui",
+        "n_runs": 3
+      },
+      "A_polluted_by_cli": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 695645867.5,
+          "noise_band_mad": 94733.6922,
+          "min": 695578369.0,
+          "max": 695806746.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A_stats": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 695645867.5,
+          "noise_band_mad": 94733.6922,
+          "min": 695578369.0,
+          "max": 695806746.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "totalReservedBytes": {
+          "n": 30,
+          "median": 1856446464.0,
+          "noise_band_mad": 0.0,
+          "min": 1856446464.0,
+          "max": 1856446464.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "monoUsedBytes": {
+          "n": 30,
+          "median": 94388224.0,
+          "noise_band_mad": 6667857.1008,
+          "min": 82153472.0,
+          "max": 103702528.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "monoHeapBytes": {
+          "n": 30,
+          "median": 146014208.0,
+          "noise_band_mad": 0.0,
+          "min": 146014208.0,
+          "max": 146014208.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "available": {
+          "n": 30,
+          "median": 1.0,
+          "noise_band_mad": 0.0,
+          "min": 1.0,
+          "max": 1.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "cpuFrameTimeMs": {
+          "n": 30,
+          "median": 3.9549,
+          "noise_band_mad": 0.346039,
+          "min": 3.3605,
+          "max": 4.7447,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "gpuFrameTimeMs": {
+          "n": 30,
+          "median": 1.0726,
+          "noise_band_mad": 0.024291,
+          "min": 1.0301,
+          "max": 1.111,
+          "unique": 24,
+          "degenerate_distribution": false
+        },
+        "cpuMainThreadFrameTimeMs": {
+          "n": 30,
+          "median": 0.773,
+          "noise_band_mad": 0.093107,
+          "min": 0.6988,
+          "max": 0.9788,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A2_stats": {
+        "gc_alloc_per_frame": {
+          "n": 7765,
+          "median": 85338.0,
+          "noise_band_mad": 0.0,
+          "min": 85338.0,
+          "max": 2986261.0,
+          "unique": 179,
+          "degenerate_distribution": true
+        },
+        "total_used_per_frame": {
+          "n": 7765,
+          "median": 1199185953.0,
+          "noise_band_mad": 6476480.1276,
+          "min": 1186112741.0,
+          "max": 1216565053.0,
+          "unique": 7762,
+          "degenerate_distribution": false
+        },
+        "animator_process_animations_ns": {
+          "n": 7765,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "animator_process_graph_ns": {
+          "n": 7765,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        }
+      },
+      "scene_guid_hash": "5d8254c028cd"
+    },
+    "F-GPU-01": {
+      "fixture": "F-GPU-01",
+      "scene": "Assets/UpiFixtures/Scenes/Scene_F-GPU-01.unity",
+      "protocol": {
+        "warmup_samples": 8,
+        "window_samples": 30,
+        "poll_rate": 1.0,
+        "data_tier": "A+A2",
+        "editor_mode": "gui",
+        "n_runs": 3
+      },
+      "A_polluted_by_cli": {
+        "drawCalls": {
+          "n": 30,
+          "median": 124.0,
+          "noise_band_mad": 4.4478,
+          "min": 87.0,
+          "max": 127.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 3090.0,
+          "noise_band_mad": 53.3736,
+          "min": 2646.0,
+          "max": 3126.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "vertices": {
+          "n": 30,
+          "median": 7866.0,
+          "noise_band_mad": 106.7472,
+          "min": 6978.0,
+          "max": 7938.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 696675215.0,
+          "noise_band_mad": 117332.964,
+          "min": 696507316.0,
+          "max": 696908459.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A_stats": {
+        "drawCalls": {
+          "n": 30,
+          "median": 124.0,
+          "noise_band_mad": 4.4478,
+          "min": 87.0,
+          "max": 127.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 3090.0,
+          "noise_band_mad": 53.3736,
+          "min": 2646.0,
+          "max": 3126.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "vertices": {
+          "n": 30,
+          "median": 7866.0,
+          "noise_band_mad": 106.7472,
+          "min": 6978.0,
+          "max": 7938.0,
+          "unique": 10,
+          "degenerate_distribution": false
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 696675215.0,
+          "noise_band_mad": 117332.964,
+          "min": 696507316.0,
+          "max": 696908459.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "totalReservedBytes": {
+          "n": 30,
+          "median": 1856446464.0,
+          "noise_band_mad": 0.0,
+          "min": 1856446464.0,
+          "max": 1856446464.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "monoUsedBytes": {
+          "n": 30,
+          "median": 95471616.0,
+          "noise_band_mad": 9440058.1632,
+          "min": 86011904.0,
+          "max": 110690304.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "monoHeapBytes": {
+          "n": 30,
+          "median": 147062784.0,
+          "noise_band_mad": 0.0,
+          "min": 146014208.0,
+          "max": 147062784.0,
+          "unique": 2,
+          "degenerate_distribution": true
+        },
+        "available": {
+          "n": 30,
+          "median": 1.0,
+          "noise_band_mad": 0.0,
+          "min": 1.0,
+          "max": 1.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "cpuFrameTimeMs": {
+          "n": 30,
+          "median": 4.1466,
+          "noise_band_mad": 0.322317,
+          "min": 1.7019,
+          "max": 9.7339,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "gpuFrameTimeMs": {
+          "n": 30,
+          "median": 1.0895,
+          "noise_band_mad": 0.015182,
+          "min": 1.0516,
+          "max": 1.153,
+          "unique": 25,
+          "degenerate_distribution": false
+        },
+        "cpuMainThreadFrameTimeMs": {
+          "n": 30,
+          "median": 0.5906,
+          "noise_band_mad": 0.046035,
+          "min": 0.5479,
+          "max": 5.4899,
+          "unique": 29,
+          "degenerate_distribution": false
+        }
+      },
+      "A2_stats": {
+        "gc_alloc_per_frame": {
+          "n": 7862,
+          "median": 16762.0,
+          "noise_band_mad": 0.0,
+          "min": 16762.0,
+          "max": 3129656.0,
+          "unique": 178,
+          "degenerate_distribution": true
+        },
+        "total_used_per_frame": {
+          "n": 7862,
+          "median": 1206346846.0,
+          "noise_band_mad": 9157545.768,
+          "min": 1192010996.0,
+          "max": 1222917184.0,
+          "unique": 7862,
+          "degenerate_distribution": false
+        },
+        "animator_process_animations_ns": {
+          "n": 7862,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "animator_process_graph_ns": {
+          "n": 7862,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        }
+      },
+      "scene_guid_hash": "27baa5bbbb90"
+    },
+    "F-ANIM-01": {
+      "fixture": "F-ANIM-01",
+      "scene": "Assets/UpiFixtures/Scenes/Scene_F-ANIM-01.unity",
+      "protocol": {
+        "warmup_samples": 8,
+        "window_samples": 30,
+        "poll_rate": 1.0,
+        "data_tier": "A+A2",
+        "editor_mode": "gui",
+        "n_runs": 3
+      },
+      "A_polluted_by_cli": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 698412877.5,
+          "noise_band_mad": 143141.3235,
+          "min": 698283052.0,
+          "max": 698809604.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A_stats": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 698412877.5,
+          "noise_band_mad": 143141.3235,
+          "min": 698283052.0,
+          "max": 698809604.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "totalReservedBytes": {
+          "n": 30,
+          "median": 1856446464.0,
+          "noise_band_mad": 0.0,
+          "min": 1856446464.0,
+          "max": 1856446464.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "monoUsedBytes": {
+          "n": 30,
+          "median": 97681408.0,
+          "noise_band_mad": 6670893.4656,
+          "min": 85106688.0,
+          "max": 110190592.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "monoHeapBytes": {
+          "n": 30,
+          "median": 147062784.0,
+          "noise_band_mad": 0.0,
+          "min": 147062784.0,
+          "max": 147062784.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "available": {
+          "n": 30,
+          "median": 1.0,
+          "noise_band_mad": 0.0,
+          "min": 1.0,
+          "max": 1.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "cpuFrameTimeMs": {
+          "n": 30,
+          "median": 4.0397,
+          "noise_band_mad": 0.607273,
+          "min": 2.046,
+          "max": 5.0402,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "gpuFrameTimeMs": {
+          "n": 30,
+          "median": 1.0854,
+          "noise_band_mad": 0.022014,
+          "min": 1.0455,
+          "max": 1.1172,
+          "unique": 22,
+          "degenerate_distribution": false
+        },
+        "cpuMainThreadFrameTimeMs": {
+          "n": 30,
+          "median": 0.9359,
+          "noise_band_mad": 0.047221,
+          "min": 0.8545,
+          "max": 1.0698,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A2_stats": {
+        "gc_alloc_per_frame": {
+          "n": 7735,
+          "median": 16762.0,
+          "noise_band_mad": 0.0,
+          "min": 16762.0,
+          "max": 2855153.0,
+          "unique": 178,
+          "degenerate_distribution": true
+        },
+        "total_used_per_frame": {
+          "n": 7735,
+          "median": 1207889917.0,
+          "noise_band_mad": 6255968.5818,
+          "min": 1192100504.0,
+          "max": 1224671080.0,
+          "unique": 7735,
+          "degenerate_distribution": false
+        },
+        "animator_process_animations_ns": {
+          "n": 7735,
+          "median": 354200.0,
+          "noise_band_mad": 28021.14,
+          "min": 164100.0,
+          "max": 2262600.0,
+          "unique": 1513,
+          "degenerate_distribution": false
+        },
+        "animator_process_graph_ns": {
+          "n": 7735,
+          "median": 396400.0,
+          "noise_band_mad": 31579.38,
+          "min": 217400.0,
+          "max": 2014400.0,
+          "unique": 1698,
+          "degenerate_distribution": false
+        }
+      },
+      "scene_guid_hash": "27baa5bbbb90"
+    },
+    "F-LOAD-01": {
+      "fixture": "F-LOAD-01",
+      "scene": "Assets/UpiFixtures/Scenes/Scene_F-LOAD-01.unity",
+      "protocol": {
+        "warmup_samples": 8,
+        "window_samples": 30,
+        "poll_rate": 1.0,
+        "data_tier": "A+A2",
+        "editor_mode": "gui",
+        "n_runs": 3
+      },
+      "A_polluted_by_cli": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 776788023.5,
+          "noise_band_mad": 216656.0445,
+          "min": 776611118.0,
+          "max": 777104164.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A_stats": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 776788023.5,
+          "noise_band_mad": 216656.0445,
+          "min": 776611118.0,
+          "max": 777104164.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "totalReservedBytes": {
+          "n": 30,
+          "median": 1856446464.0,
+          "noise_band_mad": 0.0,
+          "min": 1856446464.0,
+          "max": 1856446464.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "monoUsedBytes": {
+          "n": 30,
+          "median": 112582656.0,
+          "noise_band_mad": 10111094.784,
+          "min": 93995008.0,
+          "max": 127102976.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "monoHeapBytes": {
+          "n": 30,
+          "median": 147062784.0,
+          "noise_band_mad": 0.0,
+          "min": 147062784.0,
+          "max": 147062784.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "available": {
+          "n": 30,
+          "median": 1.0,
+          "noise_band_mad": 0.0,
+          "min": 1.0,
+          "max": 1.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "cpuFrameTimeMs": {
+          "n": 30,
+          "median": 4.0308,
+          "noise_band_mad": 0.327136,
+          "min": 1.7222,
+          "max": 11.8056,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "gpuFrameTimeMs": {
+          "n": 30,
+          "median": 1.0537,
+          "noise_band_mad": 0.019736,
+          "min": 1.0035,
+          "max": 2.2774,
+          "unique": 23,
+          "degenerate_distribution": false
+        },
+        "cpuMainThreadFrameTimeMs": {
+          "n": 30,
+          "median": 0.5842,
+          "noise_band_mad": 0.030171,
+          "min": 0.5337,
+          "max": 0.728,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A2_stats": {
+        "gc_alloc_per_frame": {
+          "n": 7791,
+          "median": 16762.0,
+          "noise_band_mad": 0.0,
+          "min": 16762.0,
+          "max": 2850005.0,
+          "unique": 189,
+          "degenerate_distribution": true
+        },
+        "total_used_per_frame": {
+          "n": 7791,
+          "median": 1301911183.0,
+          "noise_band_mad": 9431918.6892,
+          "min": 1278447902.0,
+          "max": 1320657482.0,
+          "unique": 7790,
+          "degenerate_distribution": false
+        },
+        "animator_process_animations_ns": {
+          "n": 7791,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "animator_process_graph_ns": {
+          "n": 7791,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        }
+      },
+      "scene_guid_hash": "27baa5bbbb90"
+    },
+    "CLEAN": {
+      "fixture": "CLEAN",
+      "scene": "Assets/UpiFixtures/Scenes/Scene_CLEAN.unity",
+      "protocol": {
+        "warmup_samples": 8,
+        "window_samples": 30,
+        "poll_rate": 1.0,
+        "data_tier": "A+A2",
+        "editor_mode": "gui",
+        "n_runs": 3
+      },
+      "A_polluted_by_cli": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 695465355.5,
+          "noise_band_mad": 119031.2823,
+          "min": 695359791.0,
+          "max": 695712124.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        }
+      },
+      "A_stats": {
+        "drawCalls": {
+          "n": 30,
+          "median": 47.0,
+          "noise_band_mad": 0.0,
+          "min": 47.0,
+          "max": 47.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "batches": {
+          "n": 30,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "setPassCalls": {
+          "n": 30,
+          "median": 9.0,
+          "noise_band_mad": 0.0,
+          "min": 9.0,
+          "max": 9.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "triangles": {
+          "n": 30,
+          "median": 2166.0,
+          "noise_band_mad": 0.0,
+          "min": 2166.0,
+          "max": 2166.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "vertices": {
+          "n": 30,
+          "median": 6018.0,
+          "noise_band_mad": 0.0,
+          "min": 6018.0,
+          "max": 6018.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "totalAllocatedBytes": {
+          "n": 30,
+          "median": 695465355.5,
+          "noise_band_mad": 119031.2823,
+          "min": 695359791.0,
+          "max": 695712124.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "totalReservedBytes": {
+          "n": 30,
+          "median": 1856446464.0,
+          "noise_band_mad": 0.0,
+          "min": 1856446464.0,
+          "max": 1856446464.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "monoUsedBytes": {
+          "n": 30,
+          "median": 94216192.0,
+          "noise_band_mad": 5629420.3392,
+          "min": 84205568.0,
+          "max": 112201728.0,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "monoHeapBytes": {
+          "n": 30,
+          "median": 147062784.0,
+          "noise_band_mad": 0.0,
+          "min": 147062784.0,
+          "max": 147062784.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "available": {
+          "n": 30,
+          "median": 1.0,
+          "noise_band_mad": 0.0,
+          "min": 1.0,
+          "max": 1.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "cpuFrameTimeMs": {
+          "n": 30,
+          "median": 3.8537,
+          "noise_band_mad": 0.304081,
+          "min": 1.6492,
+          "max": 5.1661,
+          "unique": 30,
+          "degenerate_distribution": false
+        },
+        "gpuFrameTimeMs": {
+          "n": 30,
+          "median": 1.0706,
+          "noise_band_mad": 0.024291,
+          "min": 1.0394,
+          "max": 2.3368,
+          "unique": 25,
+          "degenerate_distribution": false
+        },
+        "cpuMainThreadFrameTimeMs": {
+          "n": 30,
+          "median": 0.5903,
+          "noise_band_mad": 0.044478,
+          "min": 0.532,
+          "max": 0.7001,
+          "unique": 29,
+          "degenerate_distribution": false
+        }
+      },
+      "A2_stats": {
+        "gc_alloc_per_frame": {
+          "n": 7817,
+          "median": 16762.0,
+          "noise_band_mad": 0.0,
+          "min": 16762.0,
+          "max": 3375808.0,
+          "unique": 183,
+          "degenerate_distribution": true
+        },
+        "total_used_per_frame": {
+          "n": 7817,
+          "median": 1202861640.0,
+          "noise_band_mad": 7290913.8204,
+          "min": 1188498555.0,
+          "max": 1222252132.0,
+          "unique": 7813,
+          "degenerate_distribution": false
+        },
+        "animator_process_animations_ns": {
+          "n": 7817,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "animator_process_graph_ns": {
+          "n": 7817,
+          "median": 0.0,
+          "noise_band_mad": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        }
+      },
+      "scene_guid_hash": "f31d3d0c3e98"
+    }
+  }
+}

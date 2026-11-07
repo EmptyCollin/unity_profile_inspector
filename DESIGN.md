@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.9
+# DESIGN.md — 自动化性能优化管线（最小集）v0.10
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -10,6 +10,7 @@
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
 > v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
+> v0.10 变更：M1 完成——双源基线（A轮询+A2逐帧含动画管线 marker）、CLEAN 统一基底、阈值全量来自标定（缺项即中止）、四链路检出 4/4；实测教训"指标必须贴机制"入 §12
 > v0.9 变更：实验4 定论——**双源采集架构定型**（渲染计数唯一通路=1Hz 轮询；GC/内存=按帧注入采样 handle 构造，实测真值；离线 .data 补 marker 时间线）；档位重编号 A/A2/A3；§2.2.1 增事实 7/8
 > v0.8 变更：**A 档采集通路更换**——注入式 `ProfilerRecorder` 取不到渲染读数（构造成功但恒为 0），主力改为轮询内置 `diagnostics get_performance`（~1.05 次/秒 ⇒ 秒级抽样，统计口径帧→秒并新增 `poll_rate`）；§2.2.1 扩为六条；新增方法学陷阱（静止场景噪声带退化 ⇒ `k·σ` 失效）作为 M1 交付判据；幂等判据改用心跳文件新鲜度
 
@@ -522,6 +523,9 @@ trace: run_id
 | LangChain 依赖 | dry-run 解析通过：`langchain-1.4.9`、`langgraph-1.2.20`、`langchain-openai-1.7.4`、`openai-3.46.0`，纯 v2 pydantic 路径 | ⚠️ 已知坑：**pydantic v1 模型在 3.14 上跑不起来**（上游 issue #34441）。本项目所有模型一律 pydantic v2；若引入任何老三方包携带 pydantic v1，视为阻塞问题 |
 | 真机 | 无 | ⇒ §9 边界声明 |
 | 实验4：recorder 体系边界 | 枚举 5023 个可用 recorder：`GC Allocated In Frame`（类目=Memory）存在且 handle 构造实测读到 166KB/508KB 每帧真值；`Draw Calls/SetPass/Batches` 精确匹配**不存在**；不存在名称的构造静默返回 0 不抛异常 | 双源定型依据（§2.2.1 事实 7/8）；解析层必须把"静默 0"与"-1 哨兵"当非法值拒绝 |
+| M1 基线标定 | tuning=F-CPU-01/F-GPU-01，holdout=F-ANIM-01/F-LOAD-01，+CLEAN 统一基底（20 共享材质立方体+轨道相机）；检出 4/4，CLEAN 对照自身零检出；阈值全量来自标定（4/4 应用，缺项即中止） | 检测端硬约束：`threshold_source != noise_calibration` 构造即拒（已验证负例拦截） |
+| M1 指标贴机制教训 | F-ANIM-01 用 `cpuMainThreadFrameTimeMs`（整帧 4ms 摊薄，delta 0.27ms<地板）两轮未检出；换 `Animator.ProcessAnimations`（A2 逐帧，实测 F-ANIM-01 med=354µs vs clean≈0）立即检出 | 检测器指标必须直接量机制本身，"帧时被睡眠摊薄"是秒级/整帧指标的通病；标定表与检测器指标需全量对齐（否则漏标=未覆盖） |
+| M1 缺陷量级修正 | F-CPU-01 4×100 skills（+68.5KB/帧=5.1×）；F-GPU-01 40 实例化材质（47→124 draw call=2.6×）；F-ANIM-01 128 单元；F-LOAD-01 400×64KB 同步加载+16MB 常驻（+77.5MB 峰值=1.12×）；targetFrameRate=-1 解除 vsync 锁死 | clean 与缺陷场景唯一差异=缺陷组件本身，drawCalls/分配差才可归因 |
 | 实验4：离线 .data 解析通路 | `ProfilerDriver.LoadProfile` + `GetCounterValuesBatch` 经编辑器会话可解析（120 帧实测，Memory/GC 列真值、渲染列 -1）；Profile Analyzer 的 `Load(.data)` 与 AnalysisDataSource 反射均不可用 | A3 档成立但覆盖窄；-1=counter 不存在的哨兵 |
 | 服务商模型列表 | 2026-11-07 实测 `GET /models` 返回 2 项：`deepseek-flash`、`deepseek-v4-pro`（均 `context_window=1048576`、`max_output_tokens=393216`） | ⚠️ 原拟用的 `deepseekv41flash` 不在列表内，已按实测校正为 `deepseek-flash`。印证 §2.3.4 "model id 必须由列表回填、禁止手填猜测值"这条规定的必要性 |
 | 连通性测试（开发通道） | 四步全通过：`list_models` / `minimal_chat` / `tool_call_smoke` / `json_mode_smoke`，纪录落 `knowledge/llm_connectivity.json`（`channel: dev`，不含凭据） | tool calling 与 json mode **实测可用**，结构化输出契约（AGENTS I7）成立 |
