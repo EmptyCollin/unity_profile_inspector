@@ -1,0 +1,254 @@
+{
+  "started": "2026-11-08T01:21:55",
+  "script": {
+    "seed": 20261108,
+    "dt_num": 1,
+    "dt_den": 60,
+    "ts_millis": 1000,
+    "target_fps": 60,
+    "duration_ms": 120000
+  },
+  "arm": {
+    "at_rel": 100,
+    "stride": 10,
+    "count": 12
+  },
+  "tol": 0.0001,
+  "run1": {
+    "scene_open": true,
+    "acks": {
+      "load_ack": "loaded 66b8b064f4e6",
+      "arm_ack": "armed atRel=100 stride=10 n=12 origin=-1 hash=66b8b064f4e6"
+    },
+    "play_start": true,
+    "n_samples": 12,
+    "frames": [
+      {
+        "rel": "100",
+        "frame": "101",
+        "mover": "-0.778591752,2.89720464",
+        "replayT": "1.68333244"
+      },
+      {
+        "rel": "110",
+        "frame": "111",
+        "mover": "-1.29372656,2.70670867",
+        "replayT": "1.849999"
+      },
+      {
+        "rel": "120",
+        "frame": "121",
+        "mover": "-1.76550007,2.42549157",
+        "replayT": "2.01666546"
+      },
+      {
+        "rel": "130",
+        "frame": "131",
+        "mover": "-2.17809963,2.062979",
+        "replayT": "2.183332"
+      },
+      {
+        "rel": "140",
+        "frame": "141",
+        "mover": "-2.51769519,1.63132191",
+        "replayT": "2.34999847"
+      },
+      {
+        "rel": "150",
+        "frame": "151",
+        "mover": "-2.77290535,1.14498758",
+        "replayT": "2.516665"
+      },
+      {
+        "rel": "160",
+        "frame": "161",
+        "mover": "-2.93517566,0.6202768",
+        "replayT": "2.68333149"
+      },
+      {
+        "rel": "170",
+        "frame": "171",
+        "mover": "-2.999068,0.07477627",
+        "replayT": "2.849998"
+      },
+      {
+        "rel": "180",
+        "frame": "181",
+        "mover": "-2.96244025,-0.4732306",
+        "replayT": "3.01666451"
+      },
+      {
+        "rel": "190",
+        "frame": "191",
+        "mover": "-2.82652068,-1.0053761",
+        "replayT": "3.183331"
+      },
+      {
+        "rel": "200",
+        "frame": "201",
+        "mover": "-2.5958643,-1.50382447",
+        "replayT": "3.34999752"
+      },
+      {
+        "rel": "210",
+        "frame": "211",
+        "mover": "-2.27820253,-1.95186925",
+        "replayT": "3.516664"
+      }
+    ]
+  },
+  "run2": {
+    "scene_open": true,
+    "acks": {
+      "load_ack": "loaded 66b8b064f4e6",
+      "arm_ack": "armed atRel=100 stride=10 n=12 origin=-1 hash=66b8b064f4e6"
+    },
+    "play_start": true,
+    "n_samples": 12,
+    "frames": [
+      {
+        "rel": "100",
+        "frame": "101",
+        "mover": "-0.778591752,2.89720464",
+        "replayT": "1.68333244"
+      },
+      {
+        "rel": "110",
+        "frame": "111",
+        "mover": "-1.29372656,2.70670867",
+        "replayT": "1.849999"
+      },
+      {
+        "rel": "120",
+        "frame": "121",
+        "mover": "-1.76550007,2.42549157",
+        "replayT": "2.01666546"
+      },
+      {
+        "rel": "130",
+        "frame": "131",
+        "mover": "-2.17809963,2.062979",
+        "replayT": "2.183332"
+      },
+      {
+        "rel": "140",
+        "frame": "141",
+        "mover": "-2.51769519,1.63132191",
+        "replayT": "2.34999847"
+      },
+      {
+        "rel": "150",
+        "frame": "151",
+        "mover": "-2.77290535,1.14498758",
+        "replayT": "2.516665"
+      },
+      {
+        "rel": "160",
+        "frame": "161",
+        "mover": "-2.93517566,0.6202768",
+        "replayT": "2.68333149"
+      },
+      {
+        "rel": "170",
+        "frame": "171",
+        "mover": "-2.999068,0.07477627",
+        "replayT": "2.849998"
+      },
+      {
+        "rel": "180",
+        "frame": "181",
+        "mover": "-2.96244025,-0.4732306",
+        "replayT": "3.01666451"
+      },
+      {
+        "rel": "190",
+        "frame": "191",
+        "mover": "-2.82652068,-1.0053761",
+        "replayT": "3.183331"
+      },
+      {
+        "rel": "200",
+        "frame": "201",
+        "mover": "-2.5958643,-1.50382447",
+        "replayT": "3.34999752"
+      },
+      {
+        "rel": "210",
+        "frame": "211",
+        "mover": "-2.27820253,-1.95186925",
+        "replayT": "3.516664"
+      }
+    ]
+  },
+  "comparison": {
+    "n1": 12,
+    "n2": 12,
+    "max_pos_diff": 0.0,
+    "max_replayT_diff": 0.0,
+    "rel_equal": true,
+    "pointwise": [
+      {
+        "rel": 100,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 110,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 120,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 130,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 140,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 150,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 160,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 170,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 180,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 190,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 200,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      },
+      {
+        "rel": 210,
+        "pos_diff": 0.0,
+        "replayT_diff": 0.0
+      }
+    ],
+    "verdict": "aligned"
+  },
+  "final": "aligned"
+}
