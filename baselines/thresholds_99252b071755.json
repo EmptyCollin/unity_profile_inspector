@@ -1,0 +1,174 @@
+{
+  "source_baseline": "baseline_215364eedfd08d40.json",
+  "protocol": {
+    "warmup_samples": 8,
+    "window_samples": 30,
+    "poll_rate": 1.0,
+    "data_tier": "A+A2",
+    "editor_mode": "gui",
+    "n_runs": 3
+  },
+  "created_at": "2026-11-07T17:29:27",
+  "thresholds": {
+    "drawCalls": {
+      "metric": "drawCalls",
+      "clean_median": 47.0,
+      "clean_band": 0.0,
+      "min_magnitude": 10,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "batches": {
+      "metric": "batches",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "min_magnitude": 5,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "setPassCalls": {
+      "metric": "setPassCalls",
+      "clean_median": 9.0,
+      "clean_band": 0.0,
+      "min_magnitude": 8,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "triangles": {
+      "metric": "triangles",
+      "clean_median": 2166.0,
+      "clean_band": 0.0,
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "vertices": {
+      "metric": "vertices",
+      "clean_median": 6018.0,
+      "clean_band": 0.0,
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "totalAllocatedBytes": {
+      "metric": "totalAllocatedBytes",
+      "clean_median": 695465355.5,
+      "clean_band": 119031.2823,
+      "min_magnitude": 2000000,
+      "deviation_ratio": 1.0005,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "totalReservedBytes": {
+      "metric": "totalReservedBytes",
+      "clean_median": 1856446464.0,
+      "clean_band": 0.0,
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "monoUsedBytes": {
+      "metric": "monoUsedBytes",
+      "clean_median": 94216192.0,
+      "clean_band": 5629420.3392,
+      "min_magnitude": 33776522.0352,
+      "deviation_ratio": 1.1793,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "monoHeapBytes": {
+      "metric": "monoHeapBytes",
+      "clean_median": 147062784.0,
+      "clean_band": 0.0,
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "available": {
+      "metric": "available",
+      "clean_median": 1.0,
+      "clean_band": 0.0,
+      "min_magnitude": 0.0,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "cpuFrameTimeMs": {
+      "metric": "cpuFrameTimeMs",
+      "clean_median": 3.8537,
+      "clean_band": 0.304081,
+      "min_magnitude": 1.8245,
+      "deviation_ratio": 1.2367,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "gpuFrameTimeMs": {
+      "metric": "gpuFrameTimeMs",
+      "clean_median": 1.0706,
+      "clean_band": 0.024291,
+      "min_magnitude": 0.1457,
+      "deviation_ratio": 1.0681,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "cpuMainThreadFrameTimeMs": {
+      "metric": "cpuMainThreadFrameTimeMs",
+      "clean_median": 0.5903,
+      "clean_band": 0.044478,
+      "min_magnitude": 0.3,
+      "deviation_ratio": 1.226,
+      "k_sigma": 3.0,
+      "degenerate": false,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "gc_alloc_per_frame": {
+      "metric": "gc_alloc_per_frame",
+      "clean_median": 16762.0,
+      "clean_band": 0.0,
+      "min_magnitude": 20000,
+      "deviation_ratio": 1.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "animator_process_animations_ns": {
+      "metric": "animator_process_animations_ns",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "min_magnitude": 50000,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    },
+    "animator_process_graph_ns": {
+      "metric": "animator_process_graph_ns",
+      "clean_median": 0.0,
+      "clean_band": 0.0,
+      "min_magnitude": 50000,
+      "deviation_ratio": 4.0,
+      "k_sigma": 3.0,
+      "degenerate": true,
+      "basis": "clean 6×MAD + 指标地板（§8.1）"
+    }
+  }
+}
