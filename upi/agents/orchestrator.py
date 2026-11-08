@@ -42,6 +42,7 @@ class RunState(TypedDict, total=False):
     edit_plan: Optional[dict]
     snapshot: Optional[dict]
     pre_attempt: Optional[dict]   # fix 节点写入前锁定：before 束路径+改前态 fresh
+    approval_request: Optional[dict]  # 先报后批闸的工单位置（awaiting/rejected 停轮）
     verdict: Optional[dict]
     review_decision: Optional[str]
     review_reason: Optional[str]
@@ -156,7 +157,12 @@ def build_orchestrator(nodes: dict, tracer: Tracer, entry: str = "detect"):
                             {"plan": "plan", "escalate": "escalate"})
     g.add_conditional_edges("plan", _route_or("fix"),
                             {"fix": "fix", "escalate": "escalate"})
-    g.add_edge("fix", "verify")
+    # fix→verify 走条件路由（patrol-once 实测撞出的缺口）：fix 早退
+    # （awaiting_approval / rejected / diff_rejected / compile_failed_rolled_back）
+    # 返回 route=needs_human 时，无条件边照样进 verify → 读不到 pre_attempt
+    # 崩 KeyError，把干净的"待批"终态污染成假错误。
+    g.add_conditional_edges("fix", _route_or("verify"),
+                            {"verify": "verify", "escalate": "escalate"})
     g.add_conditional_edges("verify", _after_verify,
                             {"record": "record", "review": "review",
                              "escalate": "escalate"})

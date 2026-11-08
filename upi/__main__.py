@@ -4,6 +4,7 @@
   detect        水位检测一轮（等价 scripts/m1_detect.py）
   patrol-once   巡检单轮：发作(只读) + 水位(重采)；检出按配置唤起状态机
   monitor       前台周期巡检（Ctrl+C 停止；外部调度器用 patrol-once 拉起）
+  resume        工单批准后续跑（--run <run_id>：从 fix 断点，不重烧采样/归因）
   drill ...     演练两阶段（透传 scripts/m4_drill.py 参数）
 
 设计约定（与 AGENTS 全局不变量对齐）：
@@ -110,6 +111,69 @@ def cmd_monitor(_args=None) -> int:
     return monitor_loop()
 
 
+def cmd_resume(args) -> int:
+    """工单批准后续跑：python -m upi resume --run <run_id>
+
+    巡检进程停在 awaiting_approval 的轮次，人在终端写 decision.json 之后，
+    用本命令从 fix 断点续跑（不重烧 detect 采样与 diagnose 归因积分）。
+    这是批准回流的**独立入口**——不依赖 AI 助手，也不依赖 m4_drill，
+    补上它才算闭环：巡检发现 → 出工单 → 人批 → 自动修复验证 → 留证。
+    """
+    import argparse as _ap
+    ap = _ap.ArgumentParser(prog="upi resume")
+    ap.add_argument("--run", required=True, help="处于待批态的 run_id")
+    ns = ap.parse_args(args)
+    rd = ROOT / "runs" / ns.run
+    if not (rd / "state.json").exists():
+        print("!! 无 state.json，不能续跑:", rd)
+        return 1
+    from upi.agents.nodes import make_nodes
+    from upi.agents.orchestrator import Runner
+    from upi.core.approval import ApprovalStore
+    st = json.loads((rd / "state.json").read_text(encoding="utf-8"))
+    ar = st.get("approval_request")
+    if not ar:
+        # 兜底找回（实测停轮 patrol_20261108_232305 实况）：approval_request
+        # 声明进 RunState 之前的停轮，键被 LangGraph 丢弃，但 request_id 还在
+        # records 的 fix.execute 里——工单文件本身在磁盘上，从那里认。
+        for rec in reversed(st.get("records", [])):
+            rid = ((rec.get("execute") or {}).get("request_id"))
+            if rid and (rd / "approvals" / rid / "request.json").exists():
+                ar = {"md": str(rd / "approvals" / rid / "request.md")}
+                break
+    if not ar:
+        print("!! 该 run 无待批工单记录（approval_request 缺失），不是可续跑的停轮")
+        return 1
+    store = ApprovalStore(rd)
+    rid = Path(ar["md"]).parent.name
+    dec = store.load_decision(rid)
+    if dec is None:
+        print("!! 未找到有效决定:", store._dir(rid) / "decision.json")
+        print("   通道规则：无 decision=未批；approve 缺批准人或批的内容=视同未批。")
+        return 1
+    if dec.decision != "approve":
+        print(f"   决定为 {dec.decision}（{dec.approver}）——按拒绝路径收尾，不续跑。")
+        return 0
+    print(f"   批准有效：{dec.approver}：{dec.note[:80]}")
+    runner = Runner(ns.run, st["fixture"])   # 同 run_id：trace/state 续写续读
+    nodes = make_nodes(runner.dir, live_llm=False, approval_note="")
+    runner.resume(nodes, entry="fix")        # fix 节点重读 decision.json，幂等
+    st2 = json.loads((runner.dir / "state.json").read_text(encoding="utf-8"))
+    v = st2.get("verdict") or {}
+    print("   route:", st2.get("route"), "| attempts:", st2.get("attempts"))
+    if v:
+        t = v.get("target", {})
+        print(f"   目标 {t.get('metric')}: {t.get('before')} -> {t.get('after')}"
+              f" Δ{t.get('delta')} significant={t.get('significant')}")
+        print("   判定:", v.get("status"))
+        reg = [g["metric"] for g in v.get("guards", []) if g.get("regressed")]
+        print("   守护劣化:", reg or "无")
+    else:
+        print("   未走到 verdict。error:", str(st2.get("error"))[:200])
+    print("   状态:", runner.dir / "state.json", "| trace:", runner.tracer.path)
+    return 0
+
+
 def cmd_drill(args) -> int:
     import subprocess
     p = subprocess.run([sys.executable, str(ROOT / "scripts" / "m4_drill.py"),
@@ -119,7 +183,7 @@ def cmd_drill(args) -> int:
 
 _CMDS = {"status": cmd_status, "detect": cmd_detect,
          "patrol-once": cmd_patrol_once, "monitor": cmd_monitor,
-         "drill": cmd_drill}
+         "resume": cmd_resume, "drill": cmd_drill}
 
 
 def main(argv: Optional[list] = None) -> int:

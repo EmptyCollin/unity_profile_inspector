@@ -190,6 +190,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         else:
             hs = _offline_hypotheses(cands, issue)
             tokens = 0
+        # 预期效应回填（实测工单暴露：expected_effect 空 → 工单第 3 件套
+        # 只能写"请拒批并要求补证"）。数值不是新估计——min_delta 直接搬运
+        # 标定绝对阈（I1：来自标定工具，且 G1 判定本就以它为零改善线，
+        # "修复至少要压下 k·σ/min_magnitude 才算数"是判据的重述不是承诺）。
+        exp = {"metric": det.metric, "direction": "down",
+               "min_delta": det.thresholds.min_magnitude,
+               "source": f"calibration:{det.calibration_file or 'inline'}",
+               "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"}
+        hs = [h.model_copy(update={"expected_effect": exp}) for h in hs]
         from upi.core.attribution import route as attr_route
         decision = attr_route(hs)
         if decision == "needs_human":
