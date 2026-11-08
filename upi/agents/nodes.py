@@ -294,6 +294,18 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         v = st.get("verdict")
         if v:
             final["verdict_status"] = v["status"] if isinstance(v, dict) else v.status
+
+        # 未验证写入不得留在工程里（路由测试实测撞出的缺口）：预算拦停发生在
+        # fix 写入**之后**、verify 之前——夹具会停在修复态，既污染后续检出
+        # （检测原料没了），也让"失败样本"带着未验证改动入库。判据见纯函数。
+        recs = st.get("records", [])
+        if _needs_final_rollback(recs, final.get("verdict_status")):
+            try:
+                rb = snapmod.rollback(_snap_from(st), PROJECT, SCENE)
+                final["final_rollback"] = rb
+            except Exception as e:  # noqa: BLE001 — 回滚失败必须可见，不静默
+                final["final_rollback"] = {"error": str(e)[:200]}
+
         (run_dir / "runreport.json").write_text(
             json.dumps(final, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8")
@@ -356,3 +368,25 @@ def _pattern_id(issue_d: dict, top: dict) -> str:
 def _snap_from(st: dict):
     from upi.tooling.snapshot import Snapshot
     return Snapshot(**st["snapshot"])
+
+
+def _needs_final_rollback(records: list, verdict_status) -> bool:
+    """出口收尾判据（纯函数，可离线单测——escalate 直接调 rollback 不可测）。
+
+    True 的条件：最后一次 kind=fix 的 execute 已 applied，其后没有任何
+    rollback（review 撤回时已回滚），且整轮没拿到 resolved。
+    - resolved ⇒ False：修复被验证有效，改动要保留（不回滚）。
+    - 最后 fix 未 applied（diff 被拒/编译失败已回滚）⇒ False：本就没脏写。
+    - review 已 rollback_and_replan 回滚过 ⇒ False：不重复回滚。
+    """
+    if verdict_status == "resolved":
+        return False
+    last_fix = next((i for i in range(len(records) - 1, -1, -1)
+                     if records[i].get("kind") == "fix"), None)
+    if last_fix is None:
+        return False
+    if records[last_fix].get("execute", {}).get("status") != "applied":
+        return False
+    if any(r.get("rollback") for r in records[last_fix + 1:]):
+        return False
+    return True
