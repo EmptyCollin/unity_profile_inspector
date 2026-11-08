@@ -75,33 +75,41 @@ def wait_ready(max_wait: int = 180) -> bool:
     return False
 
 
-def sync_editor_code(max_wait: int = 200) -> bool:
+def sync_editor_code(max_wait: int = 240) -> tuple[bool, str]:
     """采前同步编辑器内存程序集与磁盘代码（干净链路实测撞出的状态泄漏）。
 
     成因：git reset 类文件恢复不触发资产导入——编辑器内存里仍跑回滚前的
     程序集；下一轮采样测的是"盘上没有、内存里有"的代码（00:40 轮 F-CPU-01
     采到修复态 9401 B/帧 ⇒ 缺陷漏检，而盘上文件明明是缺陷态）。
     Refresh 检测到磁盘变化会触发重编译与域重载；无变化则是无害空操作。
-    编译失败或超时 ⇒ 返回 False，调用方必须拒采——拿到脏数据比采不到更糟。
+
+    返回 (ok, why)：失败必须带原因——07:17 轮实测撞出"笼统 False 无法区分
+    编辑器忙碌与真不一致"，拒采是对的，但拒得说不清就是新的认知债。
+    编译失败或超时 ⇒ ok=False，调用方必须拒采（脏数据比采不到更糟）。
     """
     r = cmd("script eval", "--code",
             'UnityEditor.AssetDatabase.Refresh(); return "r";', timeout=60)
     if not r.get("success"):
-        return False
-    time.sleep(6)
-    if not wait_ready(max_wait=30):
-        return False
+        return False, f"Refresh 未送达：{str(r.get('errors'))[:120]}"
+    # 导入/域重载期间 editor status 会 busy——按 max_wait 整体轮询，
+    # 不给独立的 30s 硬窗（实测误拒过一轮）
     deadline = time.time() + max_wait
+    last: dict = {}
     while time.time() < deadline:
-        rs = cmd("script recompile_status", timeout=60)
-        res = (rs.get("data") or {}).get("result") or {}
-        if res.get("failed"):
-            print("!! 采前同步：编辑器重编译失败（盘上代码编译不过）——拒采")
-            return False
-        if not res.get("compiling") and "failed" in res:
-            return True
         time.sleep(6)
-    return False
+        rs = cmd("script recompile_status", timeout=60)
+        last = (rs.get("data") or {}).get("result") or {}
+        if last.get("failed"):
+            errs = [str(e) for e in (last.get("errors") or [])][:2]
+            return False, f"编辑器重编译失败（盘上代码编译不过）：{errs}"
+        st = cmd("editor status").get("data", {}).get("result") or {}
+        settled = (not last.get("compiling") and "failed" in last
+                   and st.get("status") == "ready"
+                   and not st.get("domainReloadInProgress"))
+        if settled:
+            return True, ""
+    return False, (f"同步超时（{max_wait}s）未达 settled："
+                   f"recompile={str(last)[:120]}")
 
 
 def robust(series: list[float]) -> dict:
@@ -230,8 +238,9 @@ def main() -> int:
     # 采前同步闸（00:40 轮实测漏检的根治点）：编辑器内存程序集必须与磁盘代码
     # 一致才能采。回滚/手改文件不触发资产导入，脏内存会让采样测到"盘上不存在"
     # 的代码——这种数据比采不到更有害（漏检伪装成正常）。
-    if not sync_editor_code():
-        print("!! 采前同步失败：编辑器代码态与磁盘不一致或未就绪——本轮拒采")
+    ok_sync, why_sync = sync_editor_code()
+    if not ok_sync:
+        print(f"!! 采前同步未通过——本轮拒采：{why_sync}")
         return 2
 
     fixtures = args.fixtures or (ALL_FIXTURES if FULL_SESSION else ["F-CPU-01", "F-GPU-01"])
