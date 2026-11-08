@@ -141,12 +141,16 @@ def _after_review(st: RunState) -> str:
     return "escalate"
 
 
-def build_orchestrator(nodes: dict, tracer: Tracer):
-    """nodes: 节点名→业务函数 (RunState)->增量dict。图拓扑固定（§1.1）。"""
+def build_orchestrator(nodes: dict, tracer: Tracer, entry: str = "detect"):
+    """nodes: 节点名→业务函数 (RunState)->增量dict。图拓扑固定（§1.1）。
+
+    entry 可改：人工批准回路的"两阶段跑"需要在批准后从 fix 续跑——
+    前序节点（detect/diagnose/plan）的产物已由 state.json 落盘，重跑等于
+    白烧一遍采样与归因积分。入口换掉即可复用同一张图，不改判定逻辑。"""
     g = StateGraph(RunState)
     for name, fn in nodes.items():
         g.add_node(name, _wrap(name, fn, tracer))
-    g.set_entry_point("detect")
+    g.set_entry_point(entry)
     g.add_edge("detect", "diagnose")
     g.add_conditional_edges("diagnose", _route_or("plan"),
                             {"plan": "plan", "escalate": "escalate"})
@@ -193,9 +197,22 @@ class Runner:
                        ensure_ascii=False, indent=2, default=str),
             encoding="utf-8")
 
-    def run(self, nodes: dict, initial: Optional[RunState] = None):
-        app = build_orchestrator(nodes, self.tracer)
+    def run(self, nodes: dict, initial: Optional[RunState] = None,
+            entry: str = "detect"):
+        app = build_orchestrator(nodes, self.tracer, entry=entry)
         st = initial or self.initial_state()
         final = app.invoke(st)
         self.persist(final)
         return final
+
+    def resume(self, nodes: dict, entry: str = "fix") -> RunState:
+        """从 state.json 续跑（人工批准两阶段用）。
+
+        不重跑前序节点：detect 的采样、diagnose 的归因积分已经花过，
+        重跑等于白烧（I13）。预算计数（attempts/spent/records）本来就在
+        state.json 里，续跑接着算，G11 不会因为"换了进程"而重置。"""
+        fp = self.dir / "state.json"
+        if not fp.exists():
+            raise RuntimeError(f"无 state.json，不能续跑：{fp}")
+        st = json.loads(fp.read_text(encoding="utf-8"))
+        return self.run(nodes, initial=st, entry=entry)
