@@ -57,8 +57,9 @@ def synth_bundle(clean_hi=False, cpu_defect=False):
         cpu = dict(clean)
         cpu["gc"] = [90000.0] * 4
     fx = {"CLEAN": win_metrics(clean)}
-    if cpu_defect:
-        fx["F-CPU-01"] = win_metrics(cpu)
+    # 请求采样的夹具必须恒在束里（缺采=盲区，正是 B7 闸要抓的形状）：
+    # 上一版只在缺陷时放 F-CPU-01，正常束缺它会被闸拦下——测试自己先撞。
+    fx["F-CPU-01"] = win_metrics(cpu)
     return {"session": "full", "windows_target": 4,
             "protocol": {"warmup": 8, "window_polls": 20, "poll_interval_s": 1.0},
             "fixtures": fx}
@@ -176,6 +177,25 @@ def main():
         sp.run = real_run
     check("正常束 ⇒ 零检出", not r["findings"] and not r["blindspot"])
 
+    # 静默假象闸：缺陷夹具窗口为空（采集失败的束形状）⇒ 盲区，不冒充零检出
+    def make_fake_run_broken(*a, **k):
+        doc = synth_bundle()
+        doc["fixtures"]["F-CPU-01"] = {"windows": [], "error": "编辑器未就绪"}
+        (TMP / "w4").mkdir(parents=True, exist_ok=True)
+        (TMP / "w4" / "multiwin_full.json").write_text(
+            json.dumps(doc), encoding="utf-8")
+        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})
+    _saved = sp.run
+    sp.run = lambda *a, **k: make_fake_run_broken()
+    try:
+        rb = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
+                                 "windows": 4, "waterline_timeout_s": 5},
+                                TMP / "w4")
+    finally:
+        sp.run = _saved
+    check("夹具 0 窗口的束 ⇒ 盲区（采集失败≠未检出，禁产静默轮）",
+          rb["blindspot"] and "有效前提" in rb["blindspot"] and not rb["findings"])
+
     print("== ③ patrol_once：留痕 / 唤起 / 冷却 / 排队 ==")
     woken = []
 
@@ -216,6 +236,13 @@ def main():
     lines = P.PATROL_LOG.read_text(encoding="utf-8").splitlines()
     check("静默轮也落 patrol_runs.jsonl（B1：跑了≠睡着）",
           rec3["quiet"] and len(lines) == 3)
+    # 盲区轮不算静默（B7：采不到 ≠ 没有异常）
+    P.patrol_waterline = lambda c, w: {
+        "channel": "waterline", "findings": [],
+        "blindspot": "采样有效前提不成立：F-CPU-01 采集失败"}
+    rec4 = P.patrol_once(cfgm)
+    check("盲区轮不产静默结论（未评估≠零异常）",
+          rec4["quiet"] is False and bool(rec4["blindspots"]))
     P.wake_state_machine, P.patrol_episode, P.patrol_waterline = \
         real_wake, real_ep, real_wl
 
