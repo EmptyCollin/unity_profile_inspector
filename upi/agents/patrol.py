@@ -20,6 +20,9 @@
      →又一张单，是无意义的成本与噪声；
   B6 预算护栏随每轮状态机走（G11），连续失败 ≥ max_consecutive_failures
      退出非零——巡检挂了要被知道，不静默转圈。
+  B7 采集失败 ≠ 未检出：水通路有"采样有效前提闸"（请求采样的检测器夹具
+     判定指标必须在统计里，缺一整轮按盲区记）；盲区轮不产"静默"结论。
+     失焦轮实测撞出：五个夹具全部采集失败，旧版却记成"零检出无盲区"。
 
 调度形态：`python -m upi monitor` 前台循环（日志到 stdout + patrol_runs.jsonl），
 或 `python -m upi patrol-once` 单轮（外部调度器拉起：Windows 任务计划/CI）。
@@ -162,6 +165,27 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         out["blindspot"] = "标定未覆盖全部水位检测器（§8.1 全量覆盖）"
         return out
     clean = fixs.get("CLEAN")
+
+    # ── 采样有效前提闸（实测失焦轮撞出的失效模式）：束里夹具无窗口/判定
+    # 指标缺失 = 采集失败。判据链对空 stats 只会静默跳过——巡检照抄"零检出"
+    # 就是把"没采到"冒充"没有异常"（I1/I2 在调度层的同型错误）。本轮被请求
+    # 采样的每个水位检测器夹具，其判定指标必须出现在统计里；任一缺失 ⇒
+    # 水通路整轮按盲区记。请求集之外的夹具不算失败（本轮没要它，不覆盖而已）。
+    requested = set(cfg_mon.get("fixtures") or [])
+    raw_fx = mw.get("fixtures", {})
+    missing = []
+    for det in wln:
+        if det.fixture not in requested:
+            continue
+        if det.metric not in (fixs.get(det.fixture) or {}):
+            err = str((raw_fx.get(det.fixture) or {}).get("error", "无窗口数据"))
+            missing.append(f"{det.fixture}({det.metric}): {err[:80]}")
+    if clean is None:
+        missing.append("CLEAN 无有效统计——无对照基线，禁止判定（§8.1）")
+    if missing:
+        out["blindspot"] = "采样有效前提不成立，水通路本轮未评估：" + "；".join(missing)
+        return out
+
     for det in wln:
         fx = fixs.get(det.fixture)
         if fx is None or clean is None:
@@ -255,12 +279,17 @@ def patrol_once(cfg_mon: dict) -> dict:
                                        fx: _now()}})
         except Exception as e:  # noqa: BLE001 — 唤起失败也要留痕且不影响下轮
             wake[fx] = {"woken": False, "error": str(e)[:200]}
+    blind = [x for x in (ep.get("blindspot"), wl.get("blindspot")) if x]
     rec = {"ts": _now(), "episode": {k: ep.get(k) for k in
                                       ("findings", "blindspot", "n_samples",
                                        "n_new_samples")},
            "waterline": {"findings": wl["findings"], "blindspot": wl["blindspot"],
                          "bundle": wl.get("bundle")},
-           "wake": wake, "quiet": not (ep["findings"] or wl["findings"])}
+           "wake": wake,
+           # B7 静默语义收紧：静默=采到了且无异常。任一通路未评估时整轮记
+           # "未评估"而非"静默"——把采集失败写成绿轮是假安心（G20 同源）。
+           "blindspots": blind,
+           "quiet": not (ep["findings"] or wl["findings"]) and not blind}
     with PATROL_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
     return rec
@@ -279,9 +308,10 @@ def monitor_loop() -> int:
         try:
             rec = patrol_once(mon.model_dump())
             fails = 0
-            tag = "静默" if rec["quiet"] else f"检出 {len(rec['episode']['findings'])+len(rec['waterline']['findings'])} 条"
-            blind = [x for x in (rec["episode"].get("blindspot"),
-                                 rec["waterline"].get("blindspot")) if x]
+            n_f = len(rec["episode"]["findings"]) + len(rec["waterline"]["findings"])
+            blind = rec.get("blindspots") or []
+            tag = ("静默" if rec["quiet"] else
+                   f"检出 {n_f} 条" if n_f else "未评估（盲区轮，不算静默）")
             print(f"[{rec['ts']}] {tag}" + (f"（盲区 {len(blind)} 项）" if blind else ""))
             for b in blind:
                 print("   -", b[:150])
