@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from upi.core.conflicts import run_pair, run_snapshot                    # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
 from upi.core.models import Evidence, Fingerprint, Issue, IssueSignature  # noqa: E402
 from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
@@ -244,6 +245,26 @@ def main() -> int:
                 detail["magnitude"] = issue.magnitude
             results[fid] = detail
 
+        # T7 矛盾规则表（P4，AGENTS §1.5）：跨指标组合的**机制签名**。
+        # 边界（本轮口径修正）：不用于"判数据可信"——CLEAN 自比自时
+        # totalAllocated 差 ~240KB 是环境噪声，超 S3 的 10MB 绝对阈会误报，
+        # 而 S3 本意要抓的是"结构性大分配但无逐帧分配"。因此水位层
+        # 输出只作归因方向裁定（配合检出结果互证），不作 bundle 可疑标记；
+        # "数据可信"职责已由 instrument_distorted（三层开销）与 G17（分布退化）承担。
+        conflicts_all = {}
+        for fid, st in fixs.items():
+            if fid == "CLEAN":
+                continue
+            m = {k: v["median"] for k, v in st.items()}
+            m.update({f"baseline_{k}": v["median"] for k, v in clean_stats.items()})
+            cs = run_snapshot(m)
+            # pair 口径：CLEAN=改前、fixture=改后 —— 水位层的组合签名
+            # （F-GPU-01 命中 P1 = 碎描签名与 drawCalls 检出互证）
+            cs += run_pair({k: v["median"] for k, v in clean_stats.items()},
+                           {k: v["median"] for k, v in st.items()})
+            if cs:
+                conflicts_all[fid] = [c.model_dump() for c in cs]
+
         # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
         fp_check = {}
         for det in DEFAULT_REGISTRY:
@@ -256,6 +277,7 @@ def main() -> int:
                "protocol_fingerprint": fp_data.model_dump(),   # G7：本轮判定挂靠的指纹
                "replayable": fp_data.replay_script_hash != "none-v0",  # T2 未建 → False，如实标注
                "band_basis": "between_windows", "fp_selfcheck": fp_check,
+               "conflicts": conflicts_all,
                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
         (RUNS / run_id).mkdir(parents=True, exist_ok=True)
         det_fp = RUNS / run_id / "detection.json"
@@ -272,6 +294,9 @@ def main() -> int:
               f"delta={r.get('delta','')} ratio={r.get('deviation_ratio','')} n窗口={r.get('window_n','')} {r.get('reason','')}")
     print(f"检出 {detected}/{len(results)}；CLEAN 自检误报 {len(fp_hits)}/{len(fp_check)}"
           + (f" !!{fp_hits}" if fp_hits else "（FP=0，下界成立）"))
+    for fid, cs in conflicts_all.items():
+        for c in cs:
+            print(f"  [矛盾] {fid:10s} {c['rule_id']}: {c['observed'][:88]}")
     print("trace:", tracer.path)
     return 0
 
