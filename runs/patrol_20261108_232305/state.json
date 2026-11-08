@@ -1,0 +1,269 @@
+{
+  "run_id": "patrol_20261108_232305",
+  "fixture": "F-CPU-01",
+  "quality_tier": "urp-balanced",
+  "budget": {
+    "max_issues": 1,
+    "max_review_rounds": 1,
+    "max_attempts_per_issue": 1,
+    "wallclock_s": 1500,
+    "max_tokens": 60000
+  },
+  "spent": {
+    "wallclock_s": 0.7,
+    "tokens": 0
+  },
+  "findings": [
+    {
+      "kind": "issue",
+      "fixture": "F-CPU-01",
+      "metric": "gc_alloc_per_frame",
+      "magnitude": 68576.0,
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-GPU-01",
+      "metric": "drawCalls",
+      "magnitude": 80.0,
+      "detector": "DET-GPU-BATCHBREAK",
+      "signature": {
+        "dim": "drawCalls",
+        "metric": "drawCalls",
+        "mechanism": "per_renderer_material_instantiation",
+        "threshold": 10.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-ANIM-01",
+      "metric": "animator_process_animations_ns",
+      "magnitude": 361950.0,
+      "detector": "DET-ANIM-PARAMRTT",
+      "signature": {
+        "dim": "animator_process_animations_ns",
+        "metric": "animator_process_animations_ns",
+        "mechanism": "cross_layer_state_query_per_frame",
+        "threshold": 50000.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-LOAD-01",
+      "metric": "totalAllocatedBytes",
+      "magnitude": 28620830.5,
+      "detector": "DET-LOAD-SYNCPEAK",
+      "signature": {
+        "dim": "totalAllocatedBytes",
+        "metric": "totalAllocatedBytes",
+        "mechanism": "sync_resources_load_in_start",
+        "threshold": 2000000.0,
+        "threshold_source": "noise_calibration"
+      }
+    }
+  ],
+  "issue": {
+    "id": "ISS-F-CPU-01",
+    "fixture": "F-CPU-01",
+    "detector": "DET-CPU-GC-FRAMEALLOC",
+    "metric": "gc_alloc_per_frame",
+    "magnitude": 68576.0,
+    "evidence": {
+      "metric": "gc_alloc_per_frame",
+      "fixture": 76947.0,
+      "clean": 8371.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 68576.0,
+      "deviation_ratio": 9.192,
+      "verdict": "detected",
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 68576.0
+    },
+    "state": "confirmed",
+    "anchor": "per_frame_heap_alloc_in_hot_path"
+  },
+  "hypotheses": [
+    {
+      "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {},
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "热路径每帧新建 Dictionary（可复用+Clear）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:50",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:55"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {},
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "每帧 LINQ 链（枚举器+闭包分配）（机制 anchor: linq_enumerator_closure_per_frame）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:39"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {},
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "每帧 GetComponent 重复查找（可 Awake 缓存）（机制 anchor: repeated_getcomponent_in_update）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {},
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "枚举 ToString+字符串拼接每帧执行（可预生成表）（机制 anchor: enum_tostring_concat_per_frame）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:48"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {},
+      "veto_reasons": []
+    }
+  ],
+  "edit_plan": {
+    "playbook_id": "PB-FULL-REUSE",
+    "diffs": [
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n        }",
+        "replace": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        // 修复（PB-FULL-REUSE）：缓存 + 预生成。语义等价前提——state/level\n        // 在 Awake 后不再被改写（Update 全文无赋值点，已核对），故 ready 筛选、\n        // 排序结果、key 字符串均为常量，可一次预生成。\n        private Rigidbody _body;\n        private CapsuleCollider _col;\n        private List<SkillRuntime> _readyRanked;\n        private string[] _keyByIndex;\n        private readonly Dictionary<int, float> _reusedCooldown = new Dictionary<int, float>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n\n            _body = GetComponent<Rigidbody>();\n            _col = GetComponent<CapsuleCollider>();\n            _readyRanked = _skills.Where(x => x.state == SkillState.Ready)\n                                   .Where(x => x.level > 1)\n                                   .OrderByDescending(x => x.level).ThenBy(x => x.index).ToList();\n            _keyByIndex = new string[skillCount];\n            foreach (var s in _skills)\n                _keyByIndex[s.index] = s.index + \":\" + s.state + \":\"\n                    + (_body != null ? 1 : 0) + (_col != null ? 1 : 0);\n        }",
+        "expect_count": 1,
+        "_why": "缓冲/组件/键 预生成（Awake 扩展）"
+      },
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "            // ①②③④ 全部落在每帧路径上\n            var ready = new List<SkillRuntime>();                 // 每帧分配：List\n            foreach (var s in _skills)\n            {\n                if (s.state == SkillState.Ready) ready.Add(s);\n            }\n\n            var ranked = ready\n                .Where(x => x.level > 1)                          // LINQ 枚举器 + 闭包\n                .OrderByDescending(x => x.level)\n                .ThenBy(x => x.index)\n                .ToList();\n\n            foreach (var s in ranked)\n            {\n                var body = GetComponent<Rigidbody>();             // 每帧 GetComponent\n                var col = GetComponent<CapsuleCollider>();        // 每帧 GetComponent\n                var key = s.index + \":\" + s.state + \":\" + (body != null ? 1 : 0) + (col != null ? 1 : 0); // 枚举 ToString + 字符串拼接\n                s.lastKey = key;\n                var map = new Dictionary<string, int>();          // 每帧分配：Dictionary\n                map[key] = s.level;\n                s.score = map[key];\n            }\n\n            _cooldownMap = new Dictionary<int, float>();          // 每帧分配：Dictionary\n            for (int i = 0; i < _skills.Count; i++)\n                _cooldownMap[i] = Time.time + 0.1f * i;",
+        "replace": "            // 每帧分配清零：\n            foreach (var s in _readyRanked)\n            {\n                var key = _keyByIndex[s.index];\n                s.lastKey = key;\n                s.score = s.level;\n            }\n\n            _reusedCooldown.Clear();\n            for (int i = 0; i < _skills.Count; i++)\n                _reusedCooldown[i] = Time.time + 0.1f * i;\n            _cooldownMap = _reusedCooldown;",
+        "expect_count": 1,
+        "_why": "Update 热路径分配清零"
+      }
+    ],
+    "invariants_assert": [
+      "state/level 仅 Awake 赋值（静态核对）",
+      "map[key]=level;score=map[key] ⇒ score=level 恒等",
+      "_cooldownMap 声明保留（对外语义不破坏），改指向复用缓冲",
+      "P2 语义断言基建 pending（M7）——本条如实标注"
+    ],
+    "side_effect": "none",
+    "touched_assets": [
+      "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs"
+    ],
+    "permission_tier": "blocked"
+  },
+  "snapshot": {
+    "attempt_id": "m4-232307",
+    "git_ref": "upi/attempt-m4-232307",
+    "head_before": "c4f56883695fa7c8a7dd762d54e051b0dd3817aa",
+    "asset_manifest_hash": "8907f81a458d0419",
+    "scene_guid": "filehash:7be81facbec7c6ac",
+    "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+    "created_at": "2026-11-08T23:23:07",
+    "root": "D:\\unity_profile_inspector",
+    "metadata": {}
+  },
+  "verdict": null,
+  "review_decision": null,
+  "review_reason": null,
+  "attempts": 0,
+  "route": "needs_human",
+  "records": [
+    {
+      "kind": "fix",
+      "ts": "232307",
+      "git_ref": "upi/attempt-m4-232307",
+      "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "snapshot": {
+        "attempt_id": "m4-232307",
+        "git_ref": "upi/attempt-m4-232307",
+        "head_before": "c4f56883695fa7c8a7dd762d54e051b0dd3817aa",
+        "asset_manifest_hash": "8907f81a458d0419",
+        "scene_guid": "filehash:7be81facbec7c6ac",
+        "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+        "created_at": "2026-11-08T23:23:07",
+        "root": "D:\\unity_profile_inspector",
+        "metadata": {}
+      },
+      "execute": {
+        "status": "awaiting_approval",
+        "request_id": "APR-eaab522a2f"
+      }
+    }
+  ],
+  "error": "KeyError: 'pre_attempt'"
+}
