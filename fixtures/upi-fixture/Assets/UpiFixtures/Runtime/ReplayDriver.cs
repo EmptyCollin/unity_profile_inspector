@@ -54,6 +54,11 @@ namespace Upi.Fixtures.Drivers
         static int _probeLeft;         // 剩余采样点数
         static int _probeStride = 10;  // 采样间隔（相对帧）
         static float _replayT;         // 帧索引虚拟时基（秒）
+        // 武装门控（第二轮彩排实测教训）：驱动器活着就每帧压 targetFrameRate=60
+        // 等设置，会污染一切非回放采样窗——F-CPU-01 缺陷态的每帧分配被
+        // capped60 形态从 78KB 抬到 183KB，修复效果直接测不出（183→179KB）。
+        // 默认**未武装**（与标定态 uncapped 一致）；load: 显式武装，disarm 解除。
+        static bool _armed;
 
         /// <summary>驱动逻辑读取的回放时基（确定性）。未进 Play 时回退墙钟。</summary>
         public static float ReplayTime { get { return Application.isPlaying ? _replayT : Time.time; } }
@@ -87,6 +92,8 @@ namespace Upi.Fixtures.Drivers
                         _probeStride = p.Length >= 8 ? int.Parse(p[7]) : 10;
                         _probeLeft = p.Length >= 9 ? int.Parse(p[8]) : 12;
                     }
+                    // 第 10 字段=武装标志；文件不存在或字段不足 ⇒ 未武装（默认）
+                    _armed = p.Length >= 10 && p[9] == "1";
                 }
             }
             catch (Exception) { }
@@ -98,7 +105,7 @@ namespace Upi.Fixtures.Drivers
                 + Mathf.RoundToInt(_timeScale * 1000) + ":" + _targetFps + ":"
                 + Mathf.RoundToInt(_durationS * 1000) + ":"
                 + (_probeAtRel < 0 ? "-" : _probeAtRel.ToString()) + ":" + _probeStride
-                + ":" + _probeLeft);
+                + ":" + _probeLeft + ":" + (_armed ? "1" : "0"));
         }
 
         static DateTime _lastCtlT = DateTime.MinValue;
@@ -122,20 +129,27 @@ namespace Upi.Fixtures.Drivers
             int fcn = Time.frameCount;
             if (Application.isPlaying && _origin < 0)
             {
-                // 回放前提=连续出帧。runInBackground 会被每次域重载重置（实测），
-                // 必须在每次进 Play 的第一帧重新压上，否则失焦停帧、探针永不武装。
-                Application.runInBackground = true;
                 LoadPersisted();
                 _origin = fcn;
                 _replayT = 0f;
-                Append(EVENTS, "origin frame=" + fcn + " hash=" + Hash() + " seed=" + _seed);
-                if (_probeAtRel >= 0) _probeNext = fcn + _probeAtRel;
+                // 回放前提=连续出帧。runInBackground 每次域重载被重置（实测），
+                // 但仅**武装回放**才需要压它——未武装时压了会改变非回放窗的
+                // 出帧形态，构成仪器污染（第二轮彩排实测教训）。
+                if (_armed) Application.runInBackground = true;
+                Append(EVENTS, "origin frame=" + fcn + " hash=" + Hash()
+                    + " seed=" + _seed + " armed=" + _armed);
+                if (_armed && _probeAtRel >= 0) _probeNext = fcn + _probeAtRel;
             }
             if (!Application.isPlaying && _origin >= 0) { _origin = -1; _probeNext = -1; }
 
             int fc = fcn;
             if (fc == _installedFrame) return;
             _installedFrame = fc;
+
+            // 未武装 = 纯旁观：不压任何 Time/帧率设置（标定与验证窗的仪器态
+            // 由采样方自设，驱动器活着也不得覆盖——第二轮彩排实测教训）。
+            // runInBackground 仅武装回放才需要（进 Play 首帧压一次），不在此列。
+            if (!_armed) return;
 
             Time.fixedDeltaTime = _fixedDtNum / _fixedDtDen;
             Time.maximumDeltaTime = Mathf.Min(1f / 30f, Time.fixedDeltaTime * 4f);
@@ -183,11 +197,21 @@ namespace Upi.Fixtures.Drivers
                     _timeScale = int.Parse(p[4]) / 1000f;
                     _targetFps = int.Parse(p[5]);
                     _durationS = int.Parse(p[6]) / 1000f;
+                    _armed = true;   // 装载回放脚本即武装（显式，默认态是旁观）
                     Persist();
                     if (Application.isPlaying) UnityEngine.Random.InitState(_seed);
-                    WriteAtomic(RES, "loaded " + Hash());
+                    WriteAtomic(RES, "loaded+armed " + Hash());
                 }
                 else WriteAtomic(RES, "bad load arg count");
+            }
+            else if (cmd == "disarm")
+            {
+                // 解除武装：驱动器退回纯旁观（不压 Time/帧率/runInBackground）。
+                // 采样方自己的仪器状态自己设——驱动器不得越权覆盖。
+                _armed = false;
+                _probeNext = -1;
+                Persist();
+                WriteAtomic(RES, "disarmed");
             }
             else if (cmd.StartsWith("arm:"))
             {
@@ -216,9 +240,12 @@ namespace Upi.Fixtures.Drivers
             }
             else if (cmd == "hash") WriteAtomic(RES, Hash());
             else if (cmd == "status")
+                // armed 进回执：仪器状态必须可观测——第二轮彩排就是因为
+                // 没人能一眼看出驱动器在不在压帧率，两束形态不同查了半天
                 WriteAtomic(RES, "seed=" + _seed + " fixedDt=" + (int)_fixedDtNum + "/" + (int)_fixedDtDen
                     + " timeScaleMillis=" + Mathf.RoundToInt(_timeScale * 1000)
                     + " targetFps=" + _targetFps + " durationMillis=" + Mathf.RoundToInt(_durationS * 1000)
+                    + " armed=" + _armed
                     + " hash=" + Hash() + " origin=" + _origin
                     + " replayT=" + _replayT.ToString("R", CultureInfo.InvariantCulture));
         }
