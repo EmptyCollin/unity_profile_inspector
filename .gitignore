@@ -84,7 +84,11 @@ runs/_dryrun_approval.md
 # approvals/ 工单、decision.json、state.json、runreport.json、trace.jsonl
 # 是结论证据（"入库的是结论与指针"原则），随工作束一起吞会丢批准审计链
 # ——实测拒批轮撞出，旧规则 runs/patrol_*/ 已删。
+# 工作束含嵌套目录（唤起轮的 pre_attempt_*/ 与 after_*/），一律只忽略束本身
 runs/patrol_*/multiwin_full.json
+runs/patrol_*/**/multiwin_full.json
+runs/patrol_*/pre_attempt_*/*.json
+runs/patrol_*/after_*/*.json
 
 # 验证窗原始束（before/after multiwin_full.json，单文件 3.7~4.2MB，含 A2 逐帧
 # 序列）。原始序列可由 resample 重生成，判定结论全在 report.json（已入库），
