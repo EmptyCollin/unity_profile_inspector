@@ -239,6 +239,16 @@ class GuardMetric(BaseModel):
     # 地板≈before ⇒ 判观测性积累（cleared_by_floor），非回归。
     gc_floor_check: Optional[dict] = None
     cleared_by_floor: bool = False
+    # 记忆体守护口径升级（a4_altertest 交替块实测，见 upi/core/memory_guard.py）：
+    # 窗口值是"未回收量"而非"净占用"，回收时点一变就失真（实测 7.8MB 假象
+    # 里净代价只有 1.9MB）。故记忆体类指标改用**两侧各自强制 GC 后的 post_gc**
+    # 对比。value_source 记录这条结论建立在什么口径上：
+    #   window            普通指标（时间/渲染计数），bundle 窗口中位
+    #   fresh_post_gc     记忆体指标，两侧 fresh 采集齐且交叉校验过
+    #   fresh_missing     记忆体指标但 fresh 数据缺失 = **未评估**（盲区，
+    #                     进报告单列；不退回污染口径冒充结论）
+    value_source: str = "window"
+    basis: str = ""
 
 
 class Perception(BaseModel):
