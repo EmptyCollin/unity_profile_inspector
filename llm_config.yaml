@@ -127,4 +127,4 @@ pipeline:
     cooldown_s: 1800                 # 同夹具两轮巡检的最小间隔（防循环烧成本）
     max_consecutive_failures: 3      # 连续失败即退出非零，不无脑重试
     budget: {max_review_rounds: 1, max_attempts_per_issue: 1,
-             wallclock_s: 1500, max_tokens: 60000}
+             wallclock_s: 3600, max_tokens: 60000}

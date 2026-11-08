@@ -103,7 +103,7 @@ def phase1(run_id: str, live_llm: bool) -> int:
     print(f"== 阶段一 {run_id}：detect → diagnose(live={live_llm}) → plan → 出工单 ==")
     runner = Runner(run_id, FIXTURE, budget={
         "max_review_rounds": 1, "max_attempts_per_issue": 1,
-        "wallclock_s": 1500, "max_tokens": 120_000})
+        "wallclock_s": 3600, "max_tokens": 120_000})
     from upi.agents.nodes import make_nodes
     nodes = make_nodes(runner.dir, live_llm=live_llm, approval_note="")
     p1_final = runner.run(nodes)
