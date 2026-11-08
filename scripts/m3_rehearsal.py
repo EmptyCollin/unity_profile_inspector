@@ -158,6 +158,23 @@ def main() -> int:
     report["steps"]["before"] = {"path": before["_path"]}
     print("   ok:", before["_path"])
 
+    print("\n== 1b 改前态 fresh 采集（记忆体守护两侧对称口径）==")
+    # a4_altertest 实测教训：只采改后态的地板分不清"修复净代价"与
+    # "两侧都在积累"。改前态必须同样采一份 fresh，post_gc 对 post_gc。
+    floor_before = None
+    try:
+        floor_before = gc_floor_measure("F-CPU-01")
+        report["steps"]["gc_floor_before"] = {
+            k: {"pre_gc_MB": round(vv["pre_gc"] / 1e6, 2),
+                "post_gc_MB": round(vv["post_gc"] / 1e6, 2)}
+            for k, vv in floor_before.items()}
+        for k, vv in floor_before.items():
+            print(f"   {k:22s} pre_gc={vv['pre_gc']/1e6:8.2f}MB  "
+                  f"post_gc={vv['post_gc']/1e6:8.2f}MB")
+    except Exception as e:  # noqa: BLE001 — 缺侧即盲区，fail-open 到未评估
+        report["steps"]["gc_floor_before"] = {"error": str(e)[:200]}
+        print("   !! 改前态 fresh 失败（记忆体守护将记未评估盲区）:", str(e)[:140])
+
     print("\n== 2 attempt 快照 ==")
     fp = "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0"
     snap = snapmod.snapshot(f"m3-{stamp}", PROJECT, SCENE, fp, root=ROOT)
@@ -202,7 +219,10 @@ def main() -> int:
 
     print("\n== 6 Verdict ==")
     v, detail = verdict_from_bundles("DET-CPU-GC-FRAMEALLOC", "F-CPU-01",
-                                     before, after, compile_ok=True, floor=floor)
+                                     before, after, compile_ok=True,
+                                     floor=floor, floor_before=floor_before)
+    for q in detail.get("memory_guards_unevaluated", []):
+        print(f"   [盲区] 记忆体守护未评估: {q['metric']} —— {q['basis'][:60]}")
     t = v.target
     print(f"   gc_alloc_per_frame: {t['before']:.0f} → {t['after']:.0f} "
           f"(改善 {t['delta']:.0f}, σ={t['sigma']:.0f}, basis={t['significance_basis']})")
