@@ -233,6 +233,12 @@ class GuardMetric(BaseModel):
     after: float
     delta: float
     regressed: bool = False
+    # 记忆体地板复核（M3 第三轮彩排实测教训）：修复把夹具垃圾清零后，
+    # GC 不再被高频触发，编辑器/管线自身的观测垃圾开始积累——守护量到的
+    # 爬升可能是"回收减少"而非"真吃了内存"。强制 GC 后重测即地板值：
+    # 地板≈before ⇒ 判观测性积累（cleared_by_floor），非回归。
+    gc_floor_check: Optional[dict] = None
+    cleared_by_floor: bool = False
 
 
 class Perception(BaseModel):
