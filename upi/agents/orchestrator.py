@@ -59,25 +59,35 @@ def _plain(v):
     return v
 
 
-def budget_check(st: RunState) -> Optional[str]:
-    """G11 预算护栏：超限返回原因，未超限返回 None。"""
+def budget_check(st: RunState, node: str = "") -> Optional[str]:
+    """G11 预算护栏。必须**节点感知**（批准后链路实测撞出的语义错）：
+
+    - wallclock / tokens：全局消耗，任何节点入口都拦（record/escalate 除外）；
+    - attempts：**只在 fix 入口拦**。它是"要不要开始新一次 attempt"的闸。
+      旧版不分节点，attempts 满后 verify 入口也被拦——于是已落地的修复
+      拿不到判定：双侧采样成本里 before 侧已花掉、after 侧没跑，
+      整轮 attempt 白烧，还得靠出口回滚把脏写擦掉。拦在写入之前才是正解：
+      既不烧采样，也不产生需要回滚的脏写。
+    - review_rounds：同理只在 review 入口拦（G6 配额）。
+    """
     b, sp = st.get("budget", {}), st.get("spent", {})
     if sp.get("wallclock_s", 0) > b.get("wallclock_s", 2400):
         return "budget_exceeded(wallclock)"
     if sp.get("tokens", 0) > b.get("max_tokens", 60_000):
         return "budget_exceeded(tokens)"
-    if st.get("attempts", 0) >= b.get("max_attempts_per_issue", 3):
+    if node == "fix" and st.get("attempts", 0) >= b.get("max_attempts_per_issue", 3):
         return "budget_exceeded(attempts)"
-    rr = [r for r in st.get("records", []) if r.get("kind") == "review"]
-    if len(rr) >= b.get("max_review_rounds", 3):
-        return "budget_exceeded(review_rounds)"
+    if node == "review":
+        rr = [r for r in st.get("records", []) if r.get("kind") == "review"]
+        if len(rr) >= b.get("max_review_rounds", 3):
+            return "budget_exceeded(review_rounds)"
     return None
 
 
 def _wrap(name: str, fn, tracer: Tracer):
     """节点包装：预算前置检查 + trace span + 异常成状态不炸循环。"""
     def inner(st: RunState) -> RunState:
-        over = budget_check(st)
+        over = budget_check(st, name)
         if over and name not in ("escalate", "record"):
             out = dict(st)
             out.update(route="needs_human", error=over)
