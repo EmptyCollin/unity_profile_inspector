@@ -119,15 +119,23 @@ def stats_from_windows(fx: dict) -> dict:
     for w in wins:
         for k, m in (w.get("metrics") or {}).items():
             out.setdefault(k, []).append(float(m["median"]))
-    # A2：每窗口取逐帧序列中位数，再跨窗口统计
+    # A2：每窗口取逐帧序列中位数，再跨窗口统计。
+    # 双形态兼容（2026-11-08 摘要入库改造）：原始束给 a2[src]=逐帧列表，
+    # 摘要束给 a2[src+"_median"]=已折好的窗口中位数。等价性实测逐字段一致
+    # ——median 是等价输入。改造教训：等价性必须对**实际消费的函数**验证，
+    # 上一轮我对着自写的兼容函数测通过就上，结果共享函数没改，两项指标
+    # 直接退化成"证据不足"（A 级自欺，被回归当场抓住）。
     A2MAP = {"gc": "gc_alloc_per_frame", "anim": "animator_process_animations_ns",
              "graph": "animator_process_graph_ns", "mem": "total_used_per_frame"}
     for src, kname in A2MAP.items():
         vals = []
         for w in wins:
-            seq = (w.get("a2") or {}).get(src) or []
+            a2 = w.get("a2") or {}
+            seq = a2.get(src) or []
             if len(seq) >= 50:
                 vals.append(float(st.median(seq)))
+            elif isinstance(a2.get(src + "_median"), (int, float)):
+                vals.append(float(a2[src + "_median"]))
         if vals:
             out[kname] = vals
 
@@ -144,7 +152,13 @@ def stats_from_windows(fx: dict) -> dict:
 
 
 def load_multwin() -> dict | None:
-    fp = CALDIR / "multiwin_full.json"
+    """数据源优先级：摘要束（入库、31KB）→ 原始束（本地留档、23.9MB）。
+
+    两者对 stats_from_windows 逐字段等价（median 是等价输入，实测验证）；
+    摘要入库、原始可重生成，本机留着只是缓存。判据与阈值不受影响。"""
+    fp = CALDIR / "multiwin_full_summary.json"
+    if not fp.exists():
+        fp = CALDIR / "multiwin_full.json"     # 兼容旧工作区
     if not fp.exists():
         return None
     d = json.loads(fp.read_text(encoding="utf-8"))
@@ -185,7 +199,7 @@ def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
 def main() -> int:
     mw = load_multwin()
     if mw is None:
-        print("!! 缺 calibration/multiwin_full.json（先跑 m1_multiwin --session full）")
+        print("!! 缺 calibration/multiwin_full_summary.json / multiwin_full.json（先跑 m1_multiwin --session full）")
         print("   检测与标定必须来自同一多窗口数据源，禁止回退旧单窗口基线（G7/§3）")
         return 1
     fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items() if "windows" in v}
