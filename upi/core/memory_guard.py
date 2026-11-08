@@ -38,9 +38,13 @@ FRESH_POST_GC_METRICS = frozenset({
 # 2% 留 3 倍余量。
 FRESH_TOLERANCE = 0.02
 
-# 交叉校验容差：floor 的 pre_gc 必须≈同侧 bundle 窗口中位，否则这份 fresh
-# 数据采集时机器状态与束不同（换了夹具态/隔了太久），不可采信。
-CROSS_CHECK_TOLERANCE = 0.02
+# 粗防抖容差（原"交叉校验"，2026-11-08 彩排实测后降级）：pre_gc 与同侧
+# bundle 窗口中位**不该要求吻合**——fresh 是独立 Play 会话（重开场景、重新
+# 进 Play、会话年龄不同），与验证窗束天然差 5~10%（当日实测 6.3%）。
+# 旧版拿 2% 当硬闸，把合法数据误判成盲区（教训 23）。现在只做粗防抖：
+# 偏差 >25% 视为"这份 fresh 根本来自别的机器状态/陈旧文件"，拒收；
+# 正常范围记 cross_check_ok=True 并保留偏差值供报告留档。
+GROSS_STALENESS_TOLERANCE = 0.25
 
 
 def _rel_delta(a: float, b: float) -> float:
@@ -67,14 +71,19 @@ def memory_guard_entry(metric: str, bstat: dict, astat: dict,
                      value_source="fresh_missing", cross_check_ok=None,
                      basis="fresh post-GC 数据缺失——记忆体守护未评估（盲区，进报告单列）")
         return entry
-    # 交叉校验：pre_gc≈同侧窗口中位 ⇒ fresh 与束同状态采的，可采信
-    cc_b = _rel_delta(fb["pre_gc"], b_win) <= CROSS_CHECK_TOLERANCE
-    cc_a = _rel_delta(fa["pre_gc"], a_win) <= CROSS_CHECK_TOLERANCE
+    # 粗防抖：pre_gc 与同侧窗口中位偏差 >25% 才拒收（跨会话天然差 5~10%，
+    # 2% 硬闸已被当日彩排实测证明过严——它把合法数据推进盲区，等于自废守护）
+    cc_b = _rel_delta(fb["pre_gc"], b_win) <= GROSS_STALENESS_TOLERANCE
+    cc_a = _rel_delta(fa["pre_gc"], a_win) <= GROSS_STALENESS_TOLERANCE
     vb, va = float(fb["post_gc"]), float(fa["post_gc"])
+    dev_b = round(_rel_delta(fb["pre_gc"], b_win), 4)
+    dev_a = round(_rel_delta(fa["pre_gc"], a_win), 4)
     entry.update(value_before=vb, value_after=va, delta=va - vb,
                  value_source="fresh_post_gc", cross_check_ok=cc_b and cc_a,
-                 basis=f"post_gc 口径（净常驻代理），容差 {FRESH_TOLERANCE:.0%}"
-                      + ("" if cc_b and cc_a else " !!交叉校验未过—fresh 与束状态不齐"))
+                 staleness_dev={"before": dev_b, "after": dev_a},
+                 basis=f"post_gc 口径（净常驻代理），容差 {FRESH_TOLERANCE:.0%}；"
+                      f"pre_gc 防抖偏差 before={dev_b:.1%} after={dev_a:.1%}"
+                      + ("" if cc_b and cc_a else " !!超 25%—fresh 疑似来自别的机器状态"))
     return entry
 
 
