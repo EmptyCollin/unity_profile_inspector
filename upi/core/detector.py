@@ -20,12 +20,25 @@ class Thresholds(BaseModel):
     deviation_ratio: float = 1.5            # 相对 clean 的偏离倍数
     explains_share: float = 0.2             # 双门限之业务显著（§3.4）
     threshold_source: str = "noise_calibration"
+    budget_ref: Optional[str] = None        # frame_budget 时必填：外部锚点出处（文件路径）
 
     @model_validator(mode="after")
     def _only_calibrated(self):
-        if self.threshold_source != "noise_calibration":
-            raise ValueError("阈值只能来自 clean 变体噪声标定（DESIGN §8.1），禁止手调")
-        return self
+        # §3A 两条合法阈值来源，没有第三种：
+        #   noise_calibration — 水位判据，来自 clean 变体噪声标定（§8.1）
+        #   frame_budget      — 发作判据，来自外部帧预算锚点（§9 帧预算模型）。
+        #     预算线是目标帧率的算术导出（60fps⇒16.7ms），工程外生约束而非调参
+        #     结果，因此不违反"禁止手调"——但它必须带出处（budget_ref），
+        #     否则与手调无法区分。无出处的绝对线 = 手调，构造期拒收。
+        if self.threshold_source == "noise_calibration":
+            return self
+        if self.threshold_source == "frame_budget":
+            if not self.budget_ref:
+                raise ValueError("frame_budget 阈值必须附 budget_ref 出处（DESIGN §9），"
+                                 "无出处的绝对线视同手调，禁止")
+            return self
+        raise ValueError("阈值只能来自噪声标定或带出处的帧预算锚点"
+                         "（DESIGN §3A/§8.1），禁止手调")
 
 
 class Playbook(BaseModel):
@@ -149,5 +162,24 @@ DEFAULT_REGISTRY: list[Detector] = [
         playbooks=[Playbook(id="PB-ASYNC-STAGGER", side_effect="may_affect_perception",
                             desc="分帧异步加载（改时序=可能影响体验）")],
         default_tier="semi",
+    ),
+    # ---- 发作类（episode）：证据形态 = BreachSample，输入走 T2w 通路 ----
+    # 判定口径与水位不同：单帧值 × 外部绝对线（帧预算锚点），不用 k·σ——
+    # 逐帧越线的统计意义在"越过工程外生线"，不在"比自己的均值高"（范式讨论）。
+    # 防误报三件套：线位离常态足够远 + warmup 豁免 + replayable() 复现判据。
+    # GPU 发作 detector 暂缺（探针判定路径未接 gpuFrameTime 越线，G19 宁缺毋假）。
+    Detector(
+        id="DET-LOAD-FRAMESPIKE", link="loading", fixture="F-LOAD-01",
+        metric="frame_time_ms", unit="ms", source_tier="A4",
+        ptype="episode", attribution_source="auto",   # CPU 侧越线有归因源（gc_ring/a4 cpu 分解）
+        thresholds=Thresholds(min_magnitude=33.333, deviation_ratio=1.2,
+                              threshold_source="frame_budget",
+                              budget_ref="knowledge/frame_budget.json"),
+        anchor_patterns=["sync_resources_load_in_start", "resident_buffer_without_release",
+                         "bulk_alloc_burst_single_frame"],
+        playbooks=[Playbook(id="PB-ASYNC-STAGGER", side_effect="may_affect_perception",
+                            desc="分帧异步加载（改时序=可能影响体验）")],
+        default_tier="semi",
+        version="v1",
     ),
 ]

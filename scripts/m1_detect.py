@@ -221,17 +221,29 @@ def main() -> int:
         print("!! 阈值与数据协议不一致，禁止套用（G7）：", mism)
         return 1
     print(f"G7 校验: 阈值源×数据源协议一致（{'|'.join(str(getattr(fp_data,f)) for f in ('warmup_samples','window_samples','poll_rate','scale_factor'))}）")
-    n_applied = apply_calibration(DEFAULT_REGISTRY, cal)
-    print(f"标定应用: {n_applied}/{len(DEFAULT_REGISTRY)} 项阈值来自 {Path(cal['_path']).name}")
-    if n_applied != len(DEFAULT_REGISTRY):
-        print("!! 有检测器指标不在标定表内（§8.1 要求全量覆盖），中止")
+
+    # §3A 通路分流：本脚本=水位通路（窗口分布 × noise_calibration 阈值）。
+    # episode 检测器（frame_budget 阈值 × BreachSample 输入）的证据形态不同，
+    # 由 m2a_detect_breach.py 独立跑——混进本循环会发生两件坏事：
+    #   a) 窗口标定覆盖帧预算线（两套阈值体系互相污染，§8.1 违例）；
+    #   b) "全量覆盖"检查被帧预算指标撞停（T2w 收口实测发生）。
+    waterline_dets = [d for d in DEFAULT_REGISTRY
+                      if d.thresholds.threshold_source == "noise_calibration"]
+    other_dets = [d for d in DEFAULT_REGISTRY if d not in waterline_dets]
+    if other_dets:
+        print(f"通路分流: {len(other_dets)} 个非水位检测器移交对应通路 "
+              f"{[d.id for d in other_dets]}")
+    n_applied = apply_calibration(waterline_dets, cal)
+    print(f"标定应用: {n_applied}/{len(waterline_dets)} 项阈值来自 {Path(cal['_path']).name}")
+    if n_applied != len(waterline_dets):
+        print("!! 有水位检测器指标不在标定表内（§8.1 要求全量覆盖），中止")
         return 1
 
     with tracer.stage("detect") as ctx:
         tracer.tool_call(ctx, kind="sqlite", name="read_calibration_windows", args=mw.get("_path", ""), exit_status=0)
         tracer.tool_call(ctx, kind="sqlite", name="read_thresholds", args=cal.get("_path", ""), exit_status=0)
         results = {}
-        for det in DEFAULT_REGISTRY:
+        for det in waterline_dets:
             fid = det.fixture
             if fid not in fixs:
                 results[fid] = {"verdict": "insufficient_evidence", "why": "标定数据缺该夹具"}
@@ -267,7 +279,7 @@ def main() -> int:
 
         # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
         fp_check = {}
-        for det in DEFAULT_REGISTRY:
+        for det in waterline_dets:
             _, d = compare(det, clean_stats, clean_stats)
             fp_check[det.id] = d.get("verdict")
         fp_hits = [k for k, v in fp_check.items() if v == "detected"]

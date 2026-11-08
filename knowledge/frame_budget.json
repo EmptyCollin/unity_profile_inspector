@@ -1,0 +1,17 @@
+{
+  "_what": "帧预算绝对线——发作（episode）判定的外部锚点。不是标定产物，也不是调参结果：它来自目标帧率这一工程外生约束，因此可以合法地作为『正确答案不存在』范式下的绝对参照（DESIGN v0.12 范式讨论）。",
+  "_source": "DESIGN §9 边界声明的帧预算模型；60fps ⇒ 1000/60≈16.7ms，30fps ⇒ 33.3ms。数值为算术导出，非实测。",
+  "_honest_boundary": "本 demo 全部数据来自 PC Editor（DESIGN §9）。Editor 侧越线 ≠ 真机中低端越线；映射函数与误差在报告中必须声明。本文件是『模拟锚点』，真机预算表接入属 B 档（M8）。",
+  "budgets_ms": {
+    "target60": 16.667,
+    "target30": 33.333
+  },
+  "detector_binding": {
+    "DET-LOAD-FRAMESPIKE": "target30",
+    "DET-GPU-FRAMESPIKE": "target30"
+  },
+  "unit": "ms/frame",
+  "metric": "frame_time_ms",
+  "created_at": "2026-11-08",
+  "origin": "human-approved（M2a/T2w 接入决策，随本次提交入 git 可追溯）"
+}
