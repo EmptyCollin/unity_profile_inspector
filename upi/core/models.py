@@ -320,3 +320,29 @@ class TraceSpan(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
     environment_fingerprint: str = ""
     channel: Literal["user", "dev"] = "user"
+
+
+class PatternPromotionProposal(BaseModel):
+    """AGENTS §1.7 Knowledge Agent 输出：只提案，不执行（权限变更须人工批准）。"""
+
+    pattern_id: str
+    n_effective: int                                   # §8.2 口径：独立场景×档位
+    n_trials: int
+    success_rate_wilson_lower_bound: float
+    requested_tier: Literal["auto", "semi"]
+    overfit_checklist: dict = Field(default_factory=dict)
+    current_tier: str = "semi"
+    status: Literal["proposal_ready", "blocked"] = "blocked"
+    blocked_reasons: list[str] = Field(default_factory=list)
+    checklist_ok: dict = Field(default_factory=dict)
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _no_proposal_without_checklist(self):
+        # G14：缺体检表或不达标 → 提案本身 blocked，不得提交人工批准
+        if self.status == "proposal_ready":
+            if not self.overfit_checklist:
+                raise ValueError("proposal_ready 但缺 §8.7 体检表（G14）")
+            if self.blocked_reasons:
+                raise ValueError(f"proposal_ready 却带拦截理由: {self.blocked_reasons}")
+        return self
