@@ -43,6 +43,18 @@ HIGHER_IS_WORSE = {
 # "越高越好"的少数派——available 只表示数据可用性，不入守护
 NOT_GUARDED = {"available", "scale_factor"}
 
+# 记忆体类守护（M3 第三轮彩排教训）：修复清零夹具垃圾后 GC 不再被高频触发，
+# 编辑器自身与观测管线产生的临时垃圾开始积累——守护量到的上升分不清是
+# "修复真吃了内存"还是"回收变少的观测假象"。豁免必须用证据划范围：
+# 强制 GC 响应性实测（probe/gc_floor.cs，2026-11-08）——
+#   monoUsedBytes   99.8→94.1MB（-5.7MB）响应 ⇒ 可用地板复核
+#   monoHeapBytes / totalAllocatedBytes / totalReservedBytes  delta=0.0
+#   不响应（堆预留/原生分配类计数器）⇒ 禁止地板豁免，触发即真回归
+FLOOR_EXEMPT = {"monoUsedBytes"}
+# 地板 vs 改前中位的容差：比 GUARD_TOLERANCE 宽（地板复核是独立播放会话，
+# 跨会话差异本就大于同会话窗口差异；2% 经验值，超界即维持 regressed）
+MEMORY_FLOOR_TOLERANCE = 0.02
+
 
 def instrument_state() -> dict:
     """常驻件存活指纹（彩排第一轮实测教训：before 束测到 uncapped 1.87ms、
@@ -107,6 +119,62 @@ def rp_ctl(line: str, wait_s: float = 6.0) -> str:
     return "TIMEOUT"
 
 
+def gc_floor_measure(fixture: str, polls: int = 10, timeout_s: int = 420) -> dict:
+    """地板复核实测（M3 第三轮彩排教训固化；豁免范围=有实测证据的
+    FLOOR_EXEMPT，probe/gc_floor.cs：monoUsedBytes 响应强制 GC，
+    其余三类计数器 delta=0 不响应、禁走此豁免）。
+
+    在当前夹具态进 Play：采 N 次 memory 读数 → 强制 GC.Collect×2 →
+    再采 N 次，返回 {metric: {"pre_gc": 中位, "post_gc": 中位}}。
+    post_gc 落回改前中位 ±MEMORY_FLOOR_TOLERANCE ⇒ 该守护上升判"观测性
+    积累"豁免；否则维持 regressed。调用方须保证夹具处于待验状态（修复后），
+    本函数只管测量不动代码。"""
+    import statistics as stx
+    from upi.tooling.unity_cli import run_unity
+    proj = str(ROOT / "fixtures" / "upi-fixture")
+    t0 = time.time()
+    run_unity(["command", "editor.playmode stop", "--project-path", proj], timeout_s=60)
+    time.sleep(3)
+    r = run_unity(["command", "scene open", "--project-path", proj,
+                   "--path", f"Assets/UpiFixtures/Scenes/Scene_{fixture}.unity"],
+                  timeout_s=200)
+    if not r.success:
+        raise RuntimeError(f"地板复核开场景失败: {r.errors[:1]}")
+    time.sleep(5)
+    run_unity(["command", "editor.playmode start", "--project-path", proj], timeout_s=90)
+    time.sleep(8)   # 进 Play 稳定（F-LOAD-01 的首帧巨量加载走完）
+
+    keys = tuple(sorted(FLOOR_EXEMPT | {"monoHeapBytes", "totalAllocatedBytes",
+                                        "totalReservedBytes"}))
+
+    def poll_median() -> dict:
+        vals: dict[str, list[float]] = {k: [] for k in keys}
+        for _ in range(polls):
+            if time.time() - t0 > timeout_s - 30:
+                break
+            rr = run_unity(["command", "diagnostics get_performance",
+                            "--project-path", proj], timeout_s=60)
+            mem = ((rr.data or {}).get("result") or {}).get("memory") or {}
+            for k in keys:
+                if isinstance(mem.get(k), (int, float)):
+                    vals[k].append(float(mem[k]))
+            time.sleep(0.6)
+        return {k: (stx.median(v) if v else None) for k, v in vals.items()}
+
+    pre = poll_median()
+    gc_r = run_unity(["command", "script eval", "--project-path", proj, "--code",
+                      "System.GC.Collect(); System.GC.WaitForPendingFinalizers();"
+                      "System.GC.Collect(); return \"gc\";"], timeout_s=90)
+    if not gc_r.success:
+        raise RuntimeError(f"地板复核 GC 失败: {gc_r.errors[:1]}")
+    time.sleep(2)
+    post = poll_median()
+    run_unity(["command", "editor.playmode stop", "--project-path", proj], timeout_s=60)
+    time.sleep(4)
+    return {k: {"pre_gc": pre[k], "post_gc": post[k]} for k in keys
+            if pre.get(k) is not None and post.get(k) is not None}
+
+
 def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) -> dict:
     """当场重采一个束（full 会话 = A+A2，与标定同协议）。
 
@@ -161,8 +229,13 @@ def bundle_stats(doc: dict, fixture: str) -> dict:
 
 def verdict_from_bundles(det_id: str, fixture: str,
                         before_doc: dict, after_doc: dict,
-                        compile_ok: bool) -> tuple[Verdict, dict]:
-    """核心判定。返回 (Verdict, 详情 dict——详情供 trace/report 落盘)。"""
+                        compile_ok: bool,
+                        floor: Optional[dict] = None) -> tuple[Verdict, dict]:
+    """核心判定。返回 (Verdict, 详情 dict——详情供 trace/report 落盘)。
+
+    floor=地板复采数据（gc_floor_measure 的输出，调用方在**修复态**采好后
+    传入——本函数不开场景不进 Play，保持纯判定无副作用）。None ⇒
+    FLOOR_EXEMPT 指标触发时维持 regressed（fail-closed，无证据不豁免）。"""
     # 仪器状态双闸（第一轮彩排作废教训的固化）：
     #   漂移闸——单束内 _instr_pre ≠ _instr_mid，束内窗口状态不齐，整束作废；
     #   对比闸——两束 mid 形态/常驻件存活不一致，禁止对比（G7 引申）。
@@ -232,9 +305,29 @@ def verdict_from_bundles(det_id: str, fixture: str,
         worse = delta > 0
         rel = abs(delta) / max(abs(bv["median"]), 1e-9)
         reg = worse and rel > GUARD_TOLERANCE
+        floor_ev, cleared = None, False
+
+        # 地板复核豁免（仅限 FLOOR_EXEMPT=有 GC 响应实测的指标）。
+        # 无地板数据 ⇒ 维持 regressed（fail-closed：不豁免没证据的东西）。
+        # 交叉校验：pre_gc 必须≈改后中位（证明地板测量与改后束同状态），
+        # 否则这份地板数据来自别的状态，不可采信。
+        if reg and key in FLOOR_EXEMPT and floor and key in floor:
+            fl = floor[key]
+            pre_gc, post_gc = fl.get("pre_gc"), fl.get("post_gc")
+            same_state = pre_gc is not None and abs(pre_gc - av["median"]) \
+                / max(abs(av["median"]), 1e-9) <= MEMORY_FLOOR_TOLERANCE
+            at_floor = post_gc is not None and abs(post_gc - bv["median"]) \
+                / max(abs(bv["median"]), 1e-9) <= MEMORY_FLOOR_TOLERANCE
+            floor_ev = {"pre_gc": pre_gc, "post_gc": post_gc,
+                        "before_median": bv["median"], "after_median": av["median"],
+                        "same_state_ok": same_state, "at_floor_ok": at_floor,
+                        "tolerance": MEMORY_FLOOR_TOLERANCE}
+            if same_state and at_floor:
+                cleared, reg = True, False      # 观测性积累，非真回归
         guards.append(GuardMetric(metric=key, before=round(bv["median"], 3),
                                   after=round(av["median"], 3),
-                                  delta=round(delta, 3), regressed=reg))
+                                  delta=round(delta, 3), regressed=reg,
+                                  gc_floor_check=floor_ev, cleared_by_floor=cleared))
         if reg:
             worst = max(worst, rel)
 

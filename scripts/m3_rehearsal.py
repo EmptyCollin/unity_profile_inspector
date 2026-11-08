@@ -30,7 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents import fixer                                   # noqa: E402
-from upi.agents.verify import resample, verdict_from_bundles   # noqa: E402
+from upi.agents.verify import (gc_floor_measure, resample,     # noqa: E402
+                               verdict_from_bundles)
 from upi.core.models import EditPlan                           # noqa: E402
 from upi.tooling import snapshot as snapmod                    # noqa: E402
 
@@ -182,9 +183,26 @@ def main() -> int:
     after = resample("F-CPU-01", f"m3_rehearsal_{stamp}/after")
     report["steps"]["after"] = {"path": after["_path"]}
 
+    print("\n== 5b 地板复采（修复态，monoUsedBytes GC 响应性实测）==")
+    # 插在 after 与 verdict 之间：此刻夹具处修复态，与 after 束同状态。
+    # 失败 → floor=None → fail-closed 维持 regressed，原因必须落报告。
+    floor = None
+    try:
+        floor = gc_floor_measure("F-CPU-01")
+        report["steps"]["gc_floor"] = {
+            k: {"pre_gc_MB": round(vv["pre_gc"] / 1e6, 2),
+                "post_gc_MB": round(vv["post_gc"] / 1e6, 2)}
+            for k, vv in floor.items()}
+        for k, vv in floor.items():
+            print(f"   {k:22s} pre_gc={vv['pre_gc']/1e6:8.2f}MB  "
+                  f"post_gc={vv['post_gc']/1e6:8.2f}MB")
+    except Exception as e:  # noqa: BLE001 — 地板失败不毁彩排，降级为不豁免
+        report["steps"]["gc_floor"] = {"error": str(e)[:200]}
+        print("   !! 地板复采失败（维持 fail-closed，不豁免）:", str(e)[:160])
+
     print("\n== 6 Verdict ==")
     v, detail = verdict_from_bundles("DET-CPU-GC-FRAMEALLOC", "F-CPU-01",
-                                     before, after, compile_ok=True)
+                                     before, after, compile_ok=True, floor=floor)
     t = v.target
     print(f"   gc_alloc_per_frame: {t['before']:.0f} → {t['after']:.0f} "
           f"(改善 {t['delta']:.0f}, σ={t['sigma']:.0f}, basis={t['significance_basis']})")
