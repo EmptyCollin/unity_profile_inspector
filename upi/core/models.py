@@ -189,6 +189,14 @@ class Hypothesis(BaseModel):
     confidence: float = Field(ge=0, le=1)      # 计算得出，不由 LLM 打分
     weights_version: str = "hand-set-prior-v1"
     expected_effect: dict = Field(default_factory=dict)
+    veto_reasons: list[str] = Field(default_factory=list)   # §5 否决项命中记录；非空则 conf≤0.5
+
+    @model_validator(mode="after")
+    def _veto_cap_consistency(self):
+        # 自洽校验：有否决理由却声称 conf>0.5，属计算与声明不符（I1）
+        if self.veto_reasons and self.confidence > 0.5:
+            raise ValueError("命中否决项的 Hypothesis 置信度不得 >0.5（DESIGN §5）")
+        return self
 
 
 class EditPlan(BaseModel):
