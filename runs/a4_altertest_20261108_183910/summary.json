@@ -1,0 +1,177 @@
+{
+  "stamp": "20261108_183910",
+  "blocks": {
+    "A1": {
+      "kind": "defect",
+      "windows": [
+        {
+          "monoUsedBytes": 102711296.0,
+          "totalAllocatedBytes": 4375029043.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 2.05925,
+          "gc_alloc_per_frame": 77977.0
+        },
+        {
+          "monoUsedBytes": 105588736.0,
+          "totalAllocatedBytes": 4391892615.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.9386999999999999,
+          "gc_alloc_per_frame": 77977
+        }
+      ],
+      "floor": {
+        "pre": {
+          "monoUsedBytes": 106260480.0,
+          "totalAllocatedBytes": 4408079990.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        },
+        "post": {
+          "monoUsedBytes": 107872256.0,
+          "totalAllocatedBytes": 4422359697.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        }
+      },
+      "block_seconds": 118
+    },
+    "B1": {
+      "kind": "fixed",
+      "windows": [
+        {
+          "monoUsedBytes": 110903296.0,
+          "totalAllocatedBytes": 4150981345.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.7992,
+          "gc_alloc_per_frame": 9401
+        },
+        {
+          "monoUsedBytes": 115003392.0,
+          "totalAllocatedBytes": 4152783776.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.7375500000000001,
+          "gc_alloc_per_frame": 9401
+        }
+      ],
+      "floor": {
+        "pre": {
+          "monoUsedBytes": 110940160.0,
+          "totalAllocatedBytes": 4187794975.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        },
+        "post": {
+          "monoUsedBytes": 112105472.0,
+          "totalAllocatedBytes": 4237210779.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        }
+      },
+      "block_seconds": 117
+    },
+    "A2": {
+      "kind": "defect",
+      "windows": [
+        {
+          "monoUsedBytes": 104265728.0,
+          "totalAllocatedBytes": 4432178268.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.8850500000000001,
+          "gc_alloc_per_frame": 77977
+        },
+        {
+          "monoUsedBytes": 105406464.0,
+          "totalAllocatedBytes": 4429843197.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 2.0202,
+          "gc_alloc_per_frame": 77977
+        }
+      ],
+      "floor": {
+        "pre": {
+          "monoUsedBytes": 105881600.0,
+          "totalAllocatedBytes": 4474118701.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        },
+        "post": {
+          "monoUsedBytes": 104437760.0,
+          "totalAllocatedBytes": 4516526347.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        }
+      },
+      "block_seconds": 116
+    },
+    "B2": {
+      "kind": "fixed",
+      "windows": [
+        {
+          "monoUsedBytes": 111454208.0,
+          "totalAllocatedBytes": 4364410424.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.8186,
+          "gc_alloc_per_frame": 9401.0
+        },
+        {
+          "monoUsedBytes": 111886336.0,
+          "totalAllocatedBytes": 4372308263.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0,
+          "cpuFrameTimeMs": 1.87535,
+          "gc_alloc_per_frame": 9401
+        }
+      ],
+      "floor": {
+        "pre": {
+          "monoUsedBytes": 109164544.0,
+          "totalAllocatedBytes": 4376509925.5,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        },
+        "post": {
+          "monoUsedBytes": 106373120.0,
+          "totalAllocatedBytes": 4403416797.0,
+          "totalReservedBytes": 7782014976.0,
+          "monoHeapBytes": 2166763520.0
+        }
+      },
+      "block_seconds": 117
+    }
+  },
+  "analysis": {
+    "monoUsedBytes": {
+      "delta_fix_MB": 7.82,
+      "delta_rel_pct": 7.51,
+      "defect_drift_A2_A1_MB": 0.69,
+      "delta_floor_post_MB": 1.94
+    },
+    "totalAllocatedBytes": {
+      "delta_fix_MB": -147.11,
+      "delta_rel_pct": -3.36,
+      "defect_drift_A2_A1_MB": 47.55,
+      "delta_floor_post_MB": -113.11
+    },
+    "totalReservedBytes": {
+      "delta_fix_MB": 0.0,
+      "delta_rel_pct": 0.0,
+      "defect_drift_A2_A1_MB": 0.0,
+      "delta_floor_post_MB": 0.0
+    },
+    "monoHeapBytes": {
+      "delta_fix_MB": 0.0,
+      "delta_rel_pct": 0.0,
+      "defect_drift_A2_A1_MB": 0.0,
+      "delta_floor_post_MB": 0.0
+    },
+    "gc_reclaim_A2_MB": 1.44,
+    "gc_reclaim_B2_MB": 2.79
+  }
+}
