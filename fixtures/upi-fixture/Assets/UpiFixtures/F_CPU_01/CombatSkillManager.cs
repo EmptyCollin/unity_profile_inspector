@@ -20,50 +20,41 @@ namespace Upi.Fixtures
 
         private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();
 
-        // M3 修复（PB-FULL-REUSE，行段 21-27 替换）：缓存 + 预生成。语义等价
-        // 前提——state/level 在 Awake 后不再被改写（Update 全文无赋值点，已核对），
-        // 故 ready 筛选、排序结果、key 字符串均为常量，可一次预生成。
-        private Rigidbody _body;
-        private CapsuleCollider _col;
-        private List<SkillRuntime> _readyRanked;
-        private string[] _keyByIndex;
-        private readonly Dictionary<int, float> _reusedCooldown = new Dictionary<int, float>();
-
         private void Awake()
         {
             for (int i = 0; i < skillCount; i++)
                 _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });
-
-            _body = GetComponent<Rigidbody>();
-            _col = GetComponent<CapsuleCollider>();
-            // 语义等价关键：原 Update 先筛 state==Ready 再筛 level>1 再排序。
-            // 预生成必须取同一交集——若漏掉 Ready 筛选，非 Ready 技能的
-            // score/lastKey 会从默认值变成被赋值，即改变可见行为（实测复查抓出）。
-            _readyRanked = _skills.Where(x => x.state == SkillState.Ready)
-                                   .Where(x => x.level > 1)
-                                   .OrderByDescending(x => x.level).ThenBy(x => x.index).ToList();
-            _keyByIndex = new string[skillCount];
-            foreach (var s in _skills)
-                _keyByIndex[s.index] = s.index + ":" + s.state + ":"
-                    + (_body != null ? 1 : 0) + (_col != null ? 1 : 0);
         }
 
         private void Update()
         {
-            // 每帧分配清零（①②③④ 逐条对应证据，行段 31-57 替换）：
-            foreach (var s in _readyRanked)
+            // ①②③④ 全部落在每帧路径上
+            var ready = new List<SkillRuntime>();                 // 每帧分配：List
+            foreach (var s in _skills)
             {
-                var key = _keyByIndex[s.index];
-                s.lastKey = key;
-                // 原逻辑 map[key]=s.level; s.score=map[key]; map 每帧新建且
-                // 只含该 key ⇒ s.score 恒等于 s.level，直取（字符串+字典分配消）
-                s.score = s.level;
+                if (s.state == SkillState.Ready) ready.Add(s);
             }
 
-            _reusedCooldown.Clear();
+            var ranked = ready
+                .Where(x => x.level > 1)                          // LINQ 枚举器 + 闭包
+                .OrderByDescending(x => x.level)
+                .ThenBy(x => x.index)
+                .ToList();
+
+            foreach (var s in ranked)
+            {
+                var body = GetComponent<Rigidbody>();             // 每帧 GetComponent
+                var col = GetComponent<CapsuleCollider>();        // 每帧 GetComponent
+                var key = s.index + ":" + s.state + ":" + (body != null ? 1 : 0) + (col != null ? 1 : 0); // 枚举 ToString + 字符串拼接
+                s.lastKey = key;
+                var map = new Dictionary<string, int>();          // 每帧分配：Dictionary
+                map[key] = s.level;
+                s.score = map[key];
+            }
+
+            _cooldownMap = new Dictionary<int, float>();          // 每帧分配：Dictionary
             for (int i = 0; i < _skills.Count; i++)
-                _reusedCooldown[i] = Time.time + 0.1f * i;
-            _cooldownMap = _reusedCooldown;
+                _cooldownMap[i] = Time.time + 0.1f * i;
         }
 
         private Dictionary<int, float> _cooldownMap;
