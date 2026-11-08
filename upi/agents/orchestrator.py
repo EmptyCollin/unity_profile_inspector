@@ -41,6 +41,7 @@ class RunState(TypedDict, total=False):
     hypotheses: list              # Hypothesis dicts，按 C_attr 降序
     edit_plan: Optional[dict]
     snapshot: Optional[dict]
+    pre_attempt: Optional[dict]   # fix 节点写入前锁定：before 束路径+改前态 fresh
     verdict: Optional[dict]
     review_decision: Optional[str]
     review_reason: Optional[str]

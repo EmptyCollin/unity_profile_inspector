@@ -1,0 +1,328 @@
+{
+  "stamp": "20261108_191433",
+  "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动",
+  "steps": {
+    "before": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_191433\\before\\multiwin_full.json"
+    },
+    "gc_floor_before": {
+      "monoHeapBytes": {
+        "pre_gc_MB": 2166.76,
+        "post_gc_MB": 2166.76
+      },
+      "monoUsedBytes": {
+        "pre_gc_MB": 111.91,
+        "post_gc_MB": 107.46
+      },
+      "totalAllocatedBytes": {
+        "pre_gc_MB": 4298.18,
+        "post_gc_MB": 4345.98
+      },
+      "totalReservedBytes": {
+        "pre_gc_MB": 7782.01,
+        "post_gc_MB": 7782.01
+      }
+    },
+    "snapshot": {
+      "attempt_id": "m3-20261108_191433",
+      "git_ref": "upi/attempt-m3-20261108_191433",
+      "head_before": "96c045e2f9e607c6ed473e94090170cc81417a6e",
+      "asset_manifest_hash": "8907f81a458d0419",
+      "scene_guid": "filehash:7be81facbec7c6ac",
+      "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+      "created_at": "2026-11-08T19:17:46",
+      "root": "D:\\unity_profile_inspector",
+      "metadata": {}
+    },
+    "execute": {
+      "playbook_id": "PB-FULL-REUSE",
+      "tier": "blocked",
+      "status": "applied",
+      "applied": [
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        },
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        }
+      ],
+      "compile": {
+        "ok": true,
+        "errors": []
+      },
+      "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动"
+    },
+    "after": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_191433\\after\\multiwin_full.json"
+    },
+    "gc_floor": {
+      "monoHeapBytes": {
+        "pre_gc_MB": 2166.76,
+        "post_gc_MB": 2166.76
+      },
+      "monoUsedBytes": {
+        "pre_gc_MB": 109.57,
+        "post_gc_MB": 107.12
+      },
+      "totalAllocatedBytes": {
+        "pre_gc_MB": 4286.27,
+        "post_gc_MB": 4342.05
+      },
+      "totalReservedBytes": {
+        "pre_gc_MB": 7782.01,
+        "post_gc_MB": 7782.01
+      }
+    },
+    "verdict": {
+      "verdict": {
+        "target": {
+          "metric": "gc_alloc_per_frame",
+          "before": 77977.0,
+          "after": 9401.0,
+          "delta": 68576.0,
+          "sigma": 0.0,
+          "significant": true,
+          "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+          "degenerate": true
+        },
+        "guards": [
+          {
+            "metric": "animator_process_animations_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "animator_process_graph_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "batches",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "cpuFrameTimeMs",
+            "before": 2.045,
+            "after": 1.811,
+            "delta": -0.234,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "cpuMainThreadFrameTimeMs",
+            "before": 0.924,
+            "after": 0.686,
+            "delta": -0.239,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "drawCalls",
+            "before": 47.0,
+            "after": 47.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "gpuFrameTimeMs",
+            "before": 1.659,
+            "after": 1.672,
+            "delta": 0.013,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "monoHeapBytes",
+            "before": 2166763520.0,
+            "after": 2166763520.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": {
+              "before_side": {
+                "pre_gc": 2166763520.0,
+                "post_gc": 2166763520.0
+              },
+              "after_side": {
+                "pre_gc": 2166763520.0,
+                "post_gc": 2166763520.0
+              },
+              "window_delta_archive": 0.0
+            },
+            "cleared_by_floor": false,
+            "value_source": "fresh_post_gc",
+            "basis": "post_gc 口径（净常驻代理），容差 2%"
+          },
+          {
+            "metric": "setPassCalls",
+            "before": 9.0,
+            "after": 9.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "totalAllocatedBytes",
+            "before": 4345976240.5,
+            "after": 4342046375.0,
+            "delta": -3929865.5,
+            "regressed": false,
+            "gc_floor_check": {
+              "before_side": {
+                "pre_gc": 4298184539.5,
+                "post_gc": 4345976240.5
+              },
+              "after_side": {
+                "pre_gc": 4286270256.5,
+                "post_gc": 4342046375.0
+              },
+              "window_delta_archive": 5008321.0
+            },
+            "cleared_by_floor": false,
+            "value_source": "fresh_post_gc",
+            "basis": "post_gc 口径（净常驻代理），容差 2%"
+          },
+          {
+            "metric": "totalReservedBytes",
+            "before": 7782014976.0,
+            "after": 7782014976.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": {
+              "before_side": {
+                "pre_gc": 7782014976.0,
+                "post_gc": 7782014976.0
+              },
+              "after_side": {
+                "pre_gc": 7782014976.0,
+                "post_gc": 7782014976.0
+              },
+              "window_delta_archive": 0.0
+            },
+            "cleared_by_floor": false,
+            "value_source": "fresh_post_gc",
+            "basis": "post_gc 口径（净常驻代理），容差 2%"
+          },
+          {
+            "metric": "total_used_per_frame",
+            "before": 4975087597.5,
+            "after": 4993534476.0,
+            "delta": 18446878.5,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "triangles",
+            "before": 2166.0,
+            "after": 2166.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          },
+          {
+            "metric": "vertices",
+            "before": 6018.0,
+            "after": 6018.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false,
+            "value_source": "window",
+            "basis": ""
+          }
+        ],
+        "perception": {
+          "render_diff_score": null,
+          "anim_event_diff": null,
+          "replay_divergence": null,
+          "passed": false
+        },
+        "conflicts": [],
+        "compile_ok": true,
+        "realized_over_expected": 3.429,
+        "status": "resolved"
+      },
+      "detail": {
+        "detector": "DET-CPU-GC-FRAMEALLOC",
+        "fixture": {
+          "n": 4,
+          "median": 77977.0,
+          "noise_band_mad": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "before_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_191433\\before\\multiwin_full.json",
+        "after_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_191433\\after\\multiwin_full.json",
+        "guard_worst_rel": 0.0,
+        "perception_gate_pending": true,
+        "conflicts": [],
+        "memory_guards_unevaluated": [
+          {
+            "metric": "monoUsedBytes",
+            "value_source": "fresh_post_gc",
+            "cross_check_ok": false,
+            "basis": "post_gc 口径（净常驻代理），容差 2% !!交叉校验未过—fresh 与束状态不齐",
+            "window_before": 105257984.0,
+            "window_after": 116911104.0,
+            "window_delta": 11653120.0
+          }
+        ]
+      }
+    },
+    "rollback_drill": {
+      "rolled_back_to": "upi/attempt-m3-20261108_191433",
+      "head_after": "2b2215e4c243948838499ca88f6ee21212ef5998",
+      "asset_manifest_restored": true,
+      "scene_restored": true,
+      "amh_expected": "8907f81a458d0419",
+      "amh_after": "8907f81a458d0419",
+      "editor_touched": false
+    }
+  },
+  "final": {
+    "status": "resolved",
+    "note": "resolved 后主动回滚=彩排收尾，不是失败判定；P2 语义断言/G3 感知门禁 pending（M7）"
+  }
+}

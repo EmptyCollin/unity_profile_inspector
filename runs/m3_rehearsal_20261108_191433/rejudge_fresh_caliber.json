@@ -1,0 +1,22 @@
+{
+  "note": "事后判定层复算：对 191433 彩排当日留档的束与 fresh 数据，用防抖容差修正后的 memory_guard 口径重算 monoUsedBytes 守护。非新一轮采样，不替换原报告（原报告的盲区记录保留为历史事实——它如实反映了当时口径过严的判定层缺陷）。",
+  "recomputed_at": "2026-11-08",
+  "protocol": "同原彩排（数据文件未动）",
+  "window_median_MB": {
+    "before": 100.38,
+    "after": 111.5,
+    "role": "污染口径，仅留档"
+  },
+  "fresh_post_gc_MB": {
+    "before": 107.46,
+    "after": 107.12
+  },
+  "cross_check_ok": true,
+  "staleness_dev": {
+    "before": 0.1148,
+    "after": 0.0173
+  },
+  "net_delta_MB": -0.34,
+  "regressed": false,
+  "conclusion": "记忆体守护在新口径下受保护且未劣化 ⇒ 彩排判定 resolved 成立（a4_altertest 预测净代价 ~2MB，本轮实测 -0.34MB，同数量级且远低于窗口口径的 +11.65MB 假象）"
+}

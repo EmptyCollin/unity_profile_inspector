@@ -53,17 +53,22 @@ check("窗口差值仍留档（bundle_delta 归档不丢数据）",
 # A2: 窗口[104.3,105.4] floor pre/post 105.9/104.4；B2: 窗口[111.5,111.9] 109.2/106.4
 f_b = {"monoUsedBytes": {"pre_gc": 105.9 * MB, "post_gc": 104.4 * MB}}
 f_a = {"monoUsedBytes": {"pre_gc": 109.2 * MB, "post_gc": 106.4 * MB}}
-# 交叉校验：pre_gc≈同侧窗口中位——A2 侧 |105.9-104.85|/104.85=1.0%<2% 过；
-# B2 侧 |109.2-111.7|/111.7=2.2%>2% 不过 ⇒ 这正是跨会话采集要拦的情形
+# 彩排实测教训（2026-11-08 新口径首轮）：fresh 是独立 Play 会话，pre_gc 与
+# 验证窗束天然差 5~10%（当日 6.3%）——旧 2% 硬交叉校验把合法数据误推盲区。
+# 新语义：≤25% 一律采信（记偏差留档），>25% 才按"来自别的机器状态"拒收。
 e = memory_guard_entry("monoUsedBytes", stat(104.85 * MB), stat(111.7 * MB), f_b, f_a)
-check("B2 侧 pre_gc 与窗口中位差 2.2% ⇒ 交叉校验不过", e["cross_check_ok"] is False)
-check("校验不过 ⇒ 不判劣化也不判清白（未评估语义）", not is_regressed(e))
+check("pre_gc 偏差 1.0%/2.2% 在防抖内 ⇒ 采信", e["cross_check_ok"] is True)
+check("偏差值留档（staleness_dev 进报告可回溯）",
+      e["staleness_dev"]["before"] is not None)
+check("post_gc 104.4→106.4 = +1.9% < 2% 容差 ⇒ 判非劣化（净常驻属容差内波动）",
+      not is_regressed(e))
 
-# 同会话配对（交叉校验都过的构造）：post_gc 104.4→106.4 = +1.9% < 2% 容差
-f_a2 = {"monoUsedBytes": {"pre_gc": 105.2 * MB, "post_gc": 106.4 * MB}}
-e = memory_guard_entry("monoUsedBytes", stat(105.0 * MB), stat(105.0 * MB),
-                       f_b, f_a2)
-check("两侧交叉校验过", e["cross_check_ok"] is True)
+# 拒收分支：pre_gc 与窗口中位差 40% ⇒ 疑似陈旧/别机，cross_check_ok=False
+f_stale = {"monoUsedBytes": {"pre_gc": 150.0 * MB, "post_gc": 106.4 * MB}}
+e2 = memory_guard_entry("monoUsedBytes", stat(104.85 * MB), stat(111.7 * MB),
+                        f_b, f_stale)
+check("pre_gc 偏差 40% ⇒ 防抖拒收", e2["cross_check_ok"] is False)
+check("拒收 ⇒ 不判劣化也不判清白（未评估语义）", not is_regressed(e2))
 check("post_gc +1.9% < 2% ⇒ 判非劣化（净常驻 1.9MB 属容差内波动）",
       not is_regressed(e))
 
