@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import time
@@ -194,11 +195,18 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         if issue:
             # 量级取 issue.magnitude（compare 的 detail 里同值键名是 delta，
             # 上一版写 detail.get("magnitude") 会静默拿 None——契约键名错）
+            dr = detail.get("deviation_ratio")
+            undef = isinstance(dr, float) and math.isinf(dr)
+            # 零基线指标（F-ANIM-01，A2 债）ratio=inf：那是"无定义"不是
+            # "无穷偏离"。落 None + 显式标注——Infinity 进 JSONL 是非标准
+            # 扩展（跨工具解析失败），且 None 逼消费方去看标注而不是拿伪数
+            # 当依据（I1）。检出本身仍成立（绝对增量门限，A2 既定修法）。
             out["findings"].append({
                 "kind": "issue", "ptype": "waterline", "fixture": det.fixture,
                 "detector": det.id, "metric": det.metric,
                 "magnitude": issue.magnitude,
-                "deviation_ratio": detail.get("deviation_ratio")})
+                "deviation_ratio": None if undef else dr,
+                "ratio_undefined_zero_baseline": undef})
     out["bundle"] = str(bundle)
     return out
 

@@ -35,9 +35,13 @@ def check(name, cond):
 
 
 def win_metrics(vals):
-    """构造 m1_multiwin 束的窗口形状（median 由 stats_from_windows 消费）。"""
-    return {"windows": [{"metrics": {k: {"median": v[i]} for k, v in vals.items()},
-                         "a2": {"gc_median": vals.get("gc", [0]*4)[i], "gc_n": 60}}
+    """构造 m1_multiwin 束的窗口形状（median 由 stats_from_windows 消费）。
+    gc/anim 走 a2 逐帧序列键（stats_from_windows 的 A2MAP 消费 *_median）。"""
+    return {"windows": [{"metrics": {k: {"median": v[i]} for k, v in vals.items()
+                                      if k not in ("gc", "anim")},
+                         "a2": {"gc_median": vals.get("gc", [0] * 4)[i], "gc_n": 60,
+                                "anim_median": vals.get("anim", [0] * 4)[i],
+                                "anim_n": 60}}
                         for i in range(4)]}
 
 
@@ -51,6 +55,8 @@ def synth_bundle(clean_hi=False, cpu_defect=False):
             "available": 1.0}
     clean = {k: [v] * 4 for k, v in base.items()}
     clean["gc"] = [9000.0] * 4
+    # 动画指标 CLEAN 基线≈0（A2 债实况）：缺陷轮 ratio=inf，落盘必须清洗
+    clean["anim"] = [0.0] * 4
     cpu = dict(clean)
     if cpu_defect:
         # 远超标定阈（gc min_magnitude=20000, dev_ratio=1.5）
@@ -176,6 +182,37 @@ def main():
     finally:
         sp.run = real_run
     check("正常束 ⇒ 零检出", not r["findings"] and not r["blindspot"])
+
+    # 零基线无穷比值清洗（实测轮撞出：F-ANIM-01 ratio=Infinity 写进 JSONL）
+    def make_fake_run_anim(*a, **k):
+        doc = synth_bundle()
+        clean_wins = doc["fixtures"]["CLEAN"]["windows"]
+        # F-ANIM-01 = CLEAN 的全部窗口，只把 a2 动画序列中位推到缺陷量级
+        doc["fixtures"]["F-ANIM-01"] = {
+            "windows": [dict(w, a2=dict(w["a2"], anim_median=344300.0))
+                        for w in clean_wins]}
+        (TMP / "w5").mkdir(parents=True, exist_ok=True)
+        (TMP / "w5" / "multiwin_full.json").write_text(
+            json.dumps(doc), encoding="utf-8")
+        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})
+    _saved = sp.run
+    sp.run = lambda *a, **k: make_fake_run_anim()
+    try:
+        r5 = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01", "F-ANIM-01"],
+                                 "windows": 4, "waterline_timeout_s": 5},
+                                TMP / "w5")
+    finally:
+        sp.run = _saved
+    anim_f = [f for f in r5["findings"] if f["fixture"] == "F-ANIM-01"]
+    check("零基线 F-ANIM-01 仍检出（绝对门限成立），但 ratio 清洗为 None+标注",
+          len(anim_f) == 1 and anim_f[0]["deviation_ratio"] is None
+          and anim_f[0]["ratio_undefined_zero_baseline"] is True)
+    try:
+        json.dumps(r5["findings"], allow_nan=False)
+        strict_ok = True
+    except ValueError:
+        strict_ok = False
+    check("findings strict-JSON 可解析（Infinity 扩展不再出现）", strict_ok)
 
     # 静默假象闸：缺陷夹具窗口为空（采集失败的束形状）⇒ 盲区，不冒充零检出
     def make_fake_run_broken(*a, **k):

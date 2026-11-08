@@ -185,6 +185,15 @@ def main():
     check("第二次 fix 无回滚 ⇒ 需收尾（只看最后一次 fix 之后）",
           need(two_fix, None) is True)
 
+    print("== ⑥c fix 早退直达出口（patrol-once 实测撞出的路由缺口）==")
+    # awaiting_approval / rejected / diff_rejected / compile_failed 四类早退
+    # 都返回 route=needs_human——无条件 fix→verify 边会让 verify 照跑，
+    # 读不到 pre_attempt 崩 KeyError，把干净的"待批"终态污染成假错误。
+    c9 = run_case(route_at="fix")
+    v9 = c9["visited"]
+    check("fix needs_human ⇒ verify 未跑、直达 escalate",
+          "verify" not in v9 and v9[-2:] == ["fix", "escalate"])
+
     print("== ⑦ budget_check 纯函数分支 ==")
     check("tokens 超限命中", budget_check(
         {"budget": {"max_tokens": 100}, "spent": {"tokens": 150}}
