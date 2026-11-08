@@ -76,11 +76,16 @@ class Issue(BaseModel):
         # G19：判"发作"必须建在逐帧源上；A 档秒级抽样判发作 = 漏检+把被跳过的异常当正常
         if self.ptype == "episode":
             tiers = {e.data_tier for e in self.evidence}
-            if not (tiers & {"A2", "A4"}) :
+            if not (tiers & {"A2", "A4"}):
                 raise ValueError(
                     f"ptype=episode 的 Issue 必须有逐帧源证据（A2/A4/探针），当前={tiers or '无'}（G19）")
-            if self.attribution_source == "auto":
-                raise ValueError("episode 自动归因需归因源在场；GPU 逐笔归因当前无源，"
+            # 归因源在场性**按链路**判（与 detector._gpu_a4_episode_is_fact_only 同口径）：
+            #   gpu   —— 逐笔归因程序侧无源（FD 实测不可取，DESIGN §12 ①-⑫），必须 human
+            #   其余 —— 样本自带 gc_ring + A4 CPU/GPU 分解 = 程序化归因源在场，允许 auto。
+            # 旧版此处无条件禁 auto，是把 GPU 特例泛化——会误杀 loading/anim 发作通路，
+            # 与注册表口径互相矛盾（T2w 收口实测撞出）。
+            if self.link == "gpu" and self.attribution_source != "human":
+                raise ValueError("episode 归因源按链路判：GPU 发作的逐笔归因当前无源，"
                                  "必须 attribution_source=human（G19/DESIGN D13）")
         return self
 
@@ -142,13 +147,20 @@ class A4Frame(BaseModel):
 class BreachSample(BaseModel):
     """P2 发作证据单元（DESIGN §2.4 T2w，M2a）。越界那一刻 + 前后原始序列 + A4 窗口。"""
 
+    model_config = {"extra": "forbid"}   # 探针落盘字段与本契约必须逐一对齐：
+    # 默认的"静默忽略多余字段"会让探针/契约漂移无声发生（T2w 收口实测撞出：
+    # rel/gc_ring_* 在 jsonl 里存在、契约没有 → 被静默吃掉 → 下游 AttributeError）。
+
     frame_idx: int
+    rel: int = -1                                        # 相对回放 origin 的帧号（T2 对齐口径）
     metric: str
     value: float
     threshold_abs: float
     deviation_ratio: float
     ring_before: list[float] = Field(default_factory=list)   # 前 N 帧（默认 10，D17）
     ring_after: list[float] = Field(default_factory=list)    # 后 M 帧（M≥14 覆盖 A4 固定 4 帧延迟）
+    gc_ring_before: list[float] = Field(default_factory=list)   # 逐帧 GC 分配序列（loading/cpu 发作的归因源）
+    gc_ring_after: list[float] = Field(default_factory=list)
     a4_window: list[A4Frame] = Field(default_factory=list)
     data_tier: Literal["A2", "A4"] = "A2"                    # 发作必须有逐帧源（G19）
     protocol_fingerprint: str = ""

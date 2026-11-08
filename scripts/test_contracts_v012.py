@@ -36,9 +36,16 @@ def expect_accept(name: str, fn) -> None:
         FAIL.append(f"{name}: 合规形状被误伤 → {e.errors()[0]['msg'][:80]}")
 
 
-# ── 基线：旧注册表不得被新校验误伤 ────────────────────────────────
-expect_accept("注册表存量 4 条 detector 照常构造", lambda: DEFAULT_REGISTRY)
-assert len(DEFAULT_REGISTRY) == 4, "注册表条目数变了"
+# ── 基线：旧注册表不得被新校验误伤；构成随 M2a/T2w 更新 ──────────
+expect_accept("注册表存量 detector 照常构造", lambda: DEFAULT_REGISTRY)
+_wl = [d for d in DEFAULT_REGISTRY if d.ptype == "waterline"]
+_ep = [d for d in DEFAULT_REGISTRY if d.ptype == "episode"]
+assert len(_wl) == 4, f"水位条目变了：{len(_wl)}"
+assert [d.id for d in _ep] == ["DET-LOAD-FRAMESPIKE"], f"发作条目构成异常：{_ep}"
+# 阈值体系按 ptype 分流：水位只认噪声标定，发作只认带出处的帧预算锚点
+assert all(d.thresholds.threshold_source == "noise_calibration" for d in _wl)
+assert all(d.thresholds.threshold_source == "frame_budget" and d.thresholds.budget_ref
+           for d in _ep), "episode 检测器必须用 frame_budget 阈值且带 budget_ref"
 
 ev_a = models.Evidence(tool="poll", value=127.0, unit="calls", data_tier="A")
 ev_a2 = models.Evidence(tool="probe", value=2e5, unit="B/frame", data_tier="A2")
