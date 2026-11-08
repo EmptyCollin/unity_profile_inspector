@@ -126,8 +126,9 @@ def main():
     check("stub 的 error 文本保留", "stub@diagnose" in str(c2["final"].get("error", "")))
 
     print("== ③ verify regressed → review 回环；两条停止路径都收敛 escalate ==")
-    # 默认预算(attempts=3, review=3)下 attempts 先到：第 3 次 fix 后
-    # verify 入口被 G11 拦停（写入不拦、采样拦——省成本，同 G8 精神）
+    # 节点感知预算闸（批准后链路实测撞出的语义修正）：attempts 只拦 fix 入口，
+    # 默认预算(3,3)下 regressed 回环跑满 3 次 attempt，verify 每次都执行
+    # （不白烧采样），出环由 review 配额 n<lim 判 escalate_human。
     c3 = run_case("regressed")
     v3 = c3["visited"]
     check("review 被执行", "review" in v3)
@@ -135,10 +136,9 @@ def main():
     # 不能用 index("diagnose",1)——那从索引1起搜先撞上第一轮的 diagnose）
     check("回环：review 之后又跑 diagnose",
           "diagnose" in v3[v3.index("review") + 1:])
-    check("attempts 拦停优先生效：attempts=3 review=2 escalate 收尾",
-          c3["final"].get("attempts") == 3 and v3.count("review") == 2
-          and v3[-1] == "escalate" and "budget_exceeded(attempts)"
-          in str(c3["final"].get("error", "")))
+    check("attempts 满不拦 verify：verify 跑满3、review 由配额出环（旧误拦已修）",
+          c3["final"].get("attempts") == 3 and v3.count("verify") == 3
+          and v3.count("review") == 3 and v3[-1] == "escalate")
     check("不进 record（未成功）", "record" not in v3)
     # 放宽 attempts 后 review 配额单独触发（G6：3 次审查耗尽 → 出环）
     c3b = run_case("regressed", budget={"max_attempts_per_issue": 99})
