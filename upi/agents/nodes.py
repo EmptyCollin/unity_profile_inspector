@@ -108,23 +108,32 @@ PLAYBOOK_DIFFS = {a: (PB, [_D1, _D2], _INVS) for a in (
     "repeated_getcomponent_in_update", "enum_tostring_concat_per_frame")}
 
 
+def _run_detect():
+    """跑 m1_detect 并定位本轮 detection.json（模块级=测试可替换的边界）。
+
+    stdout 末行 "trace: <abs>/trace.jsonl" 是唯一稳定指针——m1_detect 不落
+    "最新"软链，也不该为它加副作用。返回 None = 没跑成/没产出，detect 节点
+    按 needs_human 处理。"""
+    import subprocess, sys
+    p = subprocess.run([sys.executable, str(ROOT / "scripts" / "m1_detect.py")],
+                       capture_output=True, text=True, timeout=180,
+                       encoding="utf-8", errors="replace")
+    for ln in p.stdout.splitlines():
+        if ln.startswith("trace:"):
+            return Path(ln.split(":", 1)[1].strip()).parent / "detection.json"
+    return None
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
-               approval_note: str = "") -> dict:
-    """构造七节点函数表。live_llm=False 时 diagnose 用离线替身（不烧积分）。"""
+               approval_note: str = "",
+               knowledge_db: Path | None = None) -> dict:
+    """构造七节点函数表。live_llm=False 时 diagnose 用离线替身（不烧积分）。
+
+    knowledge_db 可注入（单测写临时库，不污染仓库 patterns.db 与成功率分母）。"""
 
     def detect(st: dict) -> dict:
         # 复用 m1_detect 的判据链，但只取"当前夹具"这一条 Issue 进循环
-        import subprocess, sys
-        p = subprocess.run([sys.executable, str(ROOT / "scripts" / "m1_detect.py")],
-                           capture_output=True, text=True, timeout=180,
-                           encoding="utf-8", errors="replace")
-        # 定位本轮 detection.json：stdout 末行 "trace: <abs>/trace.jsonl" 是唯一
-        # 稳定指针（m1_detect 不落"最新"软链，也不该为它加副作用）
-        det_fp = None
-        for ln in p.stdout.splitlines():
-            if ln.startswith("trace:"):
-                det_fp = Path(ln.split(":", 1)[1].strip()).parent / "detection.json"
-                break
+        det_fp = _run_detect()
         findings = []
         issue = None
         if det_fp and det_fp.exists():
@@ -146,7 +155,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                                  "anchor": sig.get("mechanism")}
         if issue is None:
             return {"route": "needs_human",
-                    "error": f"detect 未在当前夹具检出 Issue（m1_detect rc={p.returncode}）"}
+                    "error": "detect 未在当前夹具检出 Issue"
+                             f"（detection.json={'缺失' if det_fp is None else det_fp.name}）"}
         return {"findings": findings, "issue": issue, "route": "proceed"}
 
     def diagnose(st: dict) -> dict:
@@ -270,7 +280,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
     def record(st: dict) -> dict:
         # 成功修复才写知识库（症状×根因×动作三重签名）
         from upi.core.knowledge import KnowledgeStore
-        ks = KnowledgeStore(ROOT / "knowledge" / "patterns.db")
+        ks = KnowledgeStore(knowledge_db or (ROOT / "knowledge" / "patterns.db"))
         try:
             top = st["hypotheses"][0]
             pid = _pattern_id(st["issue"], top)
