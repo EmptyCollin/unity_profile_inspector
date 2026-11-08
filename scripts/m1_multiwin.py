@@ -165,15 +165,20 @@ def sample_scene(fixture: str, windows: int) -> dict:
 
 
 def main() -> int:
-    global FULL_SESSION, IDLE_ONLY
+    global FULL_SESSION, IDLE_ONLY, CALDIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--session", choices=["none", "idle", "full"])
     ap.add_argument("--fixtures", nargs="*", default=None)
     ap.add_argument("--windows", type=int, default=5)
     ap.add_argument("--merge", action="store_true")
+    ap.add_argument("--caldir", default=None,
+                    help="multiwin 输出目录。验证窗必须用隔离目录（M3）——"
+                         "默认 calibration/ 会覆盖标定真相源，跨 attempt 混比正是 G7 要拦的事")
     args = ap.parse_args()
 
-    CALDIR.mkdir(exist_ok=True)
+    if args.caldir:
+        CALDIR = Path(args.caldir)
+    CALDIR.mkdir(parents=True, exist_ok=True)
 
     if args.merge:
         return do_merge()
