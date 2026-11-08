@@ -220,8 +220,31 @@ def main() -> int:
         doc["fixtures"][fx] = sample_scene(fx, args.windows)
         fp = CALDIR / f"multiwin_{args.session}.json"
         fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        (CALDIR / f"multiwin_{args.session}_summary.json").write_text(
+            json.dumps(summarize_bundle(doc), ensure_ascii=False, indent=2),
+            encoding="utf-8")
     print("写入", CALDIR / f"multiwin_{args.session}.json")
     return 0
+
+
+def summarize_bundle(doc: dict) -> dict:
+    """原始束 → 摘要束：A2 逐帧序列（110 万点/23.9MB）折成每窗口 median + n。
+
+    等价性已实测逐字段一致（stats_from_windows 本就是"每窗口取 median 再
+    跨窗口统计"，median 是等价输入，判据不丢）。摘要入库、原始束本地留档
+    并可由 resample 重生成——入库的是结论与可复现路径，不是重生成物。"""
+    import copy
+    t = copy.deepcopy(doc)
+    for _fx, v in t.get("fixtures", {}).items():
+        for w in v.get("windows", []):
+            a2 = w.get("a2")
+            if isinstance(a2, dict):
+                for k in list(a2):
+                    if isinstance(a2[k], list) and a2[k]:
+                        a2[k + "_median"] = float(statistics.median(a2[k]))
+                        a2[k + "_n"] = len(a2[k])
+                        del a2[k]
+    return t
 
 
 def between_windows(wins: list[dict]) -> dict:
