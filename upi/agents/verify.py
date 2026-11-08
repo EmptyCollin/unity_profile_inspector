@@ -44,6 +44,51 @@ HIGHER_IS_WORSE = {
 NOT_GUARDED = {"available", "scale_factor"}
 
 
+def instrument_state() -> dict:
+    """常驻件存活指纹（彩排第一轮实测教训：before 束测到 uncapped 1.87ms、
+    after 束测到 capped 16.6ms——同一个"协议"下仪器状态根本不同，差值
+    混入常驻件开关与帧率封顶变化，按 G7/§3.6 不可比，整轮作废重采）。
+
+    三件全查：越界探针心跳、回放驱动器心跳、A2 采样器（无心跳文件，
+    用 probe 侧 status 回执推断注入链在场与否不成立——A2 由 m1_multiwin
+    每束自注入，其状态=注入结果，记录在各束数据里；这里查两枚心跳 +
+    实时帧率封顶形态）。形态判据：连取 3 次 cpuFrameTimeMs，全部 ≈16.6±2
+    ⇒ capped60；存在 <10 ⇒ uncapped。"""
+    st = {}
+    now = time.time()
+    for name, fn in (("breachprobe_hb", "pb_hb.txt"), ("replaydriver_hb", "rp_hb.txt")):
+        p = ROOT / "runs" / "_probe" / fn
+        st[name] = round(now - p.stat().st_mtime, 1) if p.exists() else None
+    from upi.tooling.unity_cli import run_unity
+    vals = []
+    for _ in range(3):
+        r = run_unity(["command", "diagnostics get_performance",
+                       "--project-path", str(ROOT / "fixtures" / "upi-fixture")],
+                      timeout_s=60)
+        ft = ((r.data or {}).get("result") or {}).get("frameTiming") or {}
+        if ft.get("cpuFrameTimeMs") is not None:
+            vals.append(float(ft["cpuFrameTimeMs"]))
+        time.sleep(0.7)
+    capped = bool(vals) and all(abs(v - 16.667) < 2.5 for v in vals)
+    st["fps_mode"] = "capped60" if capped else ("uncapped" if vals else "unknown")
+    st["samples_ms"] = [round(v, 3) for v in vals]
+    return st
+
+
+def assert_comparable(s_before: dict, s_after: dict) -> None:
+    """两束仪器状态一致性硬闸（代码层防呆，不依赖人记得检查）。"""
+    diffs = []
+    if s_before["fps_mode"] != s_after["fps_mode"]:
+        diffs.append(f"fps_mode {s_before['fps_mode']} vs {s_after['fps_mode']}")
+    for k in ("breachprobe_hb", "replaydriver_hb"):
+        a, b = s_before[k], s_after[k]
+        if (a is None) != (b is None) or (a is not None and b is not None
+                                          and max(a, b) > 5 > min(a, b)):
+            diffs.append(f"{k} 存活不一致 {a} vs {b}")
+    if diffs:
+        raise RuntimeError("两束仪器状态不一致，禁止对比（G7 引申）：" + "; ".join(diffs))
+
+
 def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) -> dict:
     """当场重采一个束（full 会话 = A+A2，与标定同协议）。
 
@@ -53,6 +98,10 @@ def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) ->
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
            "--session", "full", "--fixtures", fixture,
            "--windows", str(windows), "--caldir", str(out_dir)]
+    # 采前状态：第一轮彩排作废的根因就是没人记这个——驱动器采前是死的
+    # （被 overhead L0 unload 摘钩）、采中途被编译域重载复活，两束形态
+    # 不同却无人知晓。pre/mid 都记录，一致性交给 assert_comparable 判。
+    pre = instrument_state()
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s,
                        encoding="utf-8", errors="replace")
     fp = out_dir / "multiwin_full.json"
@@ -64,6 +113,21 @@ def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) ->
     if "windows" not in fx:
         raise RuntimeError(f"重采失败（{tag}）：bundle 无 {fixture} 窗口数据 "
                            f"（error={fx.get('error', '?')}）")
+    # 仪器状态写进束数据（彩排第一轮教训的固化）：
+    #   _instr_pre  —— 发起前状态，决定是否要先重装常驻件再采
+    #   _instr_mid  —— 窗口实际运行中的状态，才是对比基准
+    # mid≠pre ⇒ 采样中途常驻件被域重载复活，这束数据单独标记，不静默
+    mid = instrument_state()
+    d["_instr_pre"], d["_instr_mid"] = pre, mid
+    # 采前≠采中 ⇒ 常驻件在采样中途被域重载复活/摘钩（第一轮彩排实测撞死
+    # 的正是这条：pre=uncapped 驱动器死、mid=capped60 驱动器活）。这束数据
+    # 的窗口内部状态不齐，必须显式标记，判定方按"整束作废"处理。
+    if pre.get("fps_mode") != mid.get("fps_mode"):
+        d["_instr_drift"] = f"pre={pre.get('fps_mode')} mid={mid.get('fps_mode')}"
+    if mid["fps_mode"] == "capped60" and len(fx["windows"]) >= 2:
+        # 封顶态下 cpuFrameTime 的窗口间 σ≈0（钉在 16.6），gc 尖峰可能被
+        # 60fps 等待吃掉——如实记录，判定用 G17 绝对门限路径
+        d["_capped_warning"] = True
     return d
 
 
@@ -76,6 +140,19 @@ def verdict_from_bundles(det_id: str, fixture: str,
                         before_doc: dict, after_doc: dict,
                         compile_ok: bool) -> tuple[Verdict, dict]:
     """核心判定。返回 (Verdict, 详情 dict——详情供 trace/report 落盘)。"""
+    # 仪器状态双闸（第一轮彩排作废教训的固化）：
+    #   漂移闸——单束内 _instr_pre ≠ _instr_mid，束内窗口状态不齐，整束作废；
+    #   对比闸——两束 mid 形态/常驻件存活不一致，禁止对比（G7 引申）。
+    for doc, tag in ((before_doc, "before"), (after_doc, "after")):
+        pre_s, mid_s = doc.get("_instr_pre"), doc.get("_instr_mid")
+        if pre_s and mid_s and pre_s.get("fps_mode") != mid_s.get("fps_mode"):
+            raise RuntimeError(
+                f"{tag} 束仪器状态中途漂移（采前={pre_s.get('fps_mode')} "
+                f"采中={mid_s.get('fps_mode')}），整束作废重采，不得带病判定")
+    bp, ap = before_doc.get("_instr_mid"), after_doc.get("_instr_mid")
+    if bp and ap:
+        assert_comparable(bp, ap)
+
     det = next(d for d in DEFAULT_REGISTRY if d.id == det_id)
     cal = latest_calibration()
     if cal:
