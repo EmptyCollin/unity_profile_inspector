@@ -337,7 +337,6 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 成功修复才写知识库（症状×根因×动作三重签名）
         from upi.core.knowledge import KnowledgeStore
         ks = KnowledgeStore(knowledge_db or (ROOT / "knowledge" / "patterns.db"))
-        prop_note = {"kind": "record", "proposal_status": "record_failed"}
         try:
             top = st["hypotheses"][0]
             pid = _pattern_id(st["issue"], top)
