@@ -168,6 +168,23 @@ def main():
     check("故障节点 span exit_status=1", bool(crash_spans)
           and crash_spans[0]["exit_status"] == 1)
 
+    print("== ⑥b _needs_final_rollback 出口判据（纯函数）==")
+    from upi.agents.nodes import _needs_final_rollback as need
+    fixd = [{"kind": "fix", "execute": {"status": "applied"}}]
+    check("applied 且无后续回滚且未 resolved ⇒ 需收尾回滚", need(fixd, None) is True)
+    check("resolved ⇒ 不回滚（改动要保留）", need(fixd, "resolved") is False)
+    applied_then_rb = fixd + [{"kind": "review", "rollback": {"ok": True}}]
+    check("review 已回滚 ⇒ 不重复回滚", need(applied_then_rb, None) is False)
+    check("最后 fix 未 applied（编译失败已回滚）⇒ 无需再滚",
+          need([{"kind": "fix", "execute": {"status": "compile_failed_rolled_back"}}],
+               None) is False)
+    check("无 fix 记录 ⇒ 无需回滚", need([{"kind": "detect"}], None) is False)
+    two_fix = [{"kind": "fix", "execute": {"status": "applied"}},
+               {"kind": "review", "rollback": {"ok": True}},
+               {"kind": "fix", "execute": {"status": "applied"}}]
+    check("第二次 fix 无回滚 ⇒ 需收尾（只看最后一次 fix 之后）",
+          need(two_fix, None) is True)
+
     print("== ⑦ budget_check 纯函数分支 ==")
     check("tokens 超限命中", budget_check(
         {"budget": {"max_tokens": 100}, "spent": {"tokens": 150}}
