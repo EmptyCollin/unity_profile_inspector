@@ -171,6 +171,9 @@ def main() -> int:
     ap.add_argument("--fixtures", nargs="*", default=None)
     ap.add_argument("--windows", type=int, default=5)
     ap.add_argument("--merge", action="store_true")
+    ap.add_argument("--no-summary", action="store_true",
+                    help="临时工作束（A4 交替块实验等）不落摘要——摘要文件名按会话固定，"
+                         "写到隔离目录会留下多份 *_summary.json 误导 load_multwin 的优先级")
     ap.add_argument("--caldir", default=None,
                     help="multiwin 输出目录。验证窗必须用隔离目录（M3）——"
                          "默认 calibration/ 会覆盖标定真相源，跨 attempt 混比正是 G7 要拦的事")
@@ -220,9 +223,10 @@ def main() -> int:
         doc["fixtures"][fx] = sample_scene(fx, args.windows)
         fp = CALDIR / f"multiwin_{args.session}.json"
         fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
-        (CALDIR / f"multiwin_{args.session}_summary.json").write_text(
-            json.dumps(summarize_bundle(doc), ensure_ascii=False, indent=2),
-            encoding="utf-8")
+        if not args.no_summary:
+            (CALDIR / f"multiwin_{args.session}_summary.json").write_text(
+                json.dumps(summarize_bundle(doc), ensure_ascii=False, indent=2),
+                encoding="utf-8")
     print("写入", CALDIR / f"multiwin_{args.session}.json")
     return 0
 
