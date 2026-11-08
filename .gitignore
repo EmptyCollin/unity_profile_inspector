@@ -76,12 +76,14 @@ runs/a4_altertest_*/blocks/*/multiwin_full.json
 
 # 巡检可变运行态（样本消费偏移/冷却时间戳，进程本地状态非结论）
 runs/patrol_state.json
-# 作废轮的工作束（判读结论在 patrol_runs.jsonl 与记录里）
-runs/patrol_*/
 
 # dry-run 工单渲染样例（可重生成的展示产物）
 runs/_dryrun_approval.md
-# 巡检单轮的工作束目录（判读结论全在 patrol_runs.jsonl，束可重采）
+# 巡检单轮的工作束（multiwin_full.json 单文件 ~11MB，可重采再生）。
+# ⚠️ 只忽略束文件本身，绝不整目录 runs/patrol_*/ 忽略：唤起停轮目录里的
+# approvals/ 工单、decision.json、state.json、runreport.json、trace.jsonl
+# 是结论证据（"入库的是结论与指针"原则），随工作束一起吞会丢批准审计链
+# ——实测拒批轮撞出，旧规则 runs/patrol_*/ 已删。
 runs/patrol_*/multiwin_full.json
 
 # 验证窗原始束（before/after multiwin_full.json，单文件 3.7~4.2MB，含 A2 逐帧
