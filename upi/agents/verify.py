@@ -89,11 +89,34 @@ def assert_comparable(s_before: dict, s_after: dict) -> None:
         raise RuntimeError("两束仪器状态不一致，禁止对比（G7 引申）：" + "; ".join(diffs))
 
 
+def rp_ctl(line: str, wait_s: float = 6.0) -> str:
+    """向常驻回放驱动器发文件命令并等回执（其控制轮询 10Hz）。
+    驱动器心跳死时命令文件只是滞留，无害——返回值记 TIMEOUT 即可。"""
+    pdir = ROOT / "runs" / "_probe"
+    pdir.mkdir(exist_ok=True)
+    rp_res, rp_cmd = pdir / "rp_res.txt", pdir / "rp_cmd.txt"
+    old = rp_res.read_text(encoding="utf-8") if rp_res.exists() else None
+    tmp = pdir / "rp_cmd.tmp"
+    tmp.write_text(line, encoding="utf-8")
+    tmp.replace(rp_cmd)
+    t0 = time.time()
+    while time.time() - t0 < wait_s:
+        time.sleep(0.4)
+        if rp_res.exists() and rp_res.read_text(encoding="utf-8") != old:
+            return rp_res.read_text(encoding="utf-8").strip()[:120]
+    return "TIMEOUT"
+
+
 def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) -> dict:
     """当场重采一个束（full 会话 = A+A2，与标定同协议）。
 
     前置检查（实测教训）：常驻件在不在就在那儿，不在别硬采——
-    A2 注入失败 m1_multiwin 自身会返 error，这里只透传并拒绝空束。"""
+    A2 注入失败 m1_multiwin 自身会返 error，这里只透传并拒绝空束。
+    驱动器防御（第二轮彩排教训）：采样窗不是回放。驱动器停在武装态时
+    每帧压 targetFrameRate=60，会把 m1_multiwin 自设的 uncapped 形态
+    覆盖掉——F-CPU-01 的每帧分配被 vsync 等待帧从 78KB 抬到 183KB，
+    被测机制淹死在仪器行为里。采前显式 disarm，仪器状态归采样方。"""
+    rp_ctl("disarm")
     out_dir = ROOT / "runs" / tag
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
            "--session", "full", "--fixtures", fixture,
@@ -153,6 +176,13 @@ def verdict_from_bundles(det_id: str, fixture: str,
     if bp and ap:
         assert_comparable(bp, ap)
 
+    det = next(d for d in DEFAULT_REGISTRY if d.id == det_id)
+    cal = latest_calibration()
+    if cal:
+        apply_calibration([det], cal)        # 阈值只认标定值（§8.1）
+    bstats = bundle_stats(before_doc, fixture)
+    astats = bundle_stats(after_doc, fixture)
+
     # 播放期形态闸（第一轮作废的自我修正）：_instr_* 在 Play 结束后才取样，
     # 测的是编辑态形态——抓不住"窗口运行中途被域重载复活"的差异。
     # 形态的真证据在窗口数据本身：capped60 的 cpuFrameTimeMs 中位 ≈16.6
@@ -169,13 +199,6 @@ def verdict_from_bundles(det_id: str, fixture: str,
             f"播放期帧率封顶形态不一致：before={rb}({bstats['cpuFrameTimeMs']['median']:.2f}ms) "
             f"after={ra}({astats['cpuFrameTimeMs']['median']:.2f}ms)。所有时间类指标差值"
             "混入仪器形态变化，整轮作废重采（第一轮彩排实测教训）")
-
-    det = next(d for d in DEFAULT_REGISTRY if d.id == det_id)
-    cal = latest_calibration()
-    if cal:
-        apply_calibration([det], cal)        # 阈值只认标定值（§8.1）
-    bstats = bundle_stats(before_doc, fixture)
-    astats = bundle_stats(after_doc, fixture)
 
     m = det.metric
     if m not in bstats or m not in astats:
