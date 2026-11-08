@@ -1,0 +1,7 @@
+10:36:03 origin fc=2 thr=35000000 seed=20261108
+10:36:03 flush fc=539 a4first=ok
+10:36:05 breach fc=117 ns=65497600
+10:36:05 flush fc=117 a4first=ok
+10:36:10 breach fc=405 ns=36614300
+10:36:10 flush fc=405 a4first=ok
+10:36:12 breach fc=539 ns=94567100

@@ -1,0 +1,34 @@
+{
+  "budget_ms": 20.0,
+  "spike_ms": 35.0,
+  "replay_script": "20261108:1:60:1000:60:120000",
+  "J1_越线检出": true,
+  "J2_ring与A4完整": true,
+  "J3_契约拒收": true,
+  "J4_复跑对齐": true,
+  "J4_detail": {
+    "common_points": 64,
+    "gc_median_A": 186644,
+    "gc_median_B": 187393,
+    "gc_median_rel_diff": 0.00402,
+    "ft_median_A_ms": 16.67,
+    "ft_median_B_ms": 16.676,
+    "ft_median_rel_diff": 0.00037,
+    "gc_pointwise_identical": "0/64",
+    "spike_positions": [
+      [
+        9,
+        51,
+        407,
+        709
+      ],
+      [
+        115,
+        403,
+        537
+      ]
+    ],
+    "spike_position_reproducible": false
+  },
+  "evidence_dir": "D:\\unity_profile_inspector\\runs\\m2a_probe\\probe_run_20261108_103617"
+}

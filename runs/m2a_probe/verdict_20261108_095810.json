@@ -1,0 +1,10 @@
+{
+  "budget_ms": 20.0,
+  "replay_script": "20261108:1:60:1000:60:120000",
+  "J1_越线检出": false,
+  "J2_ring与A4完整": false,
+  "J3_契约拒收": false,
+  "J4_复跑对齐": false,
+  "sample_rel": null,
+  "evidence_dir": "D:\\unity_profile_inspector\\runs\\m2a_probe\\probe_run_20261108_095810"
+}

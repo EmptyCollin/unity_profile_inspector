@@ -1,0 +1,19 @@
+{
+  "budget_ms": 20.0,
+  "spike_ms": 35.0,
+  "replay_script": "20261108:1:60:1000:60:120000",
+  "J1_越线检出": true,
+  "J2_ring与A4完整": true,
+  "J3_契约拒收": true,
+  "J4_复跑对齐": false,
+  "spike_rel_runs": [
+    [
+      383,
+      708
+    ],
+    [
+      400
+    ]
+  ],
+  "evidence_dir": "D:\\unity_profile_inspector\\runs\\m2a_probe\\probe_run_20261108_102112"
+}
