@@ -79,12 +79,35 @@ class AgentModelParameters(BaseModel):
     agents: dict[str, AgentParams] = Field(default_factory=dict)
 
 
+class MonitorConfig(BaseModel):
+    """pipeline.monitor：自主巡检调度参数（DESIGN §2.4 T1/T2w/T3）。
+
+    判定口径不在此处——阈值永远来自标定链（§8.1），本段只管"什么时候跑、
+    跑哪些、跑完之后唤不唤起修复循环"。"""
+    enabled: bool = False
+    interval_s: int = Field(1800, ge=60)
+    windows: int = Field(4, ge=2)
+    fixtures: list[str] = Field(default_factory=list)
+    episode: dict = Field(default_factory=dict)
+    waterline_timeout_s: int = 900
+    auto_fix: dict = Field(default_factory=dict)
+    cooldown_s: int = 0
+    max_consecutive_failures: int = Field(3, ge=1)
+    budget: dict = Field(default_factory=dict)
+
+
 class LlmConfig(BaseModel):
     schema_version: int
     providers: dict[str, Provider]
     agent_model_parameters: AgentModelParameters
     bootstrap: dict = Field(default_factory=dict)
     connectivity_check: dict = Field(default_factory=dict)
+    pipeline: dict = Field(default_factory=dict)   # 内含 monitor 段；缺=不启用
+
+    def monitor(self) -> MonitorConfig:
+        """取巡检配置。未配置 pipeline.monitor ⇒ enabled=False（不猜默认）。"""
+        m = (self.pipeline or {}).get("monitor") or {}
+        return MonitorConfig(**m)
 
     @model_validator(mode="after")
     def _refs_must_resolve(self) -> "LlmConfig":

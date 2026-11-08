@@ -100,3 +100,31 @@ connectivity_check:
     rate_limited: "429 → 限流，退避后重试"
     capability_missing: "schema 解析失败 → 声明支持但实测不支持，属能力缺失非服务故障"
   redact_in_outputs: [logs, trace_spans, reports, git]   # 测试结果只留摘要与哈希，不落凭据
+
+# ─────────────────────────────────────────────
+# 管线运行配置（非模型服务）。DESIGN §2.4 识别时机 T0~T5 的调度参数。
+# 缺失此段 = 巡检不启用（settings 给默认 disabled），不改判定口径。
+pipeline:
+  monitor:
+    # 自主巡检循环：定期重采水位 + 消费常开探针（T1/T2w）的越界样本。
+    # 检出异常才唤起状态机；未检出静默留痕。与 AI 助手无关——
+    # 纯 Python 进程，任何调度器（终端/任务计划/CI）都能拉起。
+    enabled: true
+    interval_s: 1800                 # 巡检间隔（30 分钟）。水位一轮实测约 6 分钟
+    windows: 4                       # 与标定链同窗口数（G7 可比前提）
+    fixtures: [CLEAN, F-CPU-01, F-GPU-01, F-ANIM-01, F-LOAD-01]
+    episode:                         # T1/T2w 通路：只读探针落盘，本身不采样
+      jsonl: runs/_probe/pb_breach.jsonl
+      heartbeat: runs/_probe/pb_hb.txt
+      heartbeat_max_age_s: 12        # 心跳超龄=探针没活着，本轮发作通路标盲区
+    waterline_timeout_s: 900
+    auto_fix:
+      # 唤起修复循环的范围。当前只有 F-CPU-01 有 playbook 模板，
+      # 其余夹具检出后进工单队列转人工——不是缺陷，是 §1.7 边界。
+      enabled: true
+      fixtures: [F-CPU-01]
+      live_llm: false                # 真模型归因需显式开启（I13：不擅自烧积分）
+    cooldown_s: 1800                 # 同夹具两轮巡检的最小间隔（防循环烧成本）
+    max_consecutive_failures: 3      # 连续失败即退出非零，不无脑重试
+    budget: {max_review_rounds: 1, max_attempts_per_issue: 1,
+             wallclock_s: 1500, max_tokens: 60000}
