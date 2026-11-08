@@ -25,14 +25,26 @@ ROOT = Path(__file__).resolve().parents[2]
 from upi.agents import fixer
 from upi.agents.verify import (gc_floor_measure, resample, verdict_from_bundles)
 from upi.config.settings import load_config
+from upi.core.approval import ApprovalStore, build_request
 from upi.core.candidate_retrieval import retrieve_candidates
 from upi.core.detector import DEFAULT_REGISTRY
-from upi.core.models import EditPlan, Issue
+from upi.core.models import EditPlan, Hypothesis, Issue
 from upi.tooling import snapshot as snapmod
 
 PROJECT = ROOT / "fixtures" / "upi-fixture"
 SCENE = PROJECT / "Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity"
 CSFILE = "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs"
+
+
+def _why_not_auto(plan: EditPlan) -> str:
+    """§3 维度一/二的落点：为什么这单要人来批（写进工单第 0 行，不让人猜）。"""
+    if plan.permission_tier == "blocked":
+        return ("夹具脚本 / 管线自身代码属 blocked 档（§3 维度一：永远人工），"
+                "管线无自动执行权")
+    if plan.side_effect == "may_affect_perception":
+        return ("改动触碰感知层（材质/Shader/光照/动画/物理/相机），"
+                "§3 维度一硬规则：无论置信度多高一律 semi")
+    return ("不在语义保持白名单内（§3 维度二），auto 档必要条件不满足")
 
 # anchor 机制 → 该机制对应的语义保持修复（PB-* 取自 DET-CPU-GC-FRAMEALLOC.playbooks，
 # 均 whitelisted / side_effect=none）。diff 模板与彩排同源，逐条对应证据。
@@ -203,10 +215,54 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
     def fix(st: dict) -> dict:
         ep = EditPlan(**st["edit_plan"])
+        fixture = st["issue"]["fixture"]
+        top = st["hypotheses"][0]
+        # 闭包变量在函数内赋值会整体变成局部变量（条件里先读会
+        # UnboundLocalError）——批准文本一律走局部 note，不回写外层。
+        note = approval_note or ""
         fp = "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0"
         stamp = time.strftime("%H%M%S")
         snap = snapmod.snapshot(f"m4-{stamp}", PROJECT, SCENE, fp, root=ROOT)
-        fixture = st["issue"]["fixture"]
+
+        # ── 先报后批（M4 / I3：修改权限只来自权限矩阵，不来自模型自评）──
+        # 顺序讲究：快照先建（秒级、无副作用，且工单第 4 件套要写真实 tag），
+        # 工单递交并等人决定；**未获批准就不采基线**——一轮采样 25 分钟，
+        # 被拒时那笔成本是白烧的。批准文本只在这里读入，fixer 的闸照旧独立生效。
+        if ep.permission_tier != "auto" and not note.strip():
+            store = ApprovalStore(run_dir)
+            issue_obj = _rebuild_issue(
+                next(d for d in DEFAULT_REGISTRY
+                     if d.id == st["issue"]["detector"]), st["issue"])
+            hyp = Hypothesis(**top)
+            req = build_request(run_id=run_dir.name, issue=issue_obj,
+                                hypothesis=hyp, plan=ep,
+                                permission_tier=ep.permission_tier,
+                                reason_not_auto=_why_not_auto(ep),
+                                git_ref=snap.git_ref)
+            where = store.submit(req)
+            dec = store.load_decision(req.request_id)
+            if dec is None:
+                rec = {"kind": "fix", "ts": stamp, "git_ref": snap.git_ref,
+                       "root_cause": top["root_cause"],
+                       "snapshot": snap.to_dict(),
+                       "execute": {"status": "awaiting_approval",
+                                   "request_id": req.request_id}}
+                return {"snapshot": snap.to_dict(), "route": "needs_human",
+                        "error": f"等待人工批准：{where['md']}",
+                        "approval_request": where,
+                        "records": st.get("records", []) + [rec]}
+            if dec.decision != "approve":
+                rec = {"kind": "fix", "ts": stamp, "git_ref": snap.git_ref,
+                       "root_cause": top["root_cause"],
+                       "snapshot": snap.to_dict(),
+                       "execute": {"status": "rejected", "decision":
+                                   dec.model_dump()}}
+                return {"snapshot": snap.to_dict(), "route": "needs_human",
+                        "error": f"人工{'拒绝' if dec.decision=='reject' else '搁置'}"
+                                 f"（{dec.approver}：{dec.note[:80]}）",
+                        "records": st.get("records", []) + [rec]}
+            note = dec.as_approval_note()
+            store.record_used(req.request_id, dec, {"stage": "granted"})
 
         # 时序铁律（M4 接线自查抓出）：attempt 前基线必须在**写入之前**锁定。
         # verify 节点跑在 fix 之后，届时夹具已是修复态——再采"before"
@@ -220,10 +276,10 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             fb_err = str(e)[:160]
 
         rep = fixer.execute(ep, snap, project_path=PROJECT, scene_path=SCENE,
-                            root=ROOT, human_approved=bool(approval_note),
-                            approval_note=approval_note)
+                            root=ROOT, human_approved=bool(note.strip()),
+                            approval_note=note)
         rec = {"kind": "fix", "ts": stamp, "git_ref": snap.git_ref,
-               "root_cause": st["hypotheses"][0]["root_cause"],
+               "root_cause": top["root_cause"],
                "snapshot": snap.to_dict(), "execute": rep}
         if rep["status"] != "applied":
             return {"snapshot": snap.to_dict(), "route": "needs_human",
