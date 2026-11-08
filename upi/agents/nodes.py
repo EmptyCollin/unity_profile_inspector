@@ -337,6 +337,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 成功修复才写知识库（症状×根因×动作三重签名）
         from upi.core.knowledge import KnowledgeStore
         ks = KnowledgeStore(knowledge_db or (ROOT / "knowledge" / "patterns.db"))
+        prop_note = {"kind": "record", "proposal_status": "record_failed"}
         try:
             top = st["hypotheses"][0]
             pid = _pattern_id(st["issue"], top)
@@ -349,9 +350,20 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                               st["quality_tier"], st_status,
                               metric_delta=(v.get("target", {}).get("delta")
                                             if isinstance(v, dict) else None))
+            # §1.7：record 的完整职责是"写入 + 提出升维建议"。建议**只落盘不执行**
+            # （权限变更须人工批准，I3）。体检表数值当前算不出（M6' 未接入），
+            # 传 None ⇒ propose_promotion 按 G14 返回 blocked——这是诚实留痕，
+            # 不是跳过：跳过会让"提案缺失"看起来像"不需要提案"。
+            prop = ks.propose_promotion(pid, "auto", overfit_checklist=None)
+            (run_dir / "promotion_proposal.json").write_text(
+                json.dumps(prop.model_dump(), ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            prop_note = {"kind": "record", "pattern_id": pid,
+                         "proposal_status": prop.status,
+                         "blocked_reasons": prop.blocked_reasons}
         finally:
             ks.close()
-        return {"records": st.get("records", []) + [{"kind": "record"}]}
+        return {"records": st.get("records", []) + [prop_note]}
 
     def escalate(st: dict) -> dict:
         final = {"run_id": run_dir.name, "fixture": st.get("fixture"),
