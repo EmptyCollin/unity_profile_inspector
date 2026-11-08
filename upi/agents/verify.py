@@ -153,6 +153,23 @@ def verdict_from_bundles(det_id: str, fixture: str,
     if bp and ap:
         assert_comparable(bp, ap)
 
+    # 播放期形态闸（第一轮作废的自我修正）：_instr_* 在 Play 结束后才取样，
+    # 测的是编辑态形态——抓不住"窗口运行中途被域重载复活"的差异。
+    # 形态的真证据在窗口数据本身：capped60 的 cpuFrameTimeMs 中位 ≈16.6
+    # 且窗口间 σ≈0；uncapped ≈1.9。阈值 12ms 只是形态分界（两态相差近十倍，
+    # 落在界内的真实性能变化在本 demo 不存在——如实标注这是启发式）。
+    def _regime(stats):
+        v = stats.get("cpuFrameTimeMs", {}).get("median")
+        if v is None:
+            return "unknown"
+        return "capped60" if v >= 12.0 else "uncapped"
+    rb, ra = _regime(bstats), _regime(astats)
+    if rb != ra and "unknown" not in (rb, ra):
+        raise RuntimeError(
+            f"播放期帧率封顶形态不一致：before={rb}({bstats['cpuFrameTimeMs']['median']:.2f}ms) "
+            f"after={ra}({astats['cpuFrameTimeMs']['median']:.2f}ms)。所有时间类指标差值"
+            "混入仪器形态变化，整轮作废重采（第一轮彩排实测教训）")
+
     det = next(d for d in DEFAULT_REGISTRY if d.id == det_id)
     cal = latest_calibration()
     if cal:
