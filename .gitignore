@@ -74,6 +74,11 @@ calibration/multiwin_none.json
 # 交替实验的工作束（multiwin_full.json 每块 ~2MB，判读结论全在 summary.json）
 runs/a4_altertest_*/blocks/*/multiwin_full.json
 
+# 巡检可变运行态（样本消费偏移/冷却时间戳，进程本地状态非结论）
+runs/patrol_state.json
+# 作废轮的工作束（判读结论在 patrol_runs.jsonl 与记录里）
+runs/patrol_*/
+
 # dry-run 工单渲染样例（可重生成的展示产物）
 runs/_dryrun_approval.md
 # 巡检单轮的工作束目录（判读结论全在 patrol_runs.jsonl，束可重采）
