@@ -71,6 +71,9 @@ calibration/multiwin_full.json
 calibration/multiwin_idle.json
 calibration/multiwin_none.json
 
+# 交替实验的工作束（multiwin_full.json 每块 ~2MB，判读结论全在 summary.json）
+runs/a4_altertest_*/blocks/*/multiwin_full.json
+
 # 验证窗原始束（before/after multiwin_full.json，单文件 3.7~4.2MB，含 A2 逐帧
 # 序列）。原始序列可由 resample 重生成，判定结论全在 report.json（已入库），
 # 证据指针以路径形式留在 report 里——入库的是结论与指针，不是重生成物。
