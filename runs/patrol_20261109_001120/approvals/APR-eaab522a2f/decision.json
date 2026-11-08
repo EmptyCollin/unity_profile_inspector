@@ -1,0 +1,5 @@
+{
+  "decision": "approve",
+  "approver": "用户",
+  "note": "2026-11-09 对话直接批准：同意 PB-FULL-REUSE 对 CombatSkillManager.cs 的 2 条语义保持改动（Awake 预生成缓存 + Update 热路径分配清零），预期改善 ≥20000 B/frame（G1 判据重述），改坏按快照 tag 回滚"
+}

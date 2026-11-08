@@ -1,0 +1,20 @@
+{
+  "run_id": "patrol_20261109_001120",
+  "fixture": "F-CPU-01",
+  "route": "needs_human",
+  "error": "budget_exceeded(attempts)",
+  "attempts": 1,
+  "spent": {
+    "wallclock_s": 200.1,
+    "tokens": 0
+  },
+  "final_rollback": {
+    "rolled_back_to": "upi/attempt-m4-001954",
+    "head_after": "7481c1bd50f5b0f46551a083e17dd556b283ea5e",
+    "asset_manifest_restored": true,
+    "scene_restored": true,
+    "amh_expected": "8907f81a458d0419",
+    "amh_after": "8907f81a458d0419",
+    "editor_touched": false
+  }
+}

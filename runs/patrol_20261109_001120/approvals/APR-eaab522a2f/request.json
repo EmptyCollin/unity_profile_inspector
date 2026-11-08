@@ -1,0 +1,113 @@
+{
+  "request_id": "APR-eaab522a2f",
+  "run_id": "patrol_20261109_001120",
+  "issue_id": "gc_alloc_per_frame",
+  "permission_tier": "blocked",
+  "reason_not_auto": "夹具脚本 / 管线自身代码属 blocked 档（§3 维度一：永远人工），管线无自动执行权",
+  "evidence": [
+    {
+      "tool": "unity diagnostics + a2 sampler (m1_detect)",
+      "args_hash": "",
+      "raw_ref": "runs/_last_run",
+      "value": 76947.0,
+      "unit": "B/frame",
+      "noise_band": 0.0,
+      "data_tier": "A2"
+    }
+  ],
+  "signature": {
+    "dim": "gc_alloc_per_frame",
+    "metric": "gc_alloc_per_frame",
+    "mechanism": "per_frame_heap_alloc_in_hot_path",
+    "threshold": 100000.0,
+    "threshold_source": "noise_calibration"
+  },
+  "magnitude": 68576.0,
+  "deviation_ratio": 9.192,
+  "edit_plan": {
+    "playbook_id": "PB-FULL-REUSE",
+    "diffs": [
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n        }",
+        "replace": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        // 修复（PB-FULL-REUSE）：缓存 + 预生成。语义等价前提——state/level\n        // 在 Awake 后不再被改写（Update 全文无赋值点，已核对），故 ready 筛选、\n        // 排序结果、key 字符串均为常量，可一次预生成。\n        private Rigidbody _body;\n        private CapsuleCollider _col;\n        private List<SkillRuntime> _readyRanked;\n        private string[] _keyByIndex;\n        private readonly Dictionary<int, float> _reusedCooldown = new Dictionary<int, float>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n\n            _body = GetComponent<Rigidbody>();\n            _col = GetComponent<CapsuleCollider>();\n            _readyRanked = _skills.Where(x => x.state == SkillState.Ready)\n                                   .Where(x => x.level > 1)\n                                   .OrderByDescending(x => x.level).ThenBy(x => x.index).ToList();\n            _keyByIndex = new string[skillCount];\n            foreach (var s in _skills)\n                _keyByIndex[s.index] = s.index + \":\" + s.state + \":\"\n                    + (_body != null ? 1 : 0) + (_col != null ? 1 : 0);\n        }",
+        "expect_count": 1,
+        "_why": "缓冲/组件/键 预生成（Awake 扩展）"
+      },
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "            // ①②③④ 全部落在每帧路径上\n            var ready = new List<SkillRuntime>();                 // 每帧分配：List\n            foreach (var s in _skills)\n            {\n                if (s.state == SkillState.Ready) ready.Add(s);\n            }\n\n            var ranked = ready\n                .Where(x => x.level > 1)                          // LINQ 枚举器 + 闭包\n                .OrderByDescending(x => x.level)\n                .ThenBy(x => x.index)\n                .ToList();\n\n            foreach (var s in ranked)\n            {\n                var body = GetComponent<Rigidbody>();             // 每帧 GetComponent\n                var col = GetComponent<CapsuleCollider>();        // 每帧 GetComponent\n                var key = s.index + \":\" + s.state + \":\" + (body != null ? 1 : 0) + (col != null ? 1 : 0); // 枚举 ToString + 字符串拼接\n                s.lastKey = key;\n                var map = new Dictionary<string, int>();          // 每帧分配：Dictionary\n                map[key] = s.level;\n                s.score = map[key];\n            }\n\n            _cooldownMap = new Dictionary<int, float>();          // 每帧分配：Dictionary\n            for (int i = 0; i < _skills.Count; i++)\n                _cooldownMap[i] = Time.time + 0.1f * i;",
+        "replace": "            // 每帧分配清零：\n            foreach (var s in _readyRanked)\n            {\n                var key = _keyByIndex[s.index];\n                s.lastKey = key;\n                s.score = s.level;\n            }\n\n            _reusedCooldown.Clear();\n            for (int i = 0; i < _skills.Count; i++)\n                _reusedCooldown[i] = Time.time + 0.1f * i;\n            _cooldownMap = _reusedCooldown;",
+        "expect_count": 1,
+        "_why": "Update 热路径分配清零"
+      }
+    ],
+    "invariants_assert": [
+      "state/level 仅 Awake 赋值（静态核对）",
+      "map[key]=level;score=map[key] ⇒ score=level 恒等",
+      "_cooldownMap 声明保留（对外语义不破坏），改指向复用缓冲",
+      "P2 语义断言基建 pending（M7）——本条如实标注"
+    ],
+    "side_effect": "none",
+    "touched_assets": [
+      "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs"
+    ],
+    "permission_tier": "blocked"
+  },
+  "diff_evidence_map": [
+    {
+      "diff_index": 0,
+      "why": "缓冲/组件/键 预生成（Awake 扩展）",
+      "evidence_refs": [
+        "e0"
+      ]
+    },
+    {
+      "diff_index": 1,
+      "why": "Update 热路径分配清零",
+      "evidence_refs": [
+        "e0"
+      ]
+    }
+  ],
+  "hypothesis": {
+    "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+    "code_anchors": [
+      "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32"
+    ],
+    "attribution_factors": {
+      "proximity": 0.7,
+      "explains_share": 0.6,
+      "competitiveness": 0.5,
+      "prior_hit": 0.5,
+      "counterfactual": 0.5,
+      "mechanism": 0.8
+    },
+    "confidence": 0.9421,
+    "weights_version": "hand-set-prior-v1",
+    "expected_effect": {
+      "metric": "gc_alloc_per_frame",
+      "direction": "down",
+      "min_delta": 20000.0,
+      "source": "calibration:thresholds_2ba2656b6f17.json",
+      "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+    },
+    "veto_reasons": []
+  },
+  "rollback": {
+    "git_ref": "upi/attempt-m4-001954",
+    "restores": "git reset --hard + 仅夹具路径 clean",
+    "mechanism": "G9：回滚只依赖 git，不依赖 Editor 可达；编译失败进 Safe Mode 时仍可按 tag 复位",
+    "untouched": [
+      "非夹具路径",
+      "Editor 内存态（重启验证）"
+    ]
+  },
+  "failure_plan": {
+    "on_reject": "Issue 记 needs_human，保留全部证据链入库，不消耗 attempt 配额",
+    "on_compile_fail": "G8 已实测：编译门禁失败即自动回滚，不烧采样成本",
+    "on_verify_fail": "G1/G2 已实测：改善不足 k·σ 或守护劣化 → 回滚 + 进 Review，审查裁定继续/撤回/转人工（配额 3 次，G6）",
+    "on_perception_fail": "G3 感知门禁失败 → 无条件回滚 + 转人工（基建 M7，当前 pending，工单不得被读成'感知已验'）"
+  },
+  "created_at": "2026-11-09T00:19:54"
+}
