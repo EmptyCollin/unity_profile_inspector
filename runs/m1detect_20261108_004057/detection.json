@@ -1,0 +1,103 @@
+{
+  "run_id": "m1detect_20261108_004057",
+  "data_source": "D:\\unity_profile_inspector\\calibration\\multiwin_full.json",
+  "thresholds_source": "D:\\unity_profile_inspector\\baselines\\thresholds_2ba2656b6f17.json",
+  "band_basis": "between_windows",
+  "fp_selfcheck": {
+    "DET-CPU-GC-FRAMEALLOC": "not_found",
+    "DET-GPU-BATCHBREAK": "not_found",
+    "DET-ANIM-PARAMRTT": "not_found",
+    "DET-LOAD-SYNCPEAK": "not_found"
+  },
+  "created_at": "2026-11-08T00:40:57",
+  "results": {
+    "F-CPU-01": {
+      "metric": "gc_alloc_per_frame",
+      "fixture": 76947.0,
+      "clean": 8371.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 68576.0,
+      "deviation_ratio": 9.192,
+      "verdict": "detected",
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 68576.0
+    },
+    "F-GPU-01": {
+      "metric": "drawCalls",
+      "fixture": 127.0,
+      "clean": 47.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 80.0,
+      "deviation_ratio": 2.702,
+      "verdict": "detected",
+      "detector": "DET-GPU-BATCHBREAK",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "drawCalls",
+        "metric": "drawCalls",
+        "mechanism": "per_renderer_material_instantiation",
+        "threshold": 10.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 80.0
+    },
+    "F-ANIM-01": {
+      "metric": "animator_process_animations_ns",
+      "fixture": 361950.0,
+      "clean": 0.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 361950.0,
+      "deviation_ratio": Infinity,
+      "verdict": "detected",
+      "detector": "DET-ANIM-PARAMRTT",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "animator_process_animations_ns",
+        "metric": "animator_process_animations_ns",
+        "mechanism": "cross_layer_state_query_per_frame",
+        "threshold": 50000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 361950.0
+    },
+    "F-LOAD-01": {
+      "metric": "totalAllocatedBytes",
+      "fixture": 717447823.0,
+      "clean": 688826992.5,
+      "stat_ok": true,
+      "biz_ok": true,
+      "ratio_ok": true,
+      "delta": 28620830.5,
+      "deviation_ratio": 1.042,
+      "verdict": "detected",
+      "detector": "DET-LOAD-SYNCPEAK",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "totalAllocatedBytes",
+        "metric": "totalAllocatedBytes",
+        "mechanism": "sync_resources_load_in_start",
+        "threshold": 2000000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 28620830.5
+    }
+  }
+}

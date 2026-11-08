@@ -1,0 +1,258 @@
+{
+  "stamp": "20261108_164724",
+  "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动",
+  "steps": {
+    "before": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_164724\\before\\multiwin_full.json"
+    },
+    "snapshot": {
+      "attempt_id": "m3-20261108_164724",
+      "git_ref": "upi/attempt-m3-20261108_164724",
+      "head_before": "18a02b81a319b83bad59a4dd6d3c57c2fa4a3e79",
+      "asset_manifest_hash": "8907f81a458d0419",
+      "scene_guid": "filehash:7be81facbec7c6ac",
+      "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+      "created_at": "2026-11-08T16:49:57",
+      "root": "D:\\unity_profile_inspector",
+      "metadata": {}
+    },
+    "execute": {
+      "playbook_id": "PB-FULL-REUSE",
+      "tier": "blocked",
+      "status": "applied",
+      "applied": [
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        },
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        }
+      ],
+      "compile": {
+        "ok": true,
+        "errors": []
+      },
+      "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动"
+    },
+    "after": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_164724\\after\\multiwin_full.json"
+    },
+    "gc_floor": {
+      "monoHeapBytes": {
+        "pre_gc_MB": 2166.76,
+        "post_gc_MB": 2166.76
+      },
+      "monoUsedBytes": {
+        "pre_gc_MB": 118.5,
+        "post_gc_MB": 115.71
+      },
+      "totalAllocatedBytes": {
+        "pre_gc_MB": 4125.69,
+        "post_gc_MB": 4156.57
+      },
+      "totalReservedBytes": {
+        "pre_gc_MB": 7781.95,
+        "post_gc_MB": 7781.95
+      }
+    },
+    "verdict": {
+      "verdict": {
+        "target": {
+          "metric": "gc_alloc_per_frame",
+          "before": 77977.0,
+          "after": 9401.0,
+          "delta": 68576.0,
+          "sigma": 0.0,
+          "significant": true,
+          "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+          "degenerate": true
+        },
+        "guards": [
+          {
+            "metric": "animator_process_animations_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "animator_process_graph_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "batches",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "cpuFrameTimeMs",
+            "before": 1.918,
+            "after": 1.682,
+            "delta": -0.236,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "cpuMainThreadFrameTimeMs",
+            "before": 0.85,
+            "after": 0.644,
+            "delta": -0.206,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "drawCalls",
+            "before": 47.0,
+            "after": 47.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "gpuFrameTimeMs",
+            "before": 1.614,
+            "after": 1.532,
+            "delta": -0.082,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "monoHeapBytes",
+            "before": 2166763520.0,
+            "after": 2166763520.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "monoUsedBytes",
+            "before": 104698880.0,
+            "after": 115291136.0,
+            "delta": 10592256.0,
+            "regressed": true,
+            "gc_floor_check": {
+              "pre_gc": 118499328.0,
+              "post_gc": 115707904.0,
+              "before_median": 104698880.0,
+              "after_median": 115291136.0,
+              "same_state_ok": false,
+              "at_floor_ok": false,
+              "tolerance": 0.02
+            },
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "setPassCalls",
+            "before": 9.0,
+            "after": 9.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "totalAllocatedBytes",
+            "before": 4017200637.75,
+            "after": 4117673693.75,
+            "delta": 100473056.0,
+            "regressed": true,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "totalReservedBytes",
+            "before": 6708142080.0,
+            "after": 7781949440.0,
+            "delta": 1073807360.0,
+            "regressed": true,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "total_used_per_frame",
+            "before": 4746039515.75,
+            "after": 4854842971.25,
+            "delta": 108803455.5,
+            "regressed": true,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "triangles",
+            "before": 2166.0,
+            "after": 2166.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          },
+          {
+            "metric": "vertices",
+            "before": 6018.0,
+            "after": 6018.0,
+            "delta": 0.0,
+            "regressed": false,
+            "gc_floor_check": null,
+            "cleared_by_floor": false
+          }
+        ],
+        "perception": {
+          "render_diff_score": null,
+          "anim_event_diff": null,
+          "replay_divergence": null,
+          "passed": false
+        },
+        "conflicts": [],
+        "compile_ok": true,
+        "realized_over_expected": 3.429,
+        "status": "regressed"
+      },
+      "detail": {
+        "detector": "DET-CPU-GC-FRAMEALLOC",
+        "fixture": {
+          "n": 4,
+          "median": 77977.0,
+          "noise_band_mad": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "before_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_164724\\before\\multiwin_full.json",
+        "after_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_164724\\after\\multiwin_full.json",
+        "guard_worst_rel": 0.16008,
+        "perception_gate_pending": true,
+        "conflicts": []
+      }
+    },
+    "rollback_drill": {
+      "rolled_back_to": "upi/attempt-m3-20261108_164724",
+      "head_after": "d98a2807a87261caf2c3aa76f7f3f258f59fd861",
+      "asset_manifest_restored": true,
+      "scene_restored": true,
+      "amh_expected": "8907f81a458d0419",
+      "amh_after": "8907f81a458d0419",
+      "editor_touched": false
+    }
+  },
+  "final": {
+    "status": "regressed",
+    "note": "resolved 后主动回滚=彩排收尾，不是失败判定；P2 语义断言/G3 感知门禁 pending（M7）"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "purpose": "两束仪器状态对照——证明第一轮彩排不可比、作废正确（G7/§3.6 指标归属制）",
+  "before": {
+    "windows": 4,
+    "windows_with_a2": 4,
+    "cpuFrameTimeMs": 1.867,
+    "gpuFrameTimeMs": 1.621,
+    "gc_alloc_median": 77977.0,
+    "resident_breachprobe": null,
+    "instrument_mode_guess": "uncapped,A2部分"
+  },
+  "after": {
+    "windows": 4,
+    "windows_with_a2": 4,
+    "cpuFrameTimeMs": 16.631,
+    "gpuFrameTimeMs": 15.648,
+    "gc_alloc_median": 183293.0,
+    "resident_breachprobe": null,
+    "instrument_mode_guess": "capped60+A2"
+  }
+}

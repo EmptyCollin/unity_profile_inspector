@@ -1,0 +1,202 @@
+{
+  "stamp": "20261108_154042",
+  "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动",
+  "steps": {
+    "before": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_154042\\before\\multiwin_full.json"
+    },
+    "snapshot": {
+      "attempt_id": "m3-20261108_154042",
+      "git_ref": "upi/attempt-m3-20261108_154042",
+      "head_before": "74b25bd4d72b8d972d9f46f92f549ccdc9697de9",
+      "asset_manifest_hash": "8907f81a458d0419",
+      "scene_guid": "filehash:7be81facbec7c6ac",
+      "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+      "created_at": "2026-11-08T15:43:12",
+      "root": "D:\\unity_profile_inspector",
+      "metadata": {}
+    },
+    "execute": {
+      "playbook_id": "PB-FULL-REUSE",
+      "tier": "blocked",
+      "status": "applied",
+      "applied": [
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        },
+        {
+          "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+          "replaced": 1
+        }
+      ],
+      "compile": {
+        "ok": true,
+        "errors": []
+      },
+      "approval_note": "用户在 2026-11-08 对话中以「开工」批准 M3 彩排执行；夹具 blocked 档走 human_approved 旁路，批准内容=本彩排对 CombatSkillManager.cs 的 4 条语义保持改动"
+    },
+    "after": {
+      "path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_154042\\after\\multiwin_full.json"
+    },
+    "verdict": {
+      "verdict": {
+        "target": {
+          "metric": "gc_alloc_per_frame",
+          "before": 77977.0,
+          "after": 9401.0,
+          "delta": 68576.0,
+          "sigma": 0.0,
+          "significant": true,
+          "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+          "degenerate": true
+        },
+        "guards": [
+          {
+            "metric": "animator_process_animations_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "animator_process_graph_ns",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "batches",
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "cpuFrameTimeMs",
+            "before": 2.0,
+            "after": 1.745,
+            "delta": -0.256,
+            "regressed": false
+          },
+          {
+            "metric": "cpuMainThreadFrameTimeMs",
+            "before": 0.892,
+            "after": 0.674,
+            "delta": -0.218,
+            "regressed": false
+          },
+          {
+            "metric": "drawCalls",
+            "before": 47.0,
+            "after": 47.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "gpuFrameTimeMs",
+            "before": 1.681,
+            "after": 1.607,
+            "delta": -0.074,
+            "regressed": false
+          },
+          {
+            "metric": "monoHeapBytes",
+            "before": 2166763520.0,
+            "after": 2166763520.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "monoUsedBytes",
+            "before": 104380416.0,
+            "after": 115267584.0,
+            "delta": 10887168.0,
+            "regressed": true
+          },
+          {
+            "metric": "setPassCalls",
+            "before": 9.0,
+            "after": 9.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "totalAllocatedBytes",
+            "before": 3945152539.75,
+            "after": 3938002753.0,
+            "delta": -7149786.75,
+            "regressed": false
+          },
+          {
+            "metric": "totalReservedBytes",
+            "before": 6708142080.0,
+            "after": 6708142080.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "total_used_per_frame",
+            "before": 4668470031.5,
+            "after": 4676638274.75,
+            "delta": 8168243.25,
+            "regressed": false
+          },
+          {
+            "metric": "triangles",
+            "before": 2166.0,
+            "after": 2166.0,
+            "delta": 0.0,
+            "regressed": false
+          },
+          {
+            "metric": "vertices",
+            "before": 6018.0,
+            "after": 6018.0,
+            "delta": 0.0,
+            "regressed": false
+          }
+        ],
+        "perception": {
+          "render_diff_score": null,
+          "anim_event_diff": null,
+          "replay_divergence": null,
+          "passed": false
+        },
+        "conflicts": [],
+        "compile_ok": true,
+        "realized_over_expected": 3.429,
+        "status": "regressed"
+      },
+      "detail": {
+        "detector": "DET-CPU-GC-FRAMEALLOC",
+        "fixture": {
+          "n": 4,
+          "median": 77977.0,
+          "noise_band_mad": 0.0,
+          "unique": 1,
+          "degenerate_distribution": true
+        },
+        "before_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_154042\\before\\multiwin_full.json",
+        "after_path": "D:\\unity_profile_inspector\\runs\\m3_rehearsal_20261108_154042\\after\\multiwin_full.json",
+        "guard_worst_rel": 0.1043,
+        "perception_gate_pending": true,
+        "conflicts": []
+      }
+    },
+    "rollback_drill": {
+      "rolled_back_to": "upi/attempt-m3-20261108_154042",
+      "head_after": "4ea04a399df2416539d11f27efbb1479f19dfc3a",
+      "asset_manifest_restored": true,
+      "scene_restored": true,
+      "amh_expected": "8907f81a458d0419",
+      "amh_after": "8907f81a458d0419",
+      "editor_touched": false
+    }
+  },
+  "final": {
+    "status": "regressed",
+    "note": "resolved 后主动回滚=彩排收尾，不是失败判定；P2 语义断言/G3 感知门禁 pending（M7）"
+  }
+}
