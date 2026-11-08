@@ -207,6 +207,13 @@ namespace Upi.Fixtures.Drivers
                 }
                 else WriteAtomic(RES, "bad arm arg count");
             }
+            else if (cmd == "unload")
+            {
+                // 标定 L0 参考态需要摘钩（与 UpiBreachProbe.unload 对称）。
+                // 注意：进 Play 的域重载会重新装载 ⇒ unload 必须在 Play 之后发。
+                EditorApplication.update -= Tick;
+                WriteAtomic(RES, "unloaded");
+            }
             else if (cmd == "hash") WriteAtomic(RES, Hash());
             else if (cmd == "status")
                 WriteAtomic(RES, "seed=" + _seed + " fixedDt=" + (int)_fixedDtNum + "/" + (int)_fixedDtDen

@@ -1,0 +1,52 @@
+{
+  "budget_pct": 0.05,
+  "windows": 3,
+  "poll_n": 25,
+  "play_mode": true,
+  "fixtures": {
+    "CLEAN": {
+      "L0": {
+        "cpuFrameTimeMs": 16.6348,
+        "totalAllocatedBytes": 3822983249.0,
+        "windows": 3
+      },
+      "L1": {
+        "cpuFrameTimeMs": 16.6354,
+        "totalAllocatedBytes": 3852198409.0,
+        "windows": 3
+      },
+      "L2": {
+        "cpuFrameTimeMs": 16.6219,
+        "totalAllocatedBytes": 3833322644.0,
+        "windows": 3
+      },
+      "install_pct": 0.0,
+      "record_pct": -0.08,
+      "total_pct": -0.08,
+      "gc_alloc_drift_pct": 0.27
+    },
+    "F-CPU-01": {
+      "L0": {
+        "cpuFrameTimeMs": 16.546,
+        "totalAllocatedBytes": 3875647797.0,
+        "windows": 3
+      },
+      "L1": {
+        "cpuFrameTimeMs": 16.5947,
+        "totalAllocatedBytes": 3873892240.0,
+        "windows": 3
+      },
+      "L2": {
+        "cpuFrameTimeMs": 16.6882,
+        "totalAllocatedBytes": 3881887688.0,
+        "windows": 3
+      },
+      "install_pct": 0.29,
+      "record_pct": 0.57,
+      "total_pct": 0.86,
+      "gc_alloc_drift_pct": 0.16
+    }
+  },
+  "instrument_distorted": false,
+  "created_at": "2026-11-08T11:13:25"
+}
