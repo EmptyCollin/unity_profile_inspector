@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents import ui_actions as UA  # noqa: E402
+from upi.config.runtime_spec import SPEC  # noqa: E402
 from upi.core import events as E  # noqa: E402
 
 RESET, BOLD, DIM = "\x1b[0m", "\x1b[1m", "\x1b[2m"
@@ -271,6 +272,94 @@ def send(cmd: str, **args) -> tuple[bool, str]:
     return True, f"已受理：{cmd}（seq={info.get('seq')}）"
 
 
+def _ticket_of(st_now: dict) -> tuple[Path | None, str]:
+    """从状态快照取当前待批工单，返回 (工单目录, request_id)。
+
+    取 open_tickets 的**最后一条**（与 view_latest_ticket 同口径）。守护在
+    AWAITING 态本就不叠加新轮、一次只留一张，所以这里不做"多张里挑"。
+    """
+    ot = (st_now or {}).get("open_tickets") or []
+    if not ot:
+        return None, ""
+    p = Path(ot[-1])
+    return (p.parent if p.exists() else None), p.parent.name
+
+
+def approve_flow(st_now: dict, line_read, token_input=None) -> str:
+    """工单审批闭环（阶段 5）：逐页强制读完 → 决定 → 页脚码手输 → 提交意向。
+
+    为什么强制分页读完才给批：工单是"五件套"（证据/方案/预期/回滚/失败预案），
+    漏看任何一件都可能批一个自己没理解的动作。计划把这条写成硬判据
+    （"未读全则批准键不可用"），所以这里用"逐页回车 + 末页才印校验码"落实，
+    不靠人自觉。校验码只依赖工单号 ⇒ 与 md 全文无循环定义，守护能独立复算。
+    """
+    from upi.core import approval as AP
+
+    d, rid = _ticket_of(st_now)
+    if d is None:
+        return "当前没有可批的工单（或工单文件已不存在）"
+    # 短路：本单已有生效决定（上一次的意向刚被守护落盘）就不再走阅读流程。
+    # 少了这一步，"重复按 d"会把人带进一遍完整五页再在 token 处被守护拒掉
+    # （同 request_id 已写过 decision），看起来像审批坏了。
+    from upi.core import approval as _AP
+    _existing = _AP.ApprovalStore(d.parents[1]).load_decision(rid)
+    if _existing is not None:
+        return (f"{rid} 已有决定：{_existing.decision}"
+                f"（{_existing.approver}，经 {_existing.decided_via}），"
+                "审批通道已关闭，无需重复操作")
+    md_path = d / "request.md"
+    try:
+        md = md_path.read_text(encoding="utf-8")
+    except OSError as e:
+        # 读不到正文就绝不进入"可以批"的分支——宁可不批，不可假批
+        return f"工单正文读取失败，未进入审批：{type(e).__name__}: {str(e)[:80]}"
+
+    pages = AP.split_pages(md)
+    tip = "（回车读下一页）"
+    for i, seg in enumerate(pages, 1):
+        body = seg if len(seg) <= 4000 else seg[:4000] + "\n…（本页过长已截断）"
+        got = line_read(f"—— 工单 {rid} 第 {i}/{len(pages)} 页 ——\n{body}\n{tip}")
+        if (got or "").strip().lower() in ("q", "esc", "quit"):
+            return f"已中止阅读，未提交任何决定（读到第 {i}/{len(pages)} 页）"
+    # 读完全文才走到这里。校验码就在第 5 页页脚，抄得到说明翻到了底。
+
+    dec_raw = (line_read("决定：a=批准 / r=驳回 / d=暂缓（其他键=放弃本次审批）：")
+               or "").strip().lower()
+    verdict = {"a": "approve", "r": "reject", "d": "defer"}.get(dec_raw)
+    if verdict is None:
+        return "未做出决定（需 a/r/d），工单仍待批"
+    who = (line_read("批准人（你的名字，将写入留痕并按审批者分层统计）：") or "").strip()
+    note = (line_read("批语：批/驳的具体内容与理由（approve 必须非空）：") or "").strip()
+    if verdict == "approve" and not (who and note):
+        # 前端先挡一次，后端 ApprovalDecision 有同样规则（双闸同源，不互信）
+        return "批准必须同时给出批准人与批语（缺一视同未批），本次未提交"
+
+    tok = (token_input or line_read)(
+        f"请输入工单页脚的 4 位校验码（证明已读完 {len(pages)} 页）：")
+    if not AP.verify_token(rid, tok or ""):
+        return (f"校验码不匹配，未提交（工单 {rid} 仍待批）。"
+                "码印在工单末页页脚——没读到最后就抄不到它。")
+
+    # 只交意向：decision.json 必须经守护的单一写入路径落盘（含回读确认）。
+    # UI 直接写文件等于绕过校验与留痕，审批链就不可信了。
+    E.stage_decide(str(md_path), verdict, approver=who, note=note,
+                   token=(tok or "").strip())
+
+    # 等到守护真的把它落成 decision.json 才报"已生效"——只报"意向已交"
+    # 会把"守护还没跑/崩了"显示成成功（与 start_daemon 等心跳同一教训）。
+    store = AP.ApprovalStore(d.parents[1])
+    for _ in range(int(DECIDE_WAIT_S * 10)):
+        if store.load_decision(rid) is not None:
+            return (f"{rid} 的决定已生效：{verdict}（批准人 {who}）"
+                    "｜批准将触发续跑，进度见上方状态")
+        time.sleep(0.1)
+    return (f"意向已提交，但 {DECIDE_WAIT_S:.0f}s 内守护未落盘"
+            f"（{rid} 仍显示待批）——请确认守护在跑，必要时按 b 启动")
+
+
+DECIDE_WAIT_S = 20.0      # 等守护落 decision.json 的上限，与一个心跳周期同量级
+
+
 def view_latest_ticket() -> str:
     st = E.read_status() or {}
     ot = st.get("open_tickets") or []
@@ -318,51 +407,22 @@ def start_daemon() -> str:
 
 
 # 可编辑的运行配置：与守护 _dispatch_cmd 的 set 分支**逐键对应**。
-# 数值项守护按 int 收，布尔项写进 auto_fix 子字典；名字对不上就是空操作，
-# 故 test_ui_actions 会用源码交叉断言"这里列的键守护都认"。
-CFG_FIELDS = [
-    ("interval_s", "巡检间隔秒", int),
-    ("cooldown_s", "唤起冷却秒", int),
-    ("windows", "每夹具窗口数", int),
-    ("waterline_timeout_s", "重采超时秒", int),
-    ("live_llm", "真模型归因(花积分)", bool),
-    ("auto_fix_enabled", "自动修复总开关", bool),
-]
+# 可改的运行配置：字段、中文名、类型、上下界全部来自 runtime_spec.SPEC。
+# ⚠️ 这里绝不再手写一份字段清单——守护 set 分支、状态导出 conf 也各读同一份
+# SPEC。三处曾各写各的，漏改任意一处的后果都是"界面显示改成功了、其实守护
+# 按未知字段静默丢弃"（最难查的假接线）。加配置项只动 SPEC 一个地方。
+CFG_FIELDS = [(i.key, i.label, i.kind) for i in SPEC]
 
 
 def _cfg_current(st_now: dict):
-    """读当前配置值（展示用，取不到就 None，不编一个数）。"""
+    """读当前配置值（展示用，取不到就 None，不编一个数）。
+
+    守护把 conf 按 SPEC 扁平导出（{key: 值}），这里直接按 key 取即可，
+    不需要再关心 live_llm 藏在 auto_fix 子字典这类落盘结构——那是 SPEC.path
+    的职责，UI 不该重复知道。
+    """
     conf = (st_now or {}).get("conf") or {}
-    af = conf.get("auto_fix") or {}
-    cur = {}
-    for k, _label, _ty in CFG_FIELDS:
-        if k == "live_llm":
-            cur[k] = af.get("live_llm")
-        elif k == "auto_fix_enabled":
-            cur[k] = af.get("enabled")
-        else:
-            cur[k] = conf.get(k)
-    return cur
-
-
-def _parse_val(kind, raw):
-    """解析输入。返回 (值, 错误)。空输入一律视为取消。"""
-    s = (raw or "").strip()
-    if not s:
-        return None, "cancelled"
-    if kind is bool:
-        if s.lower() in ("y", "yes", "true", "1"):
-            return True, ""
-        if s.lower() in ("n", "no", "false", "0"):
-            return False, ""
-        return None, f"布尔项只能填 y/n，收到 {s!r}"
-    try:
-        v = int(s)
-    except ValueError:
-        return None, f"需要整数，收到 {s!r}"
-    if v < 0:
-        return None, "不允许负数"
-    return v, ""
+    return {i.key: conf.get(i.key) for i in SPEC}
 
 
 def edit_config(st_now: dict, send_, line_read) -> str:
@@ -372,32 +432,35 @@ def edit_config(st_now: dict, send_, line_read) -> str:
     每轮花多久花多少积分），逐项确认 + 立即回显 old→new 才敢让人改。
     """
     cur = _cfg_current(st_now)
+    n = len(SPEC)
     lines = ["可改的运行配置（回车取消，不改任何东西）："]
-    for i, (k, label, _ty) in enumerate(CFG_FIELDS, 1):
-        v = cur.get(k)
+    for i, item in enumerate(SPEC, 1):
+        v = cur.get(item.key)
         shown = "未设" if v is None else v
-        lines.append(f"  {i}. {k}  {label}  当前={shown}")
+        rng = "" if item.kind is bool else f"（{item.lo}{item.unit}~{item.hi}{item.unit}）"
+        lines.append(f"  {i}. {item.key}  {item.label}  当前={shown}{rng}")
     lines.append("")
-    pick = line_read("\n".join(lines) + "\n选哪项(1-6)：")
+    pick = line_read("\n".join(lines) + f"\n选哪项(1-{n})：")
     sel = (pick or "").strip()
-    if not sel.isdigit() or not (1 <= int(sel) <= len(CFG_FIELDS)):
-        return "未选择有效项，配置未改动"
-    field, label, kind = CFG_FIELDS[int(sel) - 1]
-    old = cur.get(field)
-    prompt = f"给 {field}（{label}）填新值{'，y/n' if kind is bool else ''}，回车取消："
-    raw = line_read(prompt)
-    val, err = _parse_val(kind, raw)
-    if err == "cancelled":
-        return f"已取消，{field} 仍为 {old}"
-    if err:
-        return f"输入无效：{err}；{field} 未改动"
-    if kind is int and field == "interval_s" and val < 60:
-        # 配置加载层本就拒 interval<60，这里提前挡，免得发出去被守护拒后
-        # 只剩一句"未确认"让人摸不着头脑
-        return f"间隔 {val}s < 60s 下限，未提交（防高频烧积分）"
-    ack, info = send_("set", **{field: val})
-    tag = "" if ack else f"（{info.get('reason')}）"
-    return f"{field}: {old} → {val}{tag}"
+    if not sel.isdigit() or not (1 <= int(sel) <= n):
+        return f"未选择有效项（需在 1-{n}），配置未改动"
+    item = SPEC[int(sel) - 1]
+    old = cur.get(item.key)
+    prompt = (f"给 {item.key}（{item.label}）填新值"
+              f"{'，y/n' if item.kind is bool else f'，{item.lo}{item.unit}~{item.hi}{item.unit}'}"
+              "，回车取消：")
+    raw = (line_read(prompt) or "").strip()
+    if not raw:
+        return f"已取消，{item.key} 仍为 {old}"
+    # 边界与类型校验直接走 SPEC.cast（与守护同一道闸）：UI 这关挡下越界，
+    # 就不用发一条守护必然回绝的命令、让人只看到一句"未确认"摸不着头脑。
+    try:
+        val = item.cast(raw)
+    except (ValueError, TypeError) as e:
+        return f"输入无效：{e}；{item.key} 未改动"
+    ack, info = send_("set", **{item.key: val})
+    tag = "" if ack else "（守护未确认受理，见告警）"
+    return f"{item.key}: {old} → {val}{tag}"
 
 
 
@@ -451,6 +514,13 @@ def step(state: str, st_now: dict, key: str, pending=None, *,
             hint = (f"⚠ 待确认「{act['label']}」：再按 [{act['key']}] 生效，"
                     "按其他键作废")
             return out(hint, act["name"])
+
+    if act["name"] == UA.ACT_DECIDE:
+        # 审批自带硬确认（读毕 5 页 + 手输页脚 4 位码），所以走 TIER_HARD
+        # 之前特判掉通用 token：两层确认不仅冗余，通用 token（每张单都是
+        # "D"）还是更弱的那层——留着它反而稀释"读毕码"的注意力。
+        # 误触 [d] 无副作用：流程第一步只是开始读第 1 页，随时可中止。
+        return out(approve_flow(st_now, tin, token_input=tin), None)
 
     if act["tier"] == UA.TIER_HARD:
         tok = act["key"].upper()

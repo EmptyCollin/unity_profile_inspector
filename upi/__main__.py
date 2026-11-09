@@ -249,6 +249,11 @@ def cmd_resume(args) -> int:
         print(f"   决定为 {dec.decision}（{dec.approver}）——按拒绝路径收尾，不续跑。")
         return 0
     print(f"   批准有效：{dec.approver}：{dec.note[:80]}")
+    if getattr(dec, "decided_via", "external") != "ui":
+        # 阶段 6 的诚实边界：功能入口已收进 UI，本命令只留作开发/诊断通道。
+        # 手写 decision.json 绕过了"逐页读完 + 校验码"，留痕里必须能看出来。
+        print("   ⚠ 该决定来自外部手写（approver_source=external），"
+              "未经界面读毕校验；正式审批请用 upi ui 按 [d]。")
     runner = Runner(ns.run, st["fixture"])   # 同 run_id：trace/state 续写续读
     nodes = make_nodes(runner.dir, live_llm=False, approval_note="")
     runner.resume(nodes, entry="fix")        # fix 节点重读 decision.json，幂等

@@ -95,6 +95,10 @@ class ApprovalDecision(BaseModel):
     approver: str                     # 谁批的（§8.5 按审批者分层统计）
     note: str = ""                    # 批了什么/为什么拒
     decided_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"))
+    # 计划要求的 approver_source：ui=界面内逐页读完+校验码，external=在终端
+    # 手放 decision.json 的开发通道。默认 external——只有守护经 write_decision
+    # (source="ui") 落盘才会被显式改回 ui，"绕过 UI 批的"因此天然可区分、可统计。
+    decided_via: Literal["ui", "external"] = "external"
 
     @model_validator(mode="after")
     def _approve_needs_what_was_approved(self):
@@ -162,6 +166,7 @@ def render_markdown(req: ApprovalRequest) -> str:
         f"- 命中要求：`expect_count={d.get('expect_count', 1)}`（不精确命中即整单中止，无半成品）"
         for m, d in zip(req.diff_evidence_map, req.edit_plan.diffs))
     exp = req.hypothesis.expected_effect or {}
+    tok = read_token(req.request_id)
     return f"""# 待批准工单 {req.request_id}
 
 **为什么不是你自动就能落地**：{req.reason_not_auto}
@@ -201,10 +206,43 @@ def render_markdown(req: ApprovalRequest) -> str:
 - 感知门禁：{req.failure_plan['on_perception_fail']}
 
 ---
-写决定：在同目录放 `decision.json`，形如
-`{{"decision": "approve", "approver": "<你的名字>", "note": "<批的具体内容>"}}`
-（approve 必须同时给 approver 与 note，缺一视同未批。）
+**本单审批校验码：`{tok}`**
+批准时须手输这 4 位——它印在页脚，所以读到这一页才抄得到（防"没看内容就按回车"）。
 """
+
+
+def split_pages(md: str) -> list[str]:
+    """把 request.md 按五件套切成页，供 UI 强制逐页读完才允许批。
+
+    第 1 页含工单标题与"为什么不能自动落地"，后各页对应 ## 1..## 5；
+    末页含文末脚注，避免"读不完"。把"未读全不能批"从自觉变成闸门。
+    """
+    import re
+    marks = [m.start() for m in re.finditer(r"(?m)^## ", md)]
+    if not marks:
+        return [md.strip()]
+    pages = [md[:marks[1]].strip()] if len(marks) > 1 else [md.strip()]
+    if len(marks) > 1:
+        for i in range(1, len(marks) - 1):
+            pages.append(md[marks[i]:marks[i + 1]].strip())
+        pages.append(md[marks[-1]:].strip())
+    return pages
+
+
+def read_token(request_id: str) -> str:
+    """本单的审批校验码（4 位，随工单唯一）。
+
+    落实计划原话"批准前手输 request.md 尾部 4 位"：码印在工单**页脚**（见
+    render_markdown），于是"读到最后一页"是"能输入正确码"的必要条件——防的
+    就是没读内容就按回车的肌肉记忆。只依赖工单号 ⇒ 不依赖 md 全文（md 里就
+    印着它，取 md 尾部字符会循环定义），且守护可独立复算、不信 UI 传来的字符串。
+    边界要诚实：这不是攻击者防线（决定权只在守护，I3），是给经办人设的坎。
+    """
+    return hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:4]
+
+
+def verify_token(request_id: str, typed: str) -> bool:
+    return (typed or "").strip().lower() == read_token(request_id)
 
 
 class ApprovalStore:
