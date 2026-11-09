@@ -16,10 +16,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from upi.config.project_profile import active_profile
 from upi.core.detector import Detector
 
-ROOT = Path(__file__).resolve().parents[2]
-FIXTURE_ASSETS = ROOT / "fixtures" / "upi-fixture" / "Assets" / "UpiFixtures"
 
 # 机制 anchor → 文本特征。每项 = (正则, 机制级根因模板)
 # 只收录"存在即候选"的硬特征；语义与阈值判断留给判定链。
@@ -64,8 +63,13 @@ _START_BLOCK = re.compile(r"private\s+void\s+Start\s*\(\)", re.M)
 
 
 def _fixture_dir_of(det: Detector) -> Path | None:
-    """det.fixture（如 F-CPU-01）→ 对应资产目录。CLEAN 变体无目录=无候选，合法。"""
-    d = FIXTURE_ASSETS / det.fixture.replace("-", "_")
+    """det.fixture（如 F-CPU-01）→ 对应资产目录。CLEAN 变体无目录=无候选，合法。
+
+    阶段 7：目录根与"机制编号→目录名"的转换风格都由 profile 给出
+    （原写法 FIXTURE_ASSETS / name.replace("-","_") 把工程位置和下划线
+    约定一起钉死在代码里；接一个用别的命名风格的工程就得改这里）。
+    """
+    d = active_profile().subject_asset_dir(det.fixture)
     return d if d.is_dir() else None
 
 
@@ -113,7 +117,13 @@ def retrieve_candidates(issue, det: Detector) -> list[tuple[str, list[str]]]:
                 if not hits or rc_key in seen:
                     continue
                 seen.add(rc_key)
-                rel = str(cs.relative_to(ROOT)).replace("\\", "/")
+                # ⚠️ 基准是档案的 git_root（阶段 7 可移植性实测撞出）：
+                #   工程不在仓库内时 relative_to(ROOT) 直接 ValueError，
+                #   表现为"接入外部工程后候选检索整条崩"。与 diff 的 file 字段、
+                #   snapshot(root=)、apply_diffs(root=) 共用同一个基准，
+                #   锚点写法才能和工单里"要改哪个文件:哪一行"对得上。
+                rel = str(cs.relative_to(
+                    Path(str(active_profile().git_root)))).replace("\\", "/")
                 anchors = [f"anchor:{rel}:{i+1}" for i in hits[:5]]
                 out.append((f"{tmpl}（机制 anchor: {anchor}）", anchors))
     return out

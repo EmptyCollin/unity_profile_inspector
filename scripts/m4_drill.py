@@ -27,11 +27,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.agents.nodes import CSFILE, _plan_for           # noqa: E402
-from upi.agents.orchestrator import Runner               # noqa: E402
+# ⚠️ 阶段 7 后 nodes 不再导出 CSFILE/PROJECT/SCENE 这些模块级路径常量
+#   （值会随 profile 变，模块常量等于在导入瞬间冻结）。演练脚本改从档案现取。
+from upi.agents.nodes import _plan_for                     # noqa: E402
+from upi.agents.orchestrator import Runner                 # noqa: E402
+from upi.config.project_profile import active_profile      # noqa: E402
 
-FIXTURE = "F-CPU-01"
+_PROF = active_profile()
+FIXTURE = _PROF.fix_subject
+CLEAN = _PROF.clean_subject
 DETECTOR = "DET-CPU-GC-FRAMEALLOC"
+CSFILE = _PROF.subject_file
 
 
 def dry_run() -> int:
