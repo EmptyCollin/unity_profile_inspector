@@ -17,13 +17,13 @@ Hypothesis + EditPlan diff + 改后全量数据 + Verdict；Fix 的自我辩护�
 """
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from upi.core import events as E
 from upi.tooling.trace import Tracer, environment_fingerprint
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +50,10 @@ class RunState(TypedDict, total=False):
     route: str                    # proceed / needs_human / budget_exceeded / done
     records: list                 # AttemptRecord 级轨迹
     error: Optional[str]
+    degraded: list                # 本轮"做不了但必须说出去"的降级项：
+                                  # state_write_failed（每节点落盘失败）等。
+                                  # 必须是正式字段——早期只写在 ctx 上，
+                                  # trace 与 UI 都不消费它，等于把告警丢进黑洞。
 
 
 def _plain(v):
@@ -115,13 +119,27 @@ def _wrap(name: str, fn, tracer: Tracer):
         # 近似合并态 {**st, **delta}——LangGraph 稍后还会写权威终态
         merged = dict(st)
         merged.update(delta)
-        try:
-            (tracer.dir / "state.json").write_text(
-                json.dumps({k: _plain(v) for k, v in merged.items()},
-                           ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8")
-        except OSError:
-            pass
+        # 原子写 + 失败留痕。为什么两件事都要：
+        #   · 半写更危险——非原子的 write_text 崩在中途会留下截断的 state.json，
+        #     而守护的续跑判据 `_tickets()` 正读这个文件；文件损坏时它既不算
+        #     "已批准待续跑"也不算"待批"，那张工单就永久隐形（实测缺口）。
+        #   · 静默失败同样危险——旧写法 `except OSError: pass` 丢盘零留痕。
+        # 失败后仍继续跑本节点：中断会把已花的采样成本一起作废，而终态还有
+        # 一次 persist 机会；但必须让 UI 看得见（写进 state 的 degraded 字段）。
+        # 通道语义已实测（Python3.14 + 本机 langgraph）：节点**不回传**某键时
+        # 旧值保留，**回传**才是覆盖。所以只在真要追加时才回传，且必须先合并
+        # 旧值——否则前序节点的降级告警会被静默冲掉，正好复现"告警进黑洞"。
+        if not E.write_json(tracer.dir / "state.json",
+                            {k: _plain(v) for k, v in merged.items()},
+                            what="state_per_node", strict=False):
+            # 专用事件名：让"哪一阶段把状态写丢了"可直接被检索到
+            # （泛化的 write_failed 只知道文件名，不知道跑到哪一步）
+            E.emit("state_write_failed", stage=name, run_id=tracer.run_id,
+                   seq=getattr(tracer, "_seq", None))
+            prev_deg = list(st.get("degraded") or [])
+            if "state_write_failed" not in prev_deg:
+                prev_deg.append("state_write_failed")
+            delta["degraded"] = prev_deg
         return delta
     return inner
 
@@ -205,13 +223,15 @@ class Runner:
                 "issue": None, "hypotheses": [], "edit_plan": None,
                 "snapshot": None, "verdict": None, "review_decision": None,
                 "review_reason": None, "attempts": 0, "route": "proceed",
-                "records": [], "error": None}
+                "records": [], "error": None, "degraded": []}
 
     def persist(self, st: RunState):
-        (self.dir / "state.json").write_text(
-            json.dumps({k: _plain(v) for k, v in st.items()},
-                       ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8")
+        # 终态落盘失败必须上抛（strict=True）：这是整轮唯一的结果文件，
+        # 静默失败会让上层以为"跑完了"，而磁盘上根本没有这一轮的判定记录。
+        # 已花的采样成本与积分换不来留痕，是最坏的一种失败。
+        E.write_json(self.dir / "state.json",
+                     {k: _plain(v) for k, v in st.items()},
+                     what="state_final")
 
     def run(self, nodes: dict, initial: Optional[RunState] = None,
             entry: str = "detect"):
@@ -228,7 +248,12 @@ class Runner:
         重跑等于白烧（I13）。预算计数（attempts/spent/records）本来就在
         state.json 里，续跑接着算，G11 不会因为"换了进程"而重置。"""
         fp = self.dir / "state.json"
-        if not fp.exists():
+        st, err = E.load_json(fp)
+        if err == "missing":
             raise RuntimeError(f"无 state.json，不能续跑：{fp}")
-        st = json.loads(fp.read_text(encoding="utf-8"))
+        if err:
+            # 损坏与缺失要分开报：损坏意味着"这一轮的进度已经不可恢复"，
+            # 需要人去查为什么写坏了，不是简单重跑就能解决的
+            raise RuntimeError(f"state.json 无法解析，拒绝续跑：{err}；"
+                               f"文件 {fp} 的进度已不可信，请勿硬跑（会重复扣预算）")
         return self.run(nodes, initial=st, entry=entry)

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -168,6 +167,17 @@ def snapshot() -> str:
     if last.get("error"):
         out.append(f"  {RED}轮次失败:{RESET} {str(last['error'])[:88]}")
 
+    # ── 常驻告警条 ──
+    # 告警必须"一直看得见"：事件流只显示最近 11 条，一条 write_failed 会被
+    # 后续 progress 事件挤出屏幕。落盘失败/坏文件这类事一旦看不见，
+    # 就等于告诉用户"一切正常"——这正是本阶段要消灭的形态。
+    al = (st or {}).get("alerts") or []
+    if al:
+        out.append(f"{RED}▲ 需要注意 {len(al)} 条告警（最新 3 条）{RESET}")
+        for a in al[:3]:
+            out.append(f"   {RED}{a.get('kind')}{RESET} "
+                       f"{DIM}{a.get('ts')} {str(a.get('what') or a.get('detail') or '')[:70]}{RESET}")
+
     # ── 待批工单 ──
     ot = (st or {}).get("open_tickets") or []
     if ot:
@@ -228,10 +238,21 @@ def _fmt_ev(ev: dict) -> str:
                     if a not in ("ts", "kind"))[:80]
 
 
-def send(cmd: str, **args) -> None:
-    E.send_cmd(cmd, **args)
-    # 立即回显一条"已发出"，让按键有反馈；守护消费时会再发 command_received
-    E.emit("command_queued", cmd=cmd, args=args)
+def send(cmd: str, **args) -> tuple[bool, str]:
+    """发命令并等守护回执。返回 (是否受理, 一行人可读的结果)。
+
+    为什么必须等：命令通道只有一个槽位。不等就会出现"两条命令相互覆盖、
+    后写的赢"——前一条按下去毫无反应也没人报错（阶段 1 要堵的洞）。
+    这里不假装成功：没回执就说没回执，让人知道该再看一眼还是该重启守护。
+    """
+    ok, info = E.send_cmd_and_wait(cmd, **args)
+    if not ok:
+        if info.get("reason") == "busy":
+            b = info.get("blocked_by") or {}
+            return False, (f"未发出：上一条命令（{b.get('cmd')}，seq={b.get('seq')}）"
+                           "守护还没受理完，请稍候再按")
+        return False, f"未确认受理（seq={info.get('seq')}）：守护可能已停止，请按 s 查看状态"
+    return True, f"已受理：{cmd}（seq={info.get('seq')}）"
 
 
 def view_latest_ticket() -> str:
@@ -255,26 +276,35 @@ def run_loop(fps: float = 2.0) -> int:
         print(snapshot())
         return 0
     vt = enable_vt()
+    toast = ""                                      # 上一次操作的受理结果
     try:
         while True:
             frame = snapshot()
             # 清屏 + 归位；无 VT 支持时退化为逐帧追加（可读但不美观）
             sys.stdout.write("\x1b[2J\x1b[H" if vt else "\n" * 2)
             sys.stdout.write(frame + "\n")
+            if toast:
+                # 受理结果必须落在屏幕上：send 现在会真报"没被受理"，
+                # 不显示就等于把失败又变回静默（这正是本次要消灭的形态）
+                sys.stdout.write(toast + "\n")
             sys.stdout.flush()
             key = read_key(1.0 / fps)
             if key == "q":
                 return 0
             elif key == "s":
                 st = E.read_status() or {}
-                send("disable" if st.get("sampling_enabled") else "enable")
+                toast = send("disable" if st.get("sampling_enabled")
+                             else "enable")[1]
             elif key == "p":
                 st = E.read_status() or {}
-                send("resume" if st.get("paused") else "pause")
+                toast = send("resume" if st.get("paused") else "pause")[1]
             elif key == "r":
-                send("run_now")
+                toast = send("run_now")[1]
             elif key == "c":
-                send("cancel")
+                # 取消的粒度是"下一个窗口边界"（约 2.4 分钟），不是立即：
+                # 走文件通道换来了子进程 finally 真执行（退 Play、卸回调）
+                ok, msg = send("cancel")
+                toast = msg + ("" if not ok else "｜取消已受理，等待窗口边界收尾")
             elif key == "a":
                 print("\n" + view_latest_ticket())
                 read_key(3.0)

@@ -28,6 +28,7 @@ from upi.config.settings import load_config
 from upi.core.approval import ApprovalStore, build_request
 from upi.core.candidate_retrieval import retrieve_candidates
 from upi.core.detector import DEFAULT_REGISTRY
+from upi.core import events as E
 from upi.core.models import EditPlan, Hypothesis, Issue
 from upi.tooling import snapshot as snapmod
 
@@ -192,8 +193,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
                          + (a.get("_meta", {}).get("token_out", 0) or 0)
                          for a in archive.values())
-            (run_dir / "diagnose_archive.json").write_text(
-                json.dumps(archive, ensure_ascii=False, indent=2), encoding="utf-8")
+            E.write_json(run_dir / "diagnose_archive.json", archive,
+                         what="diagnose_archive", strict=False)
         else:
             hs = _offline_hypotheses(cands, issue)
             tokens = 0
@@ -385,13 +386,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 cl = checklist_for_proposal()
             except Exception as e:  # noqa: BLE001
                 cl = None
-                (run_dir / "checklist_error.txt").write_text(
-                    f"体检表计算失败，提案按缺项处理：{type(e).__name__}: {e}\n",
-                    encoding="utf-8")
+                E.atomic_write_text(
+                    run_dir / "checklist_error.txt",
+                    f"体检表计算失败，提案按缺项处理：{type(e).__name__}: {e}\n")
             prop = ks.propose_promotion(pid, "auto", overfit_checklist=cl)
-            (run_dir / "promotion_proposal.json").write_text(
-                json.dumps(prop.model_dump(), ensure_ascii=False, indent=2),
-                encoding="utf-8")
+            # 提案是本节点的结论，落盘失败必须留痕（strict=False 保证记账
+            # 不因写文件失败而中断，但 write_failed 事件会进 UI 告警区）
+            E.write_json(run_dir / "promotion_proposal.json",
+                         prop.model_dump(), what="promotion_proposal",
+                         strict=False)
             prop_note = {"kind": "record", "pattern_id": pid,
                          "proposal_status": prop.status,
                          "blocked_reasons": prop.blocked_reasons}
@@ -418,9 +421,13 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             except Exception as e:  # noqa: BLE001 — 回滚失败必须可见，不静默
                 final["final_rollback"] = {"error": str(e)[:200]}
 
-        (run_dir / "runreport.json").write_text(
-            json.dumps(final, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8")
+        # 终态报告原子写 + 失败留痕：runreport.json 是统计层算成本与
+        # 判定分布的唯一入口，半写会让该轮在报告里"凭空消失"（G13 的
+        # untraced 判定依赖产物存在性）。失败不能打断已完成的记账，
+        # 但必须把这件事说出去。
+        if not E.write_json(run_dir / "runreport.json", final,
+                            what="runreport", strict=False):
+            E.emit("runreport_write_failed", run_id=run_dir.name)
         return {}
 
     return {"detect": detect, "diagnose": diagnose, "plan": plan, "fix": fix,

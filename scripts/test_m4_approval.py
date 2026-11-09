@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pydantic import ValidationError                      # noqa: E402
+from upi.core import events as E                          # noqa: E402
 from upi.core.approval import (ApprovalDecision,          # noqa: E402
                                ApprovalRequest, ApprovalStore, build_request,
                                render_markdown)
@@ -34,11 +35,17 @@ from upi.core.models import EditPlan, Evidence, Hypothesis  # noqa: E402
 
 PASS, FAIL = [], []
 TMP = ROOT / "runs" / "_m4apr_tmp"
+# 本套的负例用例（缺批准人、非法决定值、损坏决定文件）会触发 approval 里的
+# decision_invalid / decision_unreadable 留痕。不隔离总线就会把这些测试噪音
+# 写进真实 runs/daemon_events.jsonl（实测污染过 35 行）——而测试全绿不会提示
+# 这件事，所以隔离放在这里而不是靠每个用例自己记得。
+_REAL_EVENTS = E._p_events()
 
 
-def check(name, cond):
+def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
-    print(f"   [{'ok' if cond else 'FAIL'}] {name}")
+    print(f"   [{'ok' if cond else 'FAIL'}] {name}"
+          + ("" if cond else f"  ← {str(detail)[:120]}"))
 
 
 EV = [Evidence(tool="unity diagnostics + a2 sampler", raw_ref="runs/x/e.json",
@@ -83,6 +90,11 @@ def main():
     shutil.rmtree(TMP, ignore_errors=True)
     run_dir = TMP / "run1"
     run_dir.mkdir(parents=True)
+    # 总线隔离到本套自己的临时目录（rmtree 时一并消失），并记下真实事件档
+    # 的初始大小，收尾断言它没被写过——污染仓库留档不会让测试变红，
+    # 只能靠这样一条自检守住。
+    E.isolate(TMP)
+    _size0 = _REAL_EVENTS.stat().st_size if _REAL_EVENTS.exists() else 0
 
     print("== A 工单五件套契约 ==")
     req = req_kwargs()
@@ -231,6 +243,13 @@ def main():
     check("批准内容为空 ⇒ 视同未批，不执行（双保险）",
           not any(c.startswith("execute") for c in calls)
           and f3.get("route") == "needs_human")
+
+    # 自检：真实事件档不得被本套写过。这条断言存在的意义是——测试全绿
+    # 不代表没污染仓库：负例留痕一旦写到 runs/daemon_events.jsonl，
+    # 会混进报告的事件流与统计，而没人会怀疑是测试干的。
+    _size1 = _REAL_EVENTS.stat().st_size if _REAL_EVENTS.exists() else 0
+    check("真实事件档未被本套污染（负例留痕不入库）",
+          _size1 == _size0, f"size {_size0} -> {_size1}")
 
     print(f"\n==== M4 人工回路测试: {len(PASS)} 通过, {len(FAIL)} 失败"
           + (f" {FAIL}" if FAIL else ""))
