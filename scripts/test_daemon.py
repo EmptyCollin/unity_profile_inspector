@@ -27,19 +27,34 @@ PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_daemon_"))
 
 
-def check(name, cond):
-    (PASS if cond else FAIL).append(name)
-    print(f"   [{'ok' if cond else 'FAIL'}] {name}")
+def check(name, cond, detail=""):
+    (PASS if cond else FAIL).append(name + ("" if cond else f"  ← {str(detail)[:120]}"))
+    print(f"   [{'ok' if cond else 'FAIL'}] {name}"
+          + ("" if cond else f"  ← {str(detail)[:120]}"))
+
+
+def _mk_daemon_state(conf):
+    """不跑 __init__（它会读 llm_config），手装最小可运行态。"""
+    import threading
+    d = D.Daemon.__new__(D.Daemon)
+    d.conf = dict(conf)
+    d.paused = False
+    d.busy = False
+    d.stop_requested = False
+    d.child_pid = None
+    d._lock = threading.Lock()
+    d.consecutive_failures = 0
+    d._last_remind_ts = 0.0
+    d.next_round_at = 0.0
+    return d
 
 
 def main():
-    # 事件总线全指向临时区，避免污染仓库 runs/
-    E.EVENTS = TMP / "daemon_events.jsonl"
-    E.STATUS = TMP / "daemon_status.json"
-    E.CMD = TMP / "daemon_cmd.json"
-    E.CONF = TMP / "daemon_conf.json"
-    E.PID = TMP / "daemon.pid"
-    E.RUNS = TMP
+    # 事件总线全部指向临时区，避免污染仓库 runs/。
+    # 用 E.isolate() 而不是逐条赋 EVENTS/STATUS/CMD/CONF/PID：
+    # 总线现在按 RUNS 现算路径，手工赋值只对本模块的旧读法有效，
+    # 漏一个就静默写进真实留档（实测污染过 35 行事件），隔离必须集中一处。
+    E.isolate(TMP)
 
     print("== ① 事件总线 ==")
     E.emit("round_started", trigger="interval", fixtures=["A"])
@@ -190,6 +205,193 @@ def main():
                     "counters": {"rounds": 1}})
     st_tk = U.snapshot()
     check("有待批工单被醒目提示", "待你决定" in st_tk or "待批工单 1" in st_tk)
+
+    print("== ⑤b 告警链路：事件 → status.alerts → UI 常驻可见 ==")
+    # 只测"生产者存在"是不够的：alerts 必须在 status 里，UI 必须画出来。
+    # 这条链断在任何一环，落盘失败就仍然等于没发生。
+    import upi.agents.ui as U
+    d5 = _mk_daemon_state({"enabled": True, "interval_s": 1800,
+                           "cooldown_s": 0, "auto_fix": {}, "fixtures": []})
+    E.emit("state_write_failed", stage="verify", run_id="patrol_demo")
+    E.emit("ticket_state_unreadable", ticket="runs/patrol_demo/approvals/T1",
+           run_id="patrol_demo", reason="corrupt: Expecting value")
+    d5._refresh_status()
+    st_al = E.read_status() or {}
+    kinds = [a.get("kind") for a in (st_al.get("alerts") or [])]
+    check("告警被汇总进 status.alerts",
+          "state_write_failed" in kinds and "ticket_state_unreadable" in kinds,
+          str(kinds))
+    check("degraded 布尔位随告警置真", st_al.get("degraded") is True)
+    frame_al = U.snapshot()
+    check("UI 帧里出现告警条", "需要注意" in frame_al and "state_write_failed" in frame_al,
+          frame_al[frame_al.find("需要注意"):][:120] if "需要注意" in frame_al else "无告警条")
+    # 无告警时不该画空条（否则用户分不清"没告警"和"告警没采到"）
+    E.emit("daemon_started", pid=os.getpid())
+    d5._refresh_status()
+    check("alerts 上限 6 条（防长事件流撑爆 status）",
+          len((E.read_status() or {}).get("alerts") or []) <= 6)
+
+    print("== ⑥ 命令通道 ack：串行、不卡死、重启丢弃 ==")
+    # 单槽通道下"发了"≠"守护看到了"：必须等回执，否则两条命令相互覆盖
+    # ⚠️ 用 isolate() 而不是逐条赋常量：总线现在按 RUNS 现算路径
+    #   （E.CMD/E.CONF 赋值已失效），本节的重启接管还会扫 runs/_cancel，
+    #   RUNS 若指向真实仓库就会动到真实留档。
+    E.isolate(TMP)
+    seq_a = E.send_cmd("pause")
+    check("未回执前 pending=True", E.pending_cmd() is not None
+          and E.pending_cmd()["seq"] == seq_a)
+    ok_a, info_a = E.send_cmd_and_wait("resume", timeout_s=0.5)
+    check("上一条未回执 ⇒ 新命令被拒而非覆盖",
+          ok_a is False and info_a["reason"] == "busy")
+    check("被拒时留下 command_not_sent（不静默）",
+          any(e.get("kind") == "command_not_sent" for e in E.tail_events(4)))
+    check("通道文件未被第二条改写（seq 不变）",
+          int(E.read_cmd()["seq"]) == seq_a)
+    E.ack_cmd(seq_a, cmd="pause")
+    check("ack 后 pending 消失", E.pending_cmd() is None)
+    # (a) 没有守护在消费（本测试进程）⇒ 必须诚实报"未确认受理"，绝不假装成功
+    ok_b, info_b = E.send_cmd_and_wait("resume", timeout_s=0.6)
+    check("无人回执 ⇒ 报 no_ack 而不是假装成功",
+          ok_b is False and info_b["reason"] == "no_ack", str(info_b))
+    check("no_ack 也留痕（发出去了但没人看见）",
+          any(e.get("kind") == "command_unacked" for e in E.tail_events(4)))
+    # 清掉这条遗留 pending（模拟守护终究会消费），再验有回执的另一条路径
+    E.ack_cmd(E.cmd_state()["seq"])
+    # (b) 有守护回执 ⇒ acked 成功（后台线程模拟消费，不起真进程）
+    import threading
+    import time as _time
+
+    ack_stop = [False]
+
+    def _acker():
+        seen = int(E.cmd_state().get("acked_seq", 0) or 0)
+        while not ack_stop[0]:
+            st = E.cmd_state()
+            if st["seq"] > seen:
+                seen = st["seq"]
+                E.ack_cmd(seen, cmd=st["cmd"])
+            _time.sleep(0.05)
+
+    th = threading.Thread(target=_acker, daemon=True)
+    th.start()
+    ok_c, info_c = E.send_cmd_and_wait("run_now", timeout_s=3.0)
+    check("有守护回执 ⇒ acked 成功", ok_c is True
+          and info_c["reason"] == "acked", str(info_c))
+    # ⚠️ 必须关掉模拟回执线程：它是 daemon 线程，留着会在后面的
+    #   "重启丢弃"用例里继续 ack，把 pending 态抹平——两个断言同时变红，
+    #   看起来像实现的错，其实是测试自己制造的竞态。
+    ack_stop[0] = True
+    th.join(timeout=2)
+    # 守护重启接管：遗留未 ack 命令必须显式丢弃并回执，否则 UI 永久发不出命令
+    d2 = _mk_daemon_state({"enabled": True})
+    # 造 pending 态：acked 落在 seq 之后（模拟上一代崩在 ack 之前）。
+    # 不能靠 ack_cmd 倒退（它取 max），直接写文件——真实形态就是这个。
+    pending_seq = E.cmd_state()["seq"] + 1
+    E.atomic_write(E._p_cmd(), json.dumps({"seq": pending_seq, "cmd": "run_now",
+                                           "args": {}, "ts": E.now(),
+                                           "acked_seq": pending_seq - 1}))
+    dropped_before = len([e for e in E.tail_events(30)
+                          if e.get("kind") == "command_dropped"])
+    adopt = d2._adopt_cmd_channel()
+    check("重启接管返回当前最大 seq", adopt == pending_seq, str(adopt))
+    check("遗留命令被丢弃且留痕（不是静默吞）",
+          len([e for e in E.tail_events(8)
+               if e.get("kind") == "command_dropped"]) == dropped_before + 1)
+    check("丢弃后通道不再 pending（UI 恢复可用）", E.pending_cmd() is None)
+
+    print("== ⑦ 取消通道取代硬杀 + 派生路径可重定向 ==")
+    # 真正验"派生"：换一个新的根再 isolate，派生路径必须跟着走。
+    # （原先只写 E.RUNS = TMP 且值与上一节相同，等于没测到重定向能力。）
+    sub = TMP / "reroot"
+    E.isolate(sub)
+    check("isolate 后 cancel_dir 跟着新根走（不污染真实 runs）",
+          E.cancel_dir() == sub / "_cancel", str(E.cancel_dir()))
+    check("isolate 后 decide_path 同样跟着走",
+          E.decide_path() == sub / "daemon_decide.json", str(E.decide_path()))
+    check("isolate 后事件也写到新根", E.emit("probe-reroot") is not None
+          and (sub / "daemon_events.jsonl").exists())
+    E.isolate(TMP)                      # 回到主临时区继续后面的用例
+    dead = 999997                       # 不存在的 pid：不会真去杀任何进程
+    check("request_cancel 落文件并留痕",
+          E.request_cancel(dead, reason="user")
+          and E.cancel_flag(dead).exists()
+          and any(e.get("kind") == "cancel_requested" for e in E.tail_events(3)))
+    check("cancel_requested 读回True", E.cancel_requested(dead) is True)
+    E.clear_cancel(dead)
+    check("clear_cancel 清干净", not E.cancel_requested(dead))
+    # 清扫判据：活进程的取消标志**绝不能**按"太旧"删除——那是唯一能
+    # 让子进程自己收尾的手段（os.kill 会让它的 finally 不执行）
+    E.request_cancel(os.getpid(), reason="orphan-test")
+    n_swept = E.sweep_cancel_flags()
+    check("活着且持有取消标志 ⇒ 不被清扫（否则孤儿停不下来）",
+          n_swept == 0 and E.cancel_requested(os.getpid()) is True)
+    check("同时告警孤儿存在",
+          any(e.get("kind") == "orphan_child_holding_cancel"
+              for e in E.tail_events(3)))
+    E.request_cancel(dead, reason="stale")
+    check("死进程的残留标志被清走",
+          E.sweep_cancel_flags() >= 1 and not E.cancel_requested(dead))
+    E.clear_cancel(os.getpid())
+
+    print("== ⑧ 工单租约：崩溃后能自愈 ==")
+    tk8 = TMP / "runs" / "patrol_lease" / "approvals" / "APR-1"
+    tk8.mkdir(parents=True)
+    check("首次抢租约成功", E.acquire_lease(tk8, holder=os.getpid()))
+    check("同一持有者未过期 ⇒ 别人抢不到",
+          E.acquire_lease(tk8, holder=999999) is False)
+    st8 = E.lease_state(tk8)
+    check("租约状态可读且指明持有者", st8["held"] is True
+          and st8["holder"] == os.getpid())
+    # 过期即失效（实测缺口：unlink 之前崩 ⇒ 工单永久卡死）
+    (tk8 / E.LEASE_NAME).write_text(json.dumps(
+        {"pid": os.getpid(), "ts": "2020-01-01T00:00:00", "ttl_s": 60}),
+        encoding="utf-8")
+    check("过期租约不再阻塞接手", E.acquire_lease(tk8, holder=os.getpid()))
+    # 持有者进程已死 ⇒ 即使没过期也可接手（守护被硬杀的情形）
+    (tk8 / E.LEASE_NAME).write_text(json.dumps(
+        {"pid": 999996, "ts": E.now(), "ttl_s": 86400}), encoding="utf-8")
+    check("持有者已死 ⇒ 租约可被重新取得",
+          E.acquire_lease(tk8, holder=os.getpid()) is True)
+    E.release_lease(tk8)
+    check("release 后文件消失", not (tk8 / E.LEASE_NAME).exists())
+    # 半写/损坏的租约文件不得被当成"没人占"（fail-open 会双跑同一工单）
+    (tk8 / E.LEASE_NAME).write_text("{坏", encoding="utf-8")
+    check("损坏租约按不可判定处理并留痕",
+          E.lease_state(tk8)["held"] is False)
+    (tk8 / E.LEASE_NAME).unlink()
+
+    print("== ⑨ 决定意向：单一写入者的传输层 ==")
+    s1 = E.stage_decide("APR-1", "approve", approver="me", note="ok",
+                        token="7f3a")
+    check("意向落盘且 seq 自增", s1 == 1 and E.decide_path().exists())
+    s2 = E.stage_decide("APR-2", "reject", approver="me", note="no",
+                        token="91be")
+    check("第二条 seq 递增", s2 == 2)
+    got = E.take_decide()
+    check("take 读到最新意向", got["ticket"] == "APR-2"
+          and got["decision"] == "reject" and got["token"] == "91be")
+    check("take 后即清（防重复落盘）", E.take_decide() is None
+          and not E.decide_path().exists())
+
+    print("== ⑩ load_json 必须把错误交出来（静默吞异常的源头） ==")
+    bad = TMP / "bad.json"
+    bad.write_text("{坏行", encoding="utf-8")
+    data, err = E.load_json(bad)
+    check("坏文件返回 err 且数据为 None", data is None and err.startswith("corrupt"))
+    miss, err_m = E.load_json(TMP / "none.json")
+    check("缺文件明确报 missing（可与损坏区分）", err_m == "missing")
+    # 配置坏掉 ⇒ 留痕后回落，不静默当空配置（用户以为关掉的采样会继续跑）
+    # ⚠️ 必须写派生路径 E._p_conf()：总线现在按 RUNS 现算路径，
+    #   再赋 E.CONF 常量已经不影响 load_conf/save_conf 的取数（实测两条断言
+    #   因此变红——是实现错还是测试错？是实现按 I9 现算、测试还留着旧写法）。
+    conf_p = E._p_conf()
+    conf_p.write_text("{坏", encoding="utf-8")
+    check("坏配置 load 返回空 dict", E.load_conf() == {})
+    check("同时发 conf_unreadable 留痕",
+          any(e.get("kind") == "conf_unreadable" for e in E.tail_events(4)))
+    conf_p.unlink()
+    check("save_conf 返回落盘结果", E.save_conf({"enabled": False}) is True
+          and E.load_conf()["enabled"] is False)
 
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n==== 守护层离线测试: {len(PASS)} 通过, {len(FAIL)} 失败"

@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from upi.core import events as E
 from upi.core.models import EditPlan
 from upi.tooling.snapshot import Snapshot, pre_execute_check, rollback
 from upi.tooling.unity_cli import run_unity
@@ -43,6 +44,26 @@ def _cli(name: str, *extra: str, project: Path, timeout: int = 150) -> dict:
     return {"ok": env.success, "data": env.data, "errors": [e.message for e in env.errors]}
 
 
+def _write_source(fp: Path, text: str, *, why: str) -> None:
+    """源码落盘：原子写 + 读回校验。
+
+    为什么这里比普通文件更要紧：写的是**用户的 C# 源文件**。非原子的
+    write_text 崩在中途会留下截断的源码——那已经不是"这轮修复失败"，
+    而是把工程写坏到编译不过，而回滚要等到上层发现才发生，中间这个
+    破损状态可能被别的进程读到。
+    读回校验不是多余的：`applied` 报成功 ≠ 磁盘真变了（本仓既有教训），
+    校验失败当场抛错，让上层按"未生效"处置而不是继续往下跑。
+    """
+    E.atomic_write(fp, text)
+    try:
+        back = fp.read_text(encoding="utf-8")
+    except OSError as e:
+        raise FixError(f"{why}：写入后无法读回 {fp}（{e}）") from e
+    if back != text:
+        raise FixError(f"{why}：读回内容与期望不一致（{fp}），"
+                       "疑为并发写入或编码差异，视为未生效")
+
+
 def apply_diffs(plan: EditPlan, root: Optional[Path] = None) -> list[dict]:
     """机械应用 diffs。任何一片不精确命中 → 全部回退（不留半成品）。"""
     root = root or ROOT
@@ -58,12 +79,23 @@ def apply_diffs(plan: EditPlan, root: Optional[Path] = None) -> list[dict]:
                 raise FixError(f"diff 命中 {n} 次 ≠ 期望 {n_expect}：{d['file']}——"
                                "中止整个 plan（禁半成品落盘）")
             backups.append((fp, src))
-            fp.write_text(src.replace(d["find"], d["replace"]), encoding="utf-8")
+            _write_source(fp, src.replace(d["find"], d["replace"]),
+                          why="diff 落盘")
             applied.append({"file": d["file"], "replaced": n})
         return applied
-    except Exception:
-        for fp, src in backups:              # 回退已落盘的
-            fp.write_text(src, encoding="utf-8")
+    except Exception as e:
+        # 回退本身也可能失败（磁盘满/占用）。失败必须冒出来：此时工程停在
+        # 半成品状态，比"这轮没修好"严重得多，绝不能只 raise 原始异常就完事。
+        rollback_errs = []
+        for fp, src in backups:
+            try:
+                _write_source(fp, src, why="回退落盘")
+            except Exception as e2:  # noqa: BLE001
+                rollback_errs.append(f"{fp.name}: {str(e2)[:120]}")
+        if rollback_errs:
+            raise FixError(
+                f"回退失败，工程可能处于半成品状态：{'; '.join(rollback_errs)}"
+                f"；原始异常：{str(e)[:160]}") from None
         raise
 
 

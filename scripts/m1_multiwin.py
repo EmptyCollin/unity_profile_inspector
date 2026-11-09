@@ -50,6 +50,14 @@ PROGRESS_FP = ROOT / "runs" / "daemon_progress.json"
 
 def report(stage: str, fixture: str = "", window: int = 0,
            windows_total: int = 0, note: str = "") -> None:
+    """进度上报（观测件）。
+
+    ⚠️ 这里**故意**吞掉 OSError，不是遗漏：进度文件坏了可以修，但如果让写
+      进度把采样进程带崩，整轮 2.4 分钟的采集与积分就一起作废——观测件
+      永远不能变成被观测路径的故障源（本仓纪律）。
+      失败不静默于系统之外：守护侧用**进度文件新鲜度**判定（读不到/过期即
+      视为无进度上报，UI 显示"进度不可用"），检测责任在那一侧，不在这侧。
+    """
     try:
         tmp = PROGRESS_FP.with_name(PROGRESS_FP.name + ".tmp")
         tmp.write_text(json.dumps({

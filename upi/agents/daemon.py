@@ -206,23 +206,58 @@ class Daemon:
         threading.Thread(target=self._round, daemon=True).start()
         threading.Thread(target=self._progress_poller, daemon=True).start()
 
+    def _adopt_cmd_channel(self) -> int:
+        """接管命令通道，返回"已看到的最大 seq"。
+
+        ⚠️ 重启时必须把遗留的未受理命令显式丢掉并回执：命令通道是单槽，
+          留着 pending 会让 UI 此后**永远发不出新命令**（send_cmd_and_wait
+          一直拒绝），而守护看起来完全健康——这是引入 ack 机制自己带来的
+          死锁，不处理就等于把"读不到结果"升级成"整个交互层不可用"。
+          丢弃必须留痕：那条命令可能是用户按下的"取消"或"关采样"。
+        同时清扫上一代留下的取消标志（否则新子进程一开窗就被误判要取消）。
+        """
+        init = E.read_cmd() or {}
+        seq = int(init.get("seq", 0) or 0)
+        acked = int(init.get("acked_seq", 0) or 0)
+        if seq > acked:
+            E.emit("command_dropped", seq=seq, cmd=init.get("cmd"),
+                   reason="daemon_restart_before_ack")
+            E.ack_cmd(seq, dropped="daemon_restart")
+        n = E.sweep_cancel_flags()
+        if n:
+            E.emit("startup_sweep", cancel_flags=n)
+        return seq
+
     def run_forever(self) -> int:
-        E.PID.write_text(str(os.getpid()), encoding="utf-8")
+        # pid 文件必须真写进去：写失败还继续跑，就会出现"两个守护都在跑但
+        # 存活判定只看得到其中一个"（cmd_start 靠 pid 文件防双启）。
+        # 这里选择失败即退出，而不是带着不可见的 pid 硬跑。
+        try:
+            E.atomic_write(E.PID, str(os.getpid()))
+        except OSError as e:
+            E.emit("daemon_pid_write_failed", error=str(e)[:160],
+                   note="pid 写不进去就不启动，防双守护并发抢编辑器")
+            return 3
         E.emit("daemon_started", pid=os.getpid(),
                interval_s=int(self.conf.get("interval_s", 1800)),
                enabled=bool(self.conf.get("enabled")),
                auto_fix=self.conf.get("auto_fix"))
         self.next_round_at = time.time()
         self._last_remind_ts = 0.0
-        last_seen_seq = int((E.read_cmd() or {}).get("seq", 0))
+        last_seen_seq = self._adopt_cmd_channel()
         try:
             while not self.stop_requested:
+                # 决定意向先于命令处理：人刚按下的"批准"排第一优先级
+                self._consume_decide()
                 c = E.read_cmd()
                 if c and int(c.get("seq", 0)) > last_seen_seq:
                     last_seen_seq = int(c["seq"])
                     E.emit("command_received", seq=last_seen_seq,
                            cmd=c.get("cmd"), args=c.get("args") or {})
                     self._apply_cmd(c)
+                    # 回执紧跟处理之后：UI 靠它判断"命令真被消费了"，
+                    # 而不是"文件写进去了"（两者在守护崩掉的瞬间不等价）
+                    E.ack_cmd(last_seen_seq, cmd=c.get("cmd"))
                     E.write_status({"processed_seq": last_seen_seq})
 
                 open_t, go_t = self._tickets()
@@ -255,8 +290,10 @@ class Daemon:
         finally:
             try:
                 E.PID.unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                # 不清掉也不会误判存活（双判据里 pid_alive 会判死），
+                # 但残留必须留痕：否则排查"为什么有个死 pid 文件"时毫无线索
+                E.emit("pid_cleanup_failed", error=str(e)[:120])
             E.emit("daemon_stopped", pid=os.getpid())
         return 0
 
@@ -270,6 +307,11 @@ class Daemon:
         只看"批准过+没标记"会让守护一上岗就把旧修复重新落地一遍。
         真正的待续跑 = 最后一条 fix 停在 awaiting_approval 且整轮还没有
         verdict 且未起过续跑（resume_done 标记先行，防半途崩后重复起）。
+
+        ⚠️ 读不出来的文件**必须留痕**（阶段 2 收敛）：这里曾对 decision.json
+          与 state.json 双双 `except: continue`，后果是那张工单既不进 open
+          也不进 go——守护永久不续跑、UI 也看不见它，而磁盘上明明有一张
+          用户已批准的工单。静默跳过等于把"数据坏了"伪装成"没活儿干"。
         """
         open_t, go = [], []
         for d in sorted((ROOT / "runs").glob("patrol_*/approvals/*")):
@@ -279,25 +321,79 @@ class Daemon:
             if not dec.exists():
                 open_t.append(d)
                 continue
-            try:
-                approved = json.loads(dec.read_text(encoding="utf-8")).get(
-                    "decision") == "approve"
-            except (json.JSONDecodeError, OSError):
-                approved = False
+            dec_data, dec_err = E.load_json(dec)
+            if dec_err:
+                # 损坏的决定文件：不能当"未批"静默放过，也不能当"批了"放行
+                E.emit("decision_unreadable", ticket=str(d), reason=dec_err)
+                continue
+            approved = (dec_data or {}).get("decision") == "approve"
             if not approved or (d / "resume_done.json").exists():
                 continue
             run_dir = d.parents[1]
-            try:
-                st = json.loads((run_dir / "state.json")
-                                .read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            st, st_err = E.load_json(run_dir / "state.json")
+            if st_err:
+                # state.json 是续跑判据的唯一依据；读不到就如实报警，
+                # 让人去修数据，而不是让守护悄悄放弃这张单
+                E.emit("ticket_state_unreadable", ticket=str(d),
+                       run_id=run_dir.name, reason=st_err)
                 continue
+            st = st or {}
             fixes = [r for r in st.get("records", []) if r.get("kind") == "fix"]
             last_status = (fixes[-1].get("execute") or {}).get(
                 "status") if fixes else None
             if st.get("verdict") is None and last_status == "awaiting_approval":
                 go.append((run_dir.name, d))
         return open_t, go
+
+    def _consume_decide(self) -> None:
+        """消费决定意向 → 落 decision.json → 提交成功后清理。
+
+        两段式（peek/commit）而不是读后即删：意向先留在盘上，直到
+        decision.json 真的写成功才推 committed_seq。守护中途崩了也不丢
+        用户的批准，下一轮接着提交（阶段 2 单一写入者链路的可靠性靠这个）。
+        """
+        data, err = E.peek_decide()
+        if err == "missing" or err == "already_committed":
+            E.clear_decide()             # 已提交过的垃圾文件顺手清掉
+            return
+        if err or not data:
+            return
+        seq = int(data.get("seq", 0) or 0)
+        ticket_rel = str(data.get("ticket") or "")
+        # 工单路径必须真实存在且属于待批队列——不能凭意向文件里的字符串
+        # 就往任意目录写 decision.json（那等于绕过审批校验）
+        from upi.core.approval import ApprovalDecision, ApprovalStore
+        run_root = ROOT / "runs"
+        cand = [Path(ticket_rel)] if ticket_rel else []
+        if cand and not cand[0].is_absolute():
+            cand = [run_root / ticket_rel]
+        ok_dir = next((d for d in cand
+                       if d.exists() and (d / "request.json").exists()), None)
+        if ok_dir is None:
+            E.emit("decide_rejected", seq=seq, ticket=ticket_rel,
+                   reason="ticket_not_found")
+            E.commit_decide(seq)         # 认了：不再反复重试一个不存在的工单
+            E.clear_decide()
+            return
+        try:
+            dec = ApprovalDecision(
+                request_id=ok_dir.name,
+                decision=data.get("decision") or "",
+                approver=data.get("approver") or "",
+                note=data.get("note") or "")
+        except Exception as e:  # noqa: BLE001 — 意向不合法=没有有效决定，绝不放行
+            E.emit("decide_rejected", seq=seq, ticket=ticket_rel,
+                   reason=f"invalid_decision:{str(e)[:120]}")
+            E.commit_decide(seq)         # 同样认掉，避免死循环重试坏意向
+            E.clear_decide()
+            return
+        store = ApprovalStore(ok_dir.parents[1])
+        if not store.write_decision(ok_dir.name, dec, source="ui"):
+            # 落盘失败：不 commit，下一轮自动重试（意向仍在盘上）
+            E.emit("decide_write_failed", seq=seq, ticket=ticket_rel)
+            return
+        E.commit_decide(seq)
+        E.clear_decide()
 
     def _start_resume(self, run_id: str, ticket: Path):
         """续跑异步化：_resume_ticket 阻塞约 7 分钟（一次干净 attempt 实测：
@@ -308,30 +404,63 @@ class Daemon:
                 return
             self.busy = True
             self.stop_requested = False
-        threading.Thread(target=self._resume_ticket,
+        threading.Thread(target=self._resume_with_lease,
                          args=(run_id, ticket), daemon=True).start()
-    def _resume_ticket(self, run_id: str, ticket: Path):
+
+    def _resume_with_lease(self, run_id: str, ticket: Path) -> None:
+        """抢租约 → 续跑 → 释放。抢不到说明别人（另一代守护/开发通道）在跑。
+
+        为什么必须限次：没有 TTL 的"标记文件"会在崩于 unlink 之前时永久卡住
+        这张工单（实测缺口）；但 TTL 若短于真实续跑耗时（约 7~31 分钟），
+        正常运行的任务会被别人当"崩了"抢走，同一工单跑两遍——那比卡住更糟。
+        判据用 events.LEASE_TTL_S（45 分钟）：既覆盖最长干净 attempt，
+        又保证崩溃后最终能自愈。
+        """
+        if not E.acquire_lease(ticket, holder=os.getpid()):
+            E.emit("resume_skipped", run_id=run_id, reason="lease_held",
+                   lease=E.lease_state(ticket))
+            return
+        try:
+            self._run_resume_ticket(run_id, ticket)
+        finally:
+            E.release_lease(ticket)
+
+    def _run_resume_ticket(self, run_id: str, ticket: Path):
         """工单批准后由守护续跑：等价 python -m upi resume --run <id>。"""
-        (ticket / "resume_done.json").write_text(json.dumps(
-            {"started_at": E.now(), "pid": os.getpid()}), encoding="utf-8")
+        E.write_json(ticket / "resume_done.json",
+                     {"started_at": E.now(), "pid": os.getpid()},
+                     what="resume_done", strict=False)
         E.emit("resume_started", run_id=run_id,
                ticket=str(ticket / "request.md"))
         from upi.agents.nodes import make_nodes
         from upi.agents.orchestrator import Runner
-        st = json.loads((ROOT / "runs" / run_id / "state.json")
-                        .read_text(encoding="utf-8"))
+        # 续跑前先确认状态文件真能读：读不到就是"不知道要续什么"，
+        # 绝不能用空态硬跑一遍修复（那会把未知当成"没做过"）
+        st, err = E.load_json(ROOT / "runs" / run_id / "state.json")
+        if err or not st:
+            E.emit("resume_failed", run_id=run_id,
+                   error=f"state_unreadable: {err or 'empty'}")
+            with self._lock:
+                self.busy = False
+            return
         runner = Runner(run_id, st["fixture"])
         nodes = make_nodes(runner.dir, live_llm=bool(
             (self.conf.get("auto_fix") or {}).get("live_llm")),
             approval_note="")
         try:
             runner.resume(nodes, entry="fix")
-            st2 = json.loads((runner.dir / "state.json")
-                             .read_text(encoding="utf-8"))
-            v = st2.get("verdict") or {}
+            st2, err2 = E.load_json(runner.dir / "state.json")
+            if err2:
+                # 跑完了却读不到判定 ⇒ 不能报"成功"，也不能报"失败"，
+                # 只能如实标 unverifiable 并保留工单现场
+                E.emit("resume_unverifiable", run_id=run_id, reason=err2)
+                with self._lock:
+                    self.busy = False
+                return
+            v = (st2 or {}).get("verdict") or {}
             E.emit("resume_finished", run_id=run_id,
-                   status=v.get("status"), route=st2.get("route"),
-                   error=str(st2.get("error"))[:180])
+                   status=v.get("status"), route=(st2 or {}).get("route"),
+                   error=str((st2 or {}).get("error"))[:180])
             with self._lock:
                 self.busy = False
         except Exception as e:  # noqa: BLE001
@@ -343,6 +472,10 @@ class Daemon:
 
     def _refresh_status(self):
         n_rounds = n_find = n_tk = 0
+        # 告警汇总：degraded/write_failed 这类"本轮没坏但有些事没做成"
+        # 必须有读者。写进 status 后 UI 直接显示——否则生产者存在而消费者
+        # 为零，告警依旧进黑洞，只是换了个地方。
+        alerts: list[dict] = []
         for ev in reversed(E.tail_events(400)):
             k = ev.get("kind")
             if k == "round_finished":
@@ -350,6 +483,17 @@ class Daemon:
                 n_find += int(ev.get("findings") or 0)
             elif k == "ticket":
                 n_tk += 1
+            elif k in ("state_write_failed", "write_failed", "conf_unreadable",
+                       "decision_unreadable", "ticket_state_unreadable",
+                       "cmd_seq_unreadable", "decide_write_failed",
+                       "orphan_child_holding_cancel", "command_dropped"):
+                if len(alerts) < 6:
+                    alerts.append({
+                        "kind": k, "ts": ev.get("ts"),
+                        "what": ev.get("what") or ev.get("stage")
+                                or ev.get("reason") or "",
+                        "detail": str(ev.get("error") or ev.get("reason")
+                                      or ev.get("path") or "")[:90]})
         E.write_status({
             "pid": os.getpid(),
             "sampling_enabled": bool(self.conf.get("enabled")),
@@ -362,6 +506,8 @@ class Daemon:
                 time.localtime(getattr(self, "next_round_at", time.time()))),
             "counters": {"rounds": n_rounds, "findings": n_find,
                          "tickets": n_tk},
+            "alerts": alerts,
+            "degraded": bool(alerts),
             "open_tickets": [str(p / "request.md")
                            for p in self._tickets()[0]],
             "conf": {"interval_s": int(self.conf.get("interval_s", 1800)),

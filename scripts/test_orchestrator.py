@@ -27,9 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PASS, FAIL = [], []
 
 
-def check(name, cond):
+def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
-    print(f"   [{'ok' if cond else 'FAIL'}] {name}")
+    print(f"   [{'ok' if cond else 'FAIL'}] {name}"
+          + ("" if cond else f"  ← {str(detail)[:120]}"))
 
 
 def run_case(verdict_status="resolved", budget=None, route_at=None,
@@ -204,6 +205,124 @@ def main():
     check("未超限放行", budget_check(
         {"budget": {"max_tokens": 100, "wallclock_s": 10},
          "spent": {"tokens": 50, "wallclock_s": 1}}) is None)
+
+    print("== ⑧ state 落盘失败 ⇒ 留痕且不丢告警（阶段 2 收敛的判据） ==")
+    # 直接驱动 _wrap，不跑整张图：本节的被测对象是"落盘失败后的处置"，
+    # 图路由由 ①~⑦ 覆盖，混在一起会让失败原因不可归因。
+    import os as _os
+    from upi.core import events as _E
+    from upi.agents.orchestrator import _wrap as _wrap_fn
+    tmp8 = Path(tempfile.mkdtemp(prefix="upi_orch8_"))
+    # isolate() 而不是赋 _E.EVENTS：总线现在按 RUNS 现算路径，
+    # 只赋 EVENTS 常量已经不影响 emit 的落点（实测把 6 行注入噪音写进了
+    # 真实 runs/daemon_events.jsonl）。收尾必须恢复，否则同一进程内
+    # 后续用例的留痕会继续写到这个待删除的目录里。
+    _runs_bak = _E.RUNS
+    _real_ev0 = _runs_bak / "daemon_events.jsonl"
+    _size8_before = _real_ev0.stat().st_size if _real_ev0.exists() else 0
+    _E.isolate(tmp8)
+    tr8 = Tracer("t-degraded", root=str(tmp8), channel="dev",
+                 env_fingerprint="test")
+    real_wj = _E.write_json
+    fail_left = {"n": 0}
+
+    def fake_wj(p, obj, *, what="", strict=True):
+        if what == "state_per_node" and fail_left["n"] > 0:
+            fail_left["n"] -= 1
+            _E.emit("write_failed", path=str(p), what=what, error="injected")
+            return False
+        return real_wj(p, obj, what=what, strict=strict)
+
+    st8 = {"run_id": tr8.run_id, "fixture": "F-CPU-01", "budget": {},
+           "spent": {"wallclock_s": 0.0, "tokens": 0}, "records": [],
+           "attempts": 0, "route": "proceed", "degraded": []}
+    wrapped = _wrap_fn("detect", lambda st: {"findings": []}, tr8)
+    _E.write_json = fake_wj
+    try:
+        fail_left["n"] = 1
+        d1 = wrapped(dict(st8))
+        check("落盘失败 ⇒ degraded 记进状态",
+              "state_write_failed" in (d1.get("degraded") or []),
+              str(d1.get("degraded")))
+        check("事件流有 write_failed 留痕（不再静默 pass）",
+              any(e.get("kind") == "write_failed" for e in _E.tail_events(10)))
+        # 前序已有告警时不得被冲掉：必须合并旧值再回传
+        fail_left["n"] = 1
+        st8b = {**st8, "degraded": ["floor_before_err"]}
+        d2 = wrapped(st8b)
+        check("合并旧降级项（旧告警不被后续节点覆盖）",
+              set(d2.get("degraded") or []) == {"floor_before_err",
+                                                "state_write_failed"},
+              str(d2.get("degraded")))
+        # 成功落盘时不该多塞 degraded（否则会覆盖掉旧值 = 反向丢告警）
+        fail_left["n"] = 0
+        d3 = wrapped({**st8, "degraded": ["keepme"]})
+        check("落盘成功 ⇒ 不回传 degraded（保住旧告警）",
+              "degraded" not in d3 or d3.get("degraded") == ["keepme"],
+              str(d3.get("degraded")))
+    finally:
+        _E.write_json = real_wj
+
+    print("== ⑧b 原子写：替换失败不得留下截断文件 ==")
+    sp = tmp8 / "probe.json"
+    real_wj(sp, {"good": 1}, what="probe")
+    good_txt = sp.read_text(encoding="utf-8")
+    boom = {"hit": False}
+    real_replace = _os.replace
+
+    def fake_replace(a, b, **kw):
+        boom["hit"] = True
+        raise OSError("injected replace failure")   # OSError 是内建，不是 os.OSError
+
+    _os.replace = fake_replace
+    try:
+        try:
+            _E.atomic_write(sp, "截断内容")
+        except OSError:
+            pass
+    finally:
+        _os.replace = real_replace
+    check("注入确实命中替换阶段", boom["hit"] is True)
+    check("失败后原文件仍是完整 JSON（无半写）",
+          sp.read_text(encoding="utf-8") == good_txt
+          and isinstance(json.loads(sp.read_text(encoding="utf-8")), dict))
+    # strict 语义要分别验：write_json(strict=True) 必须把异常抛给调用栈，
+    # strict=False 必须返回 False 并留痕。上面那条"上抛可感知"当时写成重复
+    # 检查 boom["hit"]——那是假断言（永远为真，测不出任何东西），已换成真判据。
+    _os.replace = fake_replace
+    raised = False
+    try:
+        try:
+            _E.write_json(sp, {"x": 2}, what="probe_strict")      # strict=True
+        except OSError:
+            raised = True
+    finally:
+        _os.replace = real_replace
+    check("strict=True ⇒ 写失败上抛（调用栈能知道）", raised is True)
+
+    # 非严格路径也要真注入失败才测得到。曾写成"恢复 real_replace 后调用"，
+    # 那是一次成功写，断言名字（返回 False）与内容完全对不上 = 假断言。
+    _os.replace = fake_replace
+    try:
+        ret_false = _E.write_json(tmp8 / "sub" / "s.json", {"x": 3},
+                                  what="probe_nonstrict", strict=False)
+    finally:
+        _os.replace = real_replace
+    check("strict=False ⇒ 不抛异常但返回 False", ret_false is False,
+          f"ret={ret_false}")
+    check("非严格失败也留 write_failed 事件",
+          any(e.get("kind") == "write_failed"
+              and e.get("what") == "probe_nonstrict"
+              for e in _E.tail_events(12)))
+    check("失败写入不留下目标文件（原子性：要么全有要么全无）",
+          not (tmp8 / "sub" / "s.json").exists())
+    # 自检：真实事件档不得被本节写过（污染留档不会让测试变红，只能这样守住）
+    _real_ev = _runs_bak / "daemon_events.jsonl"
+    _size_after = _real_ev.stat().st_size if _real_ev.exists() else 0
+    _E.isolate(_runs_bak)                 # 恢复：别让后面的用例还指着 tmp8
+    check("真实事件档未被注入用例污染", _size_after == _size8_before,
+          f"{_size8_before} -> {_size_after}")
+    shutil.rmtree(tmp8, ignore_errors=True)
 
     for c_ in (c, c2, c3, c3b, c4, c5, c6):
         shutil.rmtree(c_["dir"], ignore_errors=True)

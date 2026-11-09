@@ -89,7 +89,13 @@ def patrol_episode(cfg_mon: dict) -> dict:
     seen_off = st.get("episode_offset", 0)
     try:
         size = (ROOT / jsonl).stat().st_size
-    except OSError:
+    except OSError as e:
+        # exists() 刚通过却 stat() 失败 = 文件在这一瞬消失或不可读。
+        # 必须标盲区：out 的 blindspot 若留 None，这轮会被当成
+        # "看了，没越界"——正是上面注释禁止的"冒充无发作"（B2/G19 同源）。
+        # 与心跳超龄同口径：**不消费偏移**，样本留给下一轮。
+        out["blindspot"] = (f"探针归档不可读（{type(e).__name__}: {str(e)[:80]}）"
+                            "，本轮发作判定按盲区记录，样本留待下轮")
         return out
     if seen_off and size <= seen_off:
         samples = []

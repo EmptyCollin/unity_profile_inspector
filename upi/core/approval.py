@@ -28,6 +28,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from upi.core import events as E
 from upi.core.models import EditPlan, Evidence, Hypothesis, Issue
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -218,38 +219,82 @@ class ApprovalStore:
     def submit(self, req: ApprovalRequest) -> dict:
         d = self._dir(req.request_id)
         d.mkdir(parents=True, exist_ok=True)
-        (d / "request.json").write_text(
-            json.dumps(req.model_dump(), ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8")
-        (d / "request.md").write_text(render_markdown(req), encoding="utf-8")
+        # 原子写：request.json 与 request.md 是"同一张工单"的两副面孔，
+        # 半写会让守护看到有 request.json 却读不到内容（或反之），
+        # 工单状态不可解释。失败必须上抛——出工单失败不能装作已出。
+        E.write_json(d / "request.json", req.model_dump(),
+                     what="approval_request")
+        E.atomic_write(d / "request.md", render_markdown(req))
         return {"request_id": req.request_id,
                 "md": str(d / "request.md"),
                 "decision_path": str(d / "decision.json")}
 
+    def write_decision(self, request_id: str, dec: ApprovalDecision,
+                       *, source: str = "ui") -> bool:
+        """决定落盘的**唯一入口**（阶段 2 的单一写入者约定）。
+
+        UI 不再直接写 decision.json：它只发 decide 意向，由守护经这里落盘。
+        理由：decision.json 是修复放行的凭据，两个进程都能写就可能后写覆盖
+        前写、或绕过 ApprovalDecision 校验落一个"看着像批准"的文件。
+        source 标出这条决定从哪来（ui=界面审批，external=开发通道手写）。
+        """
+        d = self._dir(request_id)
+        if not (d / "request.json").exists():
+            E.emit("decision_without_request", request_id=request_id,
+                   source=source)
+            return False
+        payload = dec.model_dump()
+        payload["decided_via"] = source
+        ok = E.write_json(d / "decision.json", payload,
+                          what="approval_decision", strict=False)
+        if not ok:
+            return False
+        # 落盘确认：decision.json 是**单写者**的关键凭据（只有守护经此函数写），
+        # 所以可以安全地回读比对——这与 daemon_cmd.json（双写者，回读会把
+        # 合法并发覆盖误判成故障）不同。"以为批了但盘上不是这条"的代价是
+        # 修复被错误放行，值得一次小文件读。
+        back, err = E.load_json(d / "decision.json")
+        if err or not back:
+            E.emit("decision_verify_failed", request_id=request_id,
+                   reason=err or "empty")
+            return False
+        for k in ("decision", "approver", "request_id"):
+            if back.get(k) != payload.get(k):
+                E.emit("decision_verify_failed", request_id=request_id,
+                       field=k, want=str(payload.get(k))[:60],
+                       have=str(back.get(k))[:60])
+                return False
+        E.emit("decision_written", request_id=request_id,
+               decision=dec.decision, approver=dec.approver, source=source)
+        return True
+
     def load_decision(self, request_id: str) -> Optional[ApprovalDecision]:
-        """读人写的决定；文件不存在/不合格即 None（不猜、不默认批准）。"""
+        """读决定；不存在/损坏/不合格一律 None（不猜、不默认批准）。
+        损坏与"还没人批"必须区分留痕——前者是数据事故，后者是正常等待。"""
         p = self._dir(request_id) / "decision.json"
-        if not p.exists():
+        raw, err = E.load_json(p)
+        if err == "missing":
             return None
-        try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        if err:
+            E.emit("decision_unreadable", request_id=request_id, reason=err)
             return None
         raw.setdefault("request_id", request_id)
         raw.setdefault("approver", "")
         try:
             return ApprovalDecision(**raw)
-        except Exception:  # noqa: BLE001 — 决定不合法=没有有效决定，绝不放行写入
+        except Exception as e:  # noqa: BLE001 — 决定不合法=没有有效决定，绝不放行写入
+            E.emit("decision_invalid", request_id=request_id,
+                   error=str(e)[:160])
             return None
 
     def record_used(self, request_id: str, decision: ApprovalDecision,
                     outcome: dict) -> None:
-        """决定被消费后落账（§8.5：批准样本要能分层统计）。"""
-        p = self._dir(request_id) / "used.json"
-        p.write_text(json.dumps({"decision": decision.model_dump(),
-                                 "outcome": outcome,
-                                 "used_at": time.strftime("%Y-%m-%dT%H:%M:%S")},
-                                ensure_ascii=False, indent=2), encoding="utf-8")
+        """决定被消费后落账（§8.5：批准样本要能分层统计）。
+        账本写失败必须上抛：丢了账，这条批准样本在统计里就永远隐身。"""
+        E.write_json(self._dir(request_id) / "used.json",
+                     {"decision": decision.model_dump(), "outcome": outcome,
+                      "used_at": time.strftime("%Y-%m-%dT%H:%M:%S")},
+                     what="approval_used")
 
     def list_open(self) -> list[str]:
         """待批队列（有 request 无 decision）。"""
