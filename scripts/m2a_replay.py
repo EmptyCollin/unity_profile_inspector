@@ -40,7 +40,8 @@ def cli(group_leaf, extra=None, timeout=120):
             "--format", "json", "--no-banner", "--timeout", str(timeout)]
     if extra:
         args += extra
-    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 60)
+    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 60,
+                       encoding="utf-8", errors="replace")
     try:
         return json.loads(p.stdout)
     except Exception:
