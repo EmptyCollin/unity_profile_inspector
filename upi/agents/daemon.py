@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from upi.core import events as E  # noqa: E402
+from upi.config.runtime_spec import SPEC, spec_for  # noqa: E402
 
 # 进度文件路径**每次现算**（与总线其余路径同纪律）：写成模块常量时，
 # 重定向 E.RUNS 的测试与多实例部署都还在读真实仓库的进度文件——
@@ -372,20 +373,38 @@ class Daemon:
             self.stop_requested = True
             self._stop_child("user_cancel")
         elif cmd == "set":
-            changed = {}
+            # 受理口径全部来自 runtime_spec.SPEC，不再在本机写字段白名单：
+            # 两处各存一份时，"UI 显示改成功了、守护按未知字段静默丢弃"
+            # 这种最难查的假接线就必然会出现（漏一个键没人报错）。
+            changed, rejected = {}, []
             for k, v in args.items():
-                if k in ("interval_s", "cooldown_s", "windows",
-                         "waterline_timeout_s"):
-                    self.conf[k] = int(v)
-                    changed[k] = int(v)
-                elif k == "live_llm":
-                    self.conf.setdefault("auto_fix", {})["live_llm"] = bool(v)
-                    changed["live_llm"] = bool(v)
-                elif k == "auto_fix_enabled":
-                    self.conf.setdefault("auto_fix", {})["enabled"] = bool(v)
-                    changed["auto_fix_enabled"] = bool(v)
+                item = spec_for(k)
+                if item is None:
+                    rejected.append(f"{k}:unknown")
+                    continue
+                try:
+                    val = item.cast(v)          # 类型 + 上下界，与 UI 同源
+                except (ValueError, TypeError) as e:
+                    rejected.append(f"{k}:{str(e)[:80]}")
+                    continue
+                item.set(self.conf, val)        # 内存态立即生效
+                changed[k] = val
+            if rejected:
+                # 越界/未知字段必须留痕并回绝：静默接受等于把"改配置"变成
+                # "改不动配置"，而界面上看着像成功了
+                E.emit("config_rejected", keys=rejected, cmd="set")
             if changed:
-                E.save_conf(self.conf)
+                # ⚠️ 只把**改动项**合进覆盖层，绝不整份 save_conf(self.conf)：
+                # self.conf 是"llm_config.yaml 打底 + 覆盖层"的合并结果，整份
+                # 写盘会把从没改过的键（fixtures、episode 探针路径等）也固化进
+                # daemon_conf.json，此后改 yaml 不再起作用——覆盖层与打底被
+                # 一次性焊死，是实测会踩的坑。
+                ov = E.load_conf()
+                for k in changed:
+                    spec_for(k).set(ov, changed[k])
+                if not E.save_conf(ov):
+                    E.emit("config_save_failed", keys=list(changed),
+                           note="本次改动只存在于内存，重启后回落到配置文件值")
                 E.emit("config_changed", **changed)
         elif cmd == "quit":
             # 优雅停止同样走统一收尾：漏改这里就等于给"编辑器被孤儿占住"
@@ -577,17 +596,34 @@ class Daemon:
         ticket_rel = str(data.get("ticket") or "")
         # 工单路径必须真实存在且属于待批队列——不能凭意向文件里的字符串
         # 就往任意目录写 decision.json（那等于绕过审批校验）
-        from upi.core.approval import ApprovalDecision, ApprovalStore
+        from upi.core.approval import (ApprovalDecision, ApprovalStore,
+                                       read_token)
         run_root = E.RUNS          # 同 _tickets()：只认总线现算的留档根
         cand = [Path(ticket_rel)] if ticket_rel else []
         if cand and not cand[0].is_absolute():
             cand = [run_root / ticket_rel]
+        # 意向里的 ticket 有两种合法形态：工单**目录**，或目录下的
+        # request.md（状态快照的 open_tickets 与 UI 用的就是正文路径）。
+        # 上一版只认目录，于是"UI 真按下批准"必然判 ticket_not_found——
+        # 实测这条链路只在 test_daemon 里传目录路径，恰好绕过了，UI 接线
+        # 后第一次跑就撞出来。路径形态不该由调用方猜，这里统一归一化。
+        cand = [d.parent if d.name == "request.md" else d for d in cand]
         ok_dir = next((d for d in cand
                        if d.exists() and (d / "request.json").exists()), None)
         if ok_dir is None:
             E.emit("decide_rejected", seq=seq, ticket=ticket_rel,
                    reason="ticket_not_found")
             E.commit_decide(seq)         # 认了：不再反复重试一个不存在的工单
+            E.clear_decide()
+            return
+        # 阶段 5 读毕证明：token 由守护**独立复算**（只依赖工单号），不信
+        # UI 传来的字符串——两道闸同源但互不依赖，UI 被改坏/绕过也批不了。
+        # 对 a/r/d 一律生效：没读完全文的人同样没资格"凭感觉驳回"。
+        if str(data.get("token") or "").strip().lower() != \
+                read_token(ok_dir.name):
+            E.emit("decide_rejected", seq=seq, ticket=ticket_rel,
+                   reason="token_mismatch")
+            E.commit_decide(seq)         # 坏意向认掉，防死循环重试
             E.clear_decide()
             return
         try:
@@ -725,10 +761,12 @@ class Daemon:
             "degraded": bool(alerts),
             "open_tickets": [str(p / "request.md")
                            for p in self._tickets()[0]],
-            "conf": {"interval_s": int(self.conf.get("interval_s", 1800)),
-                     "cooldown_s": int(self.conf.get("cooldown_s", 0)),
-                     "auto_fix": self.conf.get("auto_fix"),
-                     "fixtures": self.conf.get("fixtures")}})
+            # 配置快照按 SPEC 逐项导出，而不是手写几个键：UI 表单要显示
+            # 每一项的"当前值"，这里漏一个键，界面就会显示"未设"——用户以为
+            # 从没配过，其实守护在用默认值跑（又一类"看起来没接上其实接了
+            # 半截"）。SPEC 加字段，这里自动跟着走，不需要第二次改。
+            "conf": {i.key: i.get(self.conf) for i in SPEC},
+            "fixtures": self.conf.get("fixtures")})
 
 
 def main(argv=None) -> int:

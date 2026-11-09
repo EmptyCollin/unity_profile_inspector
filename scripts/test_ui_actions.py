@@ -40,13 +40,19 @@ def fresh_minute(offset_s: int = 0) -> str:
 
 
 def st_of(**kw) -> dict:
+    # conf 用守护真实导出的**扁平**结构（{key: 值}，键名=SPEC.key）。
+    # 夹具形状必须跟真实生产者一致，否则 UI 测的是想象中的契约。
     base = {"updated_at": fresh_minute(), "pid": 4321, "busy": False,
             "paused": False, "open_tickets": [], "alerts": [],
-            "degraded": False, "conf": {"interval_s": 1800, "cooldown_s": 0,
-                                        "windows": 4,
-                                        "waterline_timeout_s": 900,
-                                        "auto_fix": {"live_llm": False,
-                                                     "enabled": False}}}
+            "degraded": False,
+            "conf": {"interval_s": 1800, "windows": 4, "cooldown_s": 0,
+                     "waterline_timeout_s": 900,
+                     "max_consecutive_failures": 3,
+                     "budget_max_review_rounds": 1,
+                     "budget_max_attempts_per_issue": 1,
+                     "budget_wallclock_s": 3600, "budget_max_tokens": 60000,
+                     "auto_fix_enabled": False, "live_llm": False},
+            "fixtures": ["CLEAN"]}
     base.update(kw)
     return base
 
@@ -83,7 +89,7 @@ cases = [
     (UA.ROUND_RUNNING, {UA.ACT_CANCEL, UA.ACT_SNAPSHOT},
      {UA.ACT_RUN_NOW, UA.ACT_START_DAEMON, UA.ACT_PAUSE,
       UA.ACT_STOP_DAEMON, UA.ACT_CALIBRATE}),
-    (UA.AWAITING, {UA.ACT_VIEW_TICKET, UA.ACT_STOP_DAEMON},
+    (UA.AWAITING, {UA.ACT_VIEW_TICKET, UA.ACT_STOP_DAEMON, UA.ACT_DECIDE},
      {UA.ACT_RUN_NOW, UA.ACT_CANCEL, UA.ACT_PAUSE}),
     (UA.PAUSED, {UA.ACT_RESUME}, {UA.ACT_RUN_NOW, UA.ACT_PAUSE}),
     (UA.UNCALIBRATED, {UA.ACT_SNAPSHOT},
@@ -91,7 +97,7 @@ cases = [
 ]
 # ⚠️ 两个期望必须避开"未接线"与"同键去重"这两条实现规则，否则测试与
 #   实现互相矛盾：
-#     · 未接线动作（register/calibrate/decide）在所有态都置灰，不能期待可用；
+#     · 未接线动作（register/calibrate）在所有态都置灰，不能期待可用；
 #     · 同键去重会把已可用键的禁用同态项从菜单里摘掉——"没列出"等于
 #       "没被开启"，must_off 因此要按 .get(n, False) 判。
 for state, must_on, must_off in cases:
@@ -119,7 +125,7 @@ for state, _on, must_off in cases:
 
 # 未接线动作在任何态都不得可用
 print("== ②b 未接线能力一律置灰 ==")
-for name in ("register_project", "calibrate", "decide"):
+for name in ("register_project", "calibrate"):
     bad = [s for s in UA.ALL_STATES
            if any(a["name"] == name and a["enabled"]
                   for a in UA.actions_for(s))]
@@ -141,12 +147,65 @@ r = UA.consistency_report()
 ok("UI 不会发出守护不认识的命令", not r["unknown_cmds"], str(r["unknown_cmds"]))
 ok("矩阵不引用不存在的动作", not r["matrix_orphans"], str(r["matrix_orphans"]))
 ok("每个态都有退出键", not r["no_quit"], str(r["no_quit"]))
-# 配置字段必须被守护 set 分支接受（否则发了等于没发）
-src = (ROOT / "upi" / "agents" / "daemon.py").read_text(encoding="utf-8")
-seg = src[src.index('elif cmd == "set"'):src.index('elif cmd == "quit"')]
-ok("配置项字段守护全部认得",
-   all(f[0] in seg for f in U.CFG_FIELDS),
-   [f[0] for f in U.CFG_FIELDS if f[0] not in seg])
+# 配置项必须真被守护受理。⚠️ 上一版靠"读 daemon.py 源码、看字段名有没有
+# 出现在 set 分支里"来断言——那既测不到行为（名字写在注释里也算过），又把
+# 实现细节钉成了测试前提：把 set 改成由 runtime_spec 派生后源码不再写字段
+# 字面量，它会假失败得像"产品坏了"。改成直接喂守护的 set 分支看 conf 变不变。
+print("== ③b 守护 set 分支按 SPEC 逐项受理 ==")
+from upi.agents.daemon import Daemon
+from upi.config.runtime_spec import SPEC as _SPEC
+
+
+def _daemon_with(conf):
+    d = Daemon.__new__(Daemon)                # 绕开 __init__（不心跳、不排期）
+    d.conf = conf
+    return d
+
+
+for item in _SPEC:
+    E._p_conf().unlink(missing_ok=True)             # 每项从干净覆盖层起步
+    probe = _daemon_with({"fixtures": ["CLEAN"]})   # 带一个绝不该被 set 动的键
+    if item.kind is bool:
+        good = True
+    else:
+        good = item.lo if item.lo else (item.hi // 2 if item.hi else 1)
+    probe._dispatch_cmd({"cmd": "set", "args": {item.key: good}})
+    ok(f"守护受理 {item.key}", item.get(probe.conf) == good,
+       f"得到 {item.get(probe.conf)!r}")
+    # 覆盖层只能有改动项：整份写盘会把从没改的键也固化，yaml 打底从此失效
+    saved = E.load_conf()
+    ok(f"{item.key} 未把无关键固化进覆盖层", "fixtures" not in saved,
+       str(list(saved)))
+
+# 嵌套项落盘位置正确 + 重启能读回来（这是 UI 化配置的真实收益：改了要活过重启）
+E._p_conf().unlink(missing_ok=True)
+_nb = _daemon_with({})
+_nb._dispatch_cmd({"cmd": "set", "args": {"budget_max_review_rounds": 2,
+                                          "live_llm": True}})
+ok("嵌套 budget 写进 budget 子字典（不拍平成顶层怪键）",
+   (_nb.conf.get("budget") or {}).get("max_review_rounds") == 2
+   and "budget_max_review_rounds" not in _nb.conf, str(_nb.conf))
+ok("嵌套 auto_fix 写进 auto_fix 子字典",
+   (_nb.conf.get("auto_fix") or {}).get("live_llm") is True, str(_nb.conf))
+_saved = E.load_conf()
+ok("改动已落盘（活过重启）",
+   (_saved.get("budget") or {}).get("max_review_rounds") == 2
+   and (_saved.get("auto_fix") or {}).get("live_llm") is True, str(_saved))
+_rt = _daemon_with({**E.load_conf()})   # 模拟重启：覆盖层打底再合并
+ok("重启后读回同一值（覆盖层未被整份写盘污染）",
+   (_rt.conf.get("budget") or {}).get("max_review_rounds") == 2, str(_rt.conf))
+E._p_conf().unlink(missing_ok=True)
+
+# 未知字段必须被拒且不留痕改内存
+d2 = _daemon_with({"interval_s": 900})
+d2._dispatch_cmd({"cmd": "set", "args": {"bogus_key": 1}})
+ok("未知配置项被拒（不静默接受）", d2.conf.get("bogus_key") is None,
+   str(d2.conf))
+# 越界值必须被拒：间隔 1 秒会把积分当场烧穿
+d3 = _daemon_with({"interval_s": 900})
+d3._dispatch_cmd({"cmd": "set", "args": {"interval_s": 1}})
+ok("越界配置被拒（interval<60 下限）", d3.conf["interval_s"] == 900,
+   str(d3.conf["interval_s"]))
 
 
 # ───────── ④ step()：确认三档与拒绝路径 ─────────
@@ -256,8 +315,22 @@ ok("取消未受理 ⇒ 不谎称已受理", "受理" not in msg and "边界" no
 
 # ───────── ⑤ 配置表单 ─────────
 print("== ⑤ 配置编辑：逐项、可取消、挡越界 ==")
+
+
+def _idx(key):
+    """SPEC 里该字段的表单序号（1 基）。⚠️ 绝不再写死数字——上一版用 "1"/"5"
+    直接当序号，SPEC 从 6 项扩到 11 项后 "5" 指向的是别的字段，测试假失败得
+    像产品坏了；按 key 反查才跟着 SPEC 走。"""
+    return str(next(i for i, it in enumerate(_SPEC, 1) if it.key == key))
+
+
+# 需求"任何配置都由 UI 支持"的直接机器校验：表单覆盖的字段 == SPEC 全部字段
+ok("表单覆盖 SPEC 每一个可改字段（无一遗漏）",
+   {k for k, _l, _t in U.CFG_FIELDS} == {i.key for i in _SPEC},
+   str({i.key for i in _SPEC} - {k for k, _l, _t in U.CFG_FIELDS}))
+
 sent.clear()
-answers, lines = ["1", "900"], []
+answers, lines = [_idx("interval_s"), "900"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
 ok("改数值项 ⇒ 发 set 带字段与新值",
    sent == [("set", {"interval_s": 900})], str(sent))
@@ -265,7 +338,7 @@ ok("回显 old→new", "1800" in msg and "900" in msg, msg)
 
 # 回车取消：不发命令
 sent.clear()
-answers, lines = ["1", ""], []
+answers, lines = [_idx("interval_s"), ""], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
 ok("新值留空 ⇒ 取消，不发命令", not sent and "取消" in msg, f"{msg} {sent}")
 
@@ -273,31 +346,46 @@ ok("新值留空 ⇒ 取消，不发命令", not sent and "取消" in msg, f"{ms
 sent.clear()
 answers, lines = ["99"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
-ok("选项越界 ⇒ 不改动", not sent and "未改动" in msg or "未选择" in msg,
+ok("选项越界 ⇒ 不改动", not sent and ("未改动" in msg or "未选择" in msg),
    f"{msg} {sent}")
 
 # 类型不符
 sent.clear()
-answers, lines = ["1", "abc"], []
+answers, lines = [_idx("interval_s"), "abc"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
 ok("非整数 ⇒ 拒绝提交", not sent and "无效" in msg, f"{msg} {sent}")
 
-# 间隔下限
+# 间隔下限（UI 这关就挡下，不发注定被守护回绝的命令）
 sent.clear()
-answers, lines = ["1", "10"], []
+answers, lines = [_idx("interval_s"), "10"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
 ok("间隔 <60s ⇒ 提前挡住不发命令（防高频烧积分）",
    not sent and "60" in msg, f"{msg} {sent}")
 
+# 上界也挡：token 上限填一个失控值
+sent.clear()
+answers, lines = [_idx("budget_max_tokens"), "999999999"], []
+msg = U.edit_config(st_of(), spy_send, spy_line)
+ok("超上界 ⇒ 挡住不发命令", not sent and "高于上限" in msg, f"{msg} {sent}")
+
 # 布尔项
 sent.clear()
-answers, lines = ["5", "y"], []
+answers, lines = [_idx("live_llm"), "y"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
 ok("布尔项 y ⇒ 发 True", sent == [("set", {"live_llm": True})], str(sent))
 sent.clear()
-answers, lines = ["5", "maybe"], []
+answers, lines = [_idx("live_llm"), "maybe"], []
 msg = U.edit_config(st_of(), spy_send, spy_line)
-ok("布尔项乱填 ⇒ 拒绝", not sent and "y/n" in msg, f"{msg} {sent}")
+ok("布尔项乱填 ⇒ 拒绝（不当成 False 悄悄改）",
+   not sent and "y/n" in msg, f"{msg} {sent}")
+
+# 嵌套 budget 项也能改（这是"配置一律走 UI"新增的重点：以前只能手改 yaml）
+sent.clear()
+answers, lines = [_idx("budget_wallclock_s"), "7200"], []
+msg = U.edit_config(st_of(), spy_send, spy_line)
+ok("嵌套 budget 项可改 ⇒ 发 set", sent == [("set", {"budget_wallclock_s": 7200})],
+   str(sent))
+ok("嵌套项回显当前值（从扁平 conf 取到 3600）", "3600" in msg, msg)
 
 
 # ───────── ⑥ 命令通道语义（经总线，但不启守护） ─────────
@@ -386,6 +474,128 @@ ok("待决态：[r] 禁用并带原因行", "r" not in on_aw and "r" in off_aw,
 ok("快照顶部给出当前状态名",
    "状态：" in U.snapshot())
 
+
+# ───────── ⑧ 审批闭环（阶段 5） ─────────
+print("== ⑧ 工单审批：逐页读完 + 页脚码 + 守护硬闸 ==")
+# 借 test_m4_approval 的构造器造一张真工单（五件套齐、Pydantic 校验过）。
+# 手写假 md 测不出真链路：request.md 必须由 render_markdown 生成，
+# 分页/校验码才与生产一致。
+from upi.core.approval import ApprovalStore, build_request, read_token, split_pages
+from upi.core.models import (EditPlan, Evidence, Issue, IssueSignature)
+from upi.core.attribution import FactorJudgment, build_hypothesis
+
+_ev = [Evidence(tool="t", raw_ref="runs/x/e.json", value=77977.0,
+                unit="B/frame", noise_band=1200.0, data_tier="A2")]
+_plan = EditPlan(playbook_id="PB-T",
+                 diffs=[{"file": "a/B.cs", "find": "x", "replace": "y",
+                         "expect_count": 1, "_why": "测试"}],
+                 invariants_assert=["不变"], side_effect="none",
+                 touched_assets=["a/B.cs"], permission_tier="semi")
+_iss = Issue(signature=IssueSignature(dim="drawCalls", metric="drawCalls",
+                                      mechanism="m", threshold=30.0),
+             link="gpu", evidence=list(_ev), magnitude=62.0,
+             deviation_ratio=2.1, state="confirmed")
+_js = [FactorJudgment(factor=f, value=0.8, evidence_ref="runs/x/e.json")
+       for f in ("proximity", "explains_share", "competitiveness",
+                 "prior_hit", "counterfactual", "mechanism")]
+_hyp = build_hypothesis("rc", ["a/B.cs:1"], _js, _iss)
+_req = build_request(run_id="apr1", issue=_iss, hypothesis=_hyp,
+                     plan=_plan, permission_tier="semi",
+                     reason_not_auto="测试", git_ref="upi/attempt-apr1")
+_run_dir = TMP / "runs_apr" / "patrol_apr1"
+_run_dir.mkdir(parents=True, exist_ok=True)   # 目录不存在就 write_text 会 FileNotFoundError
+(_run_dir / "state.json").write_text('{"records": []}', encoding="utf-8")
+_store = ApprovalStore(_run_dir)
+_where = _store.submit(_req)
+_rid = _req.request_id
+_tok = read_token(_rid)
+_md = (_run_dir / "approvals" / _rid / "request.md").read_text(encoding="utf-8")
+
+ok("工单按五件套分页", len(split_pages(_md)) == 5, len(split_pages(_md)))
+# 断言用**带标签**的页脚行，不用裸子串计数：正文全是数值与十六进制串，
+# 4 位码偶然出现在正文里完全可能，那时"count==1"会莫名变红——假故障。
+_foot = f"本单审批校验码：`{_tok}`"
+ok("校验码只印在末页页脚（读到末页才抄得到）",
+   _md.count(_foot) == 1 and _foot in split_pages(_md)[-1]
+   and not any(_foot in p for p in split_pages(_md)[:-1]),
+   f"命中页={[i for i, p in enumerate(split_pages(_md)) if _foot in p]}")
+
+asked = []
+
+
+def reader(p):                      # 线程式答题器
+    asked.append(p)
+    return answers.pop(0) if answers else ""
+
+
+def st_apr():
+    return st_of(open_tickets=[str(_run_dir / "approvals" / _rid
+                                   / "request.md")])
+
+
+# a) 中止阅读 ⇒ 不提交任何意向
+answers, asked = ["", "", "q"], []
+msg = U.approve_flow(st_apr(), reader)
+ok("中途退出 ⇒ 未提交决定", "未提交" in msg
+   and E.peek_decide()[1] == "missing", msg[:80])
+
+# b) 校验码输错 ⇒ 不提交（这是"未读全不能批"在 UI 层的闸）
+answers, asked = ["", "", "", "", "", "a", "小明", "批合批恢复", "0000"], []
+msg = U.approve_flow(st_apr(), reader)
+ok("校验码错误 ⇒ 拒绝提交", "校验码不匹配" in msg
+   and E.peek_decide()[1] == "missing", msg[:80])
+
+# c) 读完全文 + 正确码 + 审批 ⇒ 意向提交、守护消费、decision 生效
+answers, asked = ["", "", "", "", "", "a", "小明",
+                  "批第一条：合批恢复，预期 drawCalls 降", _tok], []
+# 守护侧用同一套（不启线程）：直接调 _consume_decide 走真实落盘路径
+_d = Daemon.__new__(Daemon)
+_d.conf = {}
+U.DECIDE_WAIT_S = 0.5               # 本用例不启守护线程，缩短等待避免拖慢
+msg = U.approve_flow(st_apr(), reader)      # 意向已写，但没人落盘 ⇒ 报超时
+ok("正确码 ⇒ 意向已提交（等守护落盘）", "意向已提交" in msg, msg[:80])
+ok("意向内容含决定/批准人/批语/码",
+   (E.peek_decide()[0] or {}).get("decision") == "approve"
+   and (E.peek_decide()[0] or {}).get("approver") == "小明", str(E.peek_decide()[0]))
+_d._consume_decide()
+_dec = _store.load_decision(_rid)
+ok("守护消费后 decision.json 生效", _dec is not None
+   and _dec.decision == "approve" and _dec.decided_via == "ui",
+   str(_dec.decided_via) if _dec else "None")
+# 短路保护：决定已生效的工单再按 d，不该把人多带一遍五页再报错
+answers, asked = [], []
+msg = U.approve_flow(st_apr(), reader)
+ok("重复审批 ⇒ 直接见已有决定，不再走阅读流程",
+   "已有决定" in msg and not asked, f"{msg[:60]} asked={len(asked)}")
+
+# d) 守护独立复算：token 错的意向即便绕过 UI 直塞也被拒（两道闸互不依赖）
+asked = []
+E.stage_decide(str(_run_dir / "approvals" / _rid / "request.md"), "reject",
+               approver="小红", note="测试旁路", token="dead")
+(_run_dir / "approvals" / _rid / "decision.json").unlink()  # 清掉 c) 的决定
+_before = E.peek_decide()[0]
+_d._consume_decide()
+ok("token 不符的意向被守护拒绝（不落 decision.json）",
+   _store.load_decision(_rid) is None, "绕过 UI 也批不动")
+ok("被拒意向已认掉（不反复重试）",
+   E.peek_decide()[1] in ("missing", "already_committed"), str(_before))
+
+# e) approve 缺批准人/批语 ⇒ UI 先挡（与守护 ApprovalDecision 双闸同源）
+answers, asked = ["", "", "", "", "", "a", "", ""], []
+msg = U.approve_flow(st_apr(), reader)
+ok("批准缺人名/批语 ⇒ UI 拒绝提交", "必须同时给出" in msg
+   and E.peek_decide()[1] == "missing", msg[:80])
+
+# f) defer 同样要读满 5 页 + 输码：读完才谈"批"，也才谈"驳/缓"
+answers, asked = ["", "", "", "", "", "d", "小明", "证据够但方案要讨论", _tok], []
+msg = U.approve_flow(st_apr(), reader)
+ok("defer 也必须翻到第 5 页才问决定",
+   len(asked) >= 6 and "第 5/5 页" in asked[4] and "决定：" in asked[5],
+   f"asked={len(asked)}")
+_d._consume_decide()
+_dec2 = _store.load_decision(_rid)
+ok("defer 意向经守护生效（驳回/暂缓同样吃码闸）",
+   _dec2 is not None and _dec2.decision == "defer", str(_dec2))
 
 print(f"\nUI 动作层测试：{len(PASS)} 通过 / {len(FAIL)} 失败")
 for f in FAIL:
