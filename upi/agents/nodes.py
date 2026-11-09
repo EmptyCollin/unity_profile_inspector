@@ -374,10 +374,21 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                               metric_delta=(v.get("target", {}).get("delta")
                                             if isinstance(v, dict) else None))
             # §1.7：record 的完整职责是"写入 + 提出升维建议"。建议**只落盘不执行**
-            # （权限变更须人工批准，I3）。体检表数值当前算不出（M6' 未接入），
-            # 传 None ⇒ propose_promotion 按 G14 返回 blocked——这是诚实留痕，
-            # 不是跳过：跳过会让"提案缺失"看起来像"不需要提案"。
-            prop = ks.propose_promotion(pid, "auto", overfit_checklist=None)
+            # （权限变更须人工批准，I3）。
+            # M6' 接入后体检表不再是"算不出就传 None"：能算的项附实际数值，
+            # 让 blocked 理由精确到"缺哪几项 / 哪项不达标值是多少"，
+            # 而不是一句笼统的"缺 §8.7 体检表"。算不出的项仍由 propose_promotion
+            # 报缺（G14 的"缺项即 blocked"照旧生效，第一轮必然 blocked）。
+            # 统计层出错绝不能打断记账本身，故兜底回退 None。
+            try:
+                from upi.tooling.checklist import checklist_for_proposal
+                cl = checklist_for_proposal()
+            except Exception as e:  # noqa: BLE001
+                cl = None
+                (run_dir / "checklist_error.txt").write_text(
+                    f"体检表计算失败，提案按缺项处理：{type(e).__name__}: {e}\n",
+                    encoding="utf-8")
+            prop = ks.propose_promotion(pid, "auto", overfit_checklist=cl)
             (run_dir / "promotion_proposal.json").write_text(
                 json.dumps(prop.model_dump(), ensure_ascii=False, indent=2),
                 encoding="utf-8")

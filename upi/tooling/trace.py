@@ -36,6 +36,11 @@ class Tracer:
     def emit(self, span: TraceSpan) -> None:
         rec = span.model_dump()
         rec["schema_version"] = SCHEMA_VERSION
+        # 落盘时刻（span 结束后补记）。契约 TraceSpan 里没有这个字段也不该有——
+        # 它是"这条记录何时写下去"的事实，不是 span 的语义属性。历史 75 条 span
+        # 全无时间戳，导致统计层只能拿文件 mtime 反推轮次时刻（近似且会被后续
+        # 写入推移）；补上之后新数据的时间轴才是实测的，旧数据由聚合层如实降级。
+        rec["emitted_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
