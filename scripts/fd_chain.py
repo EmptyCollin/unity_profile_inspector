@@ -43,7 +43,8 @@ def evalc(code: str, timeout: int = 200):
             [UNITY, "command", "script eval_file",
              "--project-path", str(PROJ), "--file", "fd_chain_eval.cs",
              "--format", "json", "--no-banner", "--timeout", str(timeout)],
-            capture_output=True, text=True, timeout=timeout + 60)
+            capture_output=True, text=True, timeout=timeout + 60,
+            encoding="utf-8", errors="replace")
         try:
             d = json.loads(p.stdout)
         except Exception:
@@ -60,7 +61,8 @@ import os  # noqa: E402  (放在函数后是为了保持阅读顺序，实际使
 def cli(*args, timeout: int = 200):
     p = subprocess.run([UNITY] + list(args) + ["--project-path", str(PROJ),
                         "--format", "json", "--no-banner"],
-                       capture_output=True, text=True, timeout=timeout + 60)
+                       capture_output=True, text=True, timeout=timeout + 60,
+                       encoding="utf-8", errors="replace")
     try:
         return json.loads(p.stdout)
     except Exception:
@@ -73,7 +75,9 @@ def wait_ready(sec: int = 420):
         time.sleep(15)
         p = subprocess.run(
             [UNITY, "command", "editor status", "--project-path", str(PROJ),
-             "--format", "json", "--no-banner"], capture_output=True, text=True)
+             "--format", "json", "--no-banner"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace")
         try:
             r = json.loads(p.stdout)["data"]["result"]
         except Exception:
