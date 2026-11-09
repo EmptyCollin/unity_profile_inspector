@@ -10,7 +10,7 @@
     "max_tokens": 60000
   },
   "spent": {
-    "wallclock_s": 1478.2,
+    "wallclock_s": 1883.3,
     "tokens": 8867
   },
   "findings": [
@@ -259,35 +259,35 @@
     "permission_tier": "blocked"
   },
   "snapshot": {
-    "attempt_id": "m4-125247",
-    "git_ref": "upi/attempt-m4-125247",
-    "head_before": "1098e4442d8d02bcbd2abd9e41f3ba6ab2125380",
+    "attempt_id": "m4-134252",
+    "git_ref": "upi/attempt-m4-134252",
+    "head_before": "bb26a93d6a99548700858665bb3eccbffd737ec3",
     "asset_manifest_hash": "8907f81a458d0419",
     "scene_guid": "filehash:7be81facbec7c6ac",
     "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
-    "created_at": "2026-11-09T12:52:51",
+    "created_at": "2026-11-09T13:42:53",
     "root": "D:\\unity_profile_inspector",
     "metadata": {}
   },
   "pre_attempt": {
-    "stamp": "125247",
-    "before_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\pre_attempt_125247\\multiwin_full.json",
+    "stamp": "134252",
+    "before_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\pre_attempt_134252\\multiwin_full.json",
     "floor_before": {
       "monoHeapBytes": {
         "pre_gc": 392929280.0,
         "post_gc": 392929280.0
       },
       "monoUsedBytes": {
-        "pre_gc": 88117248.0,
-        "post_gc": 85661696.0
+        "pre_gc": 90748928.0,
+        "post_gc": 92299264.0
       },
       "totalAllocatedBytes": {
-        "pre_gc": 706382296.5,
-        "post_gc": 706601253.5
+        "pre_gc": 743818811.0,
+        "post_gc": 743841346.0
       },
       "totalReservedBytes": {
-        "pre_gc": 1585848320.0,
-        "post_gc": 1585848320.0
+        "pre_gc": 1854349312.0,
+        "post_gc": 1854349312.0
       }
     },
     "floor_before_err": null
@@ -297,10 +297,164 @@
     "md": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\approvals\\APR-eaab522a2f\\request.md",
     "decision_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\approvals\\APR-eaab522a2f\\decision.json"
   },
-  "verdict": null,
+  "verdict": {
+    "target": {
+      "metric": "gc_alloc_per_frame",
+      "before": 82385.0,
+      "after": 13809.0,
+      "delta": 68576.0,
+      "sigma": 0.0,
+      "significant": true,
+      "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+      "degenerate": true
+    },
+    "guards": [
+      {
+        "metric": "animator_process_animations_ns",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "animator_process_graph_ns",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "batches",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "cpuFrameTimeMs",
+        "before": 2.133,
+        "after": 1.897,
+        "delta": -0.236,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "cpuMainThreadFrameTimeMs",
+        "before": 0.768,
+        "after": 0.564,
+        "delta": -0.204,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "drawCalls",
+        "before": 47.0,
+        "after": 47.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "gpuFrameTimeMs",
+        "before": 0.11,
+        "after": 0.097,
+        "delta": -0.013,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "monoUsedBytes",
+        "before": 92299264.0,
+        "after": 87281664.0,
+        "delta": -5017600.0,
+        "regressed": false,
+        "gc_floor_check": {
+          "before_side": {
+            "pre_gc": 90748928.0,
+            "post_gc": 92299264.0
+          },
+          "after_side": {
+            "pre_gc": 89616384.0,
+            "post_gc": 87281664.0
+          },
+          "window_delta_archive": 9547776.0
+        },
+        "cleared_by_floor": false,
+        "value_source": "fresh_post_gc",
+        "basis": "post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.5% after=10.2%；GC 响应侧=改前改后"
+      },
+      {
+        "metric": "setPassCalls",
+        "before": 9.0,
+        "after": 9.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "triangles",
+        "before": 2166.0,
+        "after": 2166.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "vertices",
+        "before": 6018.0,
+        "after": 6018.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      }
+    ],
+    "perception": {
+      "render_diff_score": null,
+      "anim_event_diff": null,
+      "replay_divergence": null,
+      "passed": false
+    },
+    "conflicts": [],
+    "compile_ok": true,
+    "realized_over_expected": 3.429,
+    "status": "resolved"
+  },
   "review_decision": null,
   "review_reason": "verdict=regressed round=1",
-  "attempts": 0,
+  "attempts": 1,
   "route": "proceed",
   "records": [
     {
@@ -531,6 +685,107 @@
         }
       ],
       "floor_before_err": null
+    },
+    {
+      "kind": "fix",
+      "ts": "134252",
+      "git_ref": "upi/attempt-m4-134252",
+      "root_cause": "热路径每帧新建 Dictionary（可复用+Clear）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "snapshot": {
+        "attempt_id": "m4-134252",
+        "git_ref": "upi/attempt-m4-134252",
+        "head_before": "bb26a93d6a99548700858665bb3eccbffd737ec3",
+        "asset_manifest_hash": "8907f81a458d0419",
+        "scene_guid": "filehash:7be81facbec7c6ac",
+        "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+        "created_at": "2026-11-09T13:42:53",
+        "root": "D:\\unity_profile_inspector",
+        "metadata": {}
+      },
+      "execute": {
+        "playbook_id": "PB-FULL-REUSE",
+        "tier": "blocked",
+        "status": "applied",
+        "applied": [
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          },
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          }
+        ],
+        "compile": {
+          "ok": true,
+          "errors": []
+        },
+        "approval_note": "用户 于 2026-11-09T11:05:00 批准工单 APR-eaab522a2f：2026-11-09 对话直接指令授权：真实模型归因轮走保留通路，同意 PB-FULL-REUSE 对 CombatSkillManager.cs 的 2 条语义保持改动"
+      }
+    },
+    {
+      "kind": "verify",
+      "status": "resolved",
+      "target": {
+        "metric": "gc_alloc_per_frame",
+        "before": 82385.0,
+        "after": 13809.0,
+        "delta": 68576.0,
+        "sigma": 0.0,
+        "significant": true,
+        "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+        "degenerate": true
+      },
+      "unevaluated": [
+        {
+          "metric": "monoHeapBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "Mono 堆预留量，实测 Δ=0（只增不减，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档",
+          "window_before": 392929280.0,
+          "window_after": 392929280.0,
+          "window_delta": 0.0
+        },
+        {
+          "metric": "totalAllocatedBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "A 档字段，实测强制 GC 后 Δ=+0.005%（不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+2.16% 仅留档",
+          "window_before": 743712952.5,
+          "window_after": 759747338.75,
+          "window_delta": 16034386.25
+        },
+        {
+          "metric": "totalReservedBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "A 档字段，实测 Δ=0（原生堆预留，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档",
+          "window_before": 1854349312.0,
+          "window_after": 1854349312.0,
+          "window_delta": 0.0
+        },
+        {
+          "metric": "total_used_per_frame",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "A2 计数器 Total Used Memory，与 totalAllocatedBytes 同一物理量；缺陷态跨会话自然极差 192%——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+1.82% 仅留档",
+          "window_before": 1383132387.0,
+          "window_after": 1408319608.5,
+          "window_delta": 25187221.5
+        }
+      ],
+      "floor_before_err": null
+    },
+    {
+      "kind": "record",
+      "pattern_id": "pat-8091bceb39",
+      "proposal_status": "blocked",
+      "blocked_reasons": [
+        "缺 §8.7 过拟合体检表（G14：缺项即 blocked）",
+        "n_effective=1 < n_min=10（口径 §8.2）",
+        "Wilson 下界 0.207 < 0.9",
+        "平均 realized_over_expected=None < 0.8"
+      ]
     }
   ],
   "error": null

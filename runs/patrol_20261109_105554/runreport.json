@@ -1,21 +1,12 @@
 {
   "run_id": "patrol_20261109_105554",
   "fixture": "F-CPU-01",
-  "route": "needs_human",
-  "error": "budget_exceeded(review_rounds)",
+  "route": "proceed",
+  "error": null,
   "attempts": 1,
   "spent": {
-    "wallclock_s": 1477.9,
+    "wallclock_s": 1883.3,
     "tokens": 8867
   },
-  "verdict_status": "regressed",
-  "final_rollback": {
-    "rolled_back_to": "upi/attempt-m4-125247",
-    "head_after": "8b3f338a6f0ae4037d957cb568f368ddcd8c9bc2",
-    "asset_manifest_restored": true,
-    "scene_restored": true,
-    "amh_expected": "8907f81a458d0419",
-    "amh_after": "8907f81a458d0419",
-    "editor_touched": false
-  }
+  "verdict_status": "resolved"
 }

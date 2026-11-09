@@ -96,7 +96,7 @@
     "veto_reasons": []
   },
   "rollback": {
-    "git_ref": "upi/attempt-m4-123412",
+    "git_ref": "upi/attempt-m4-134252",
     "restores": "git reset --hard + 仅夹具路径 clean",
     "mechanism": "G9：回滚只依赖 git，不依赖 Editor 可达；编译失败进 Safe Mode 时仍可按 tag 复位",
     "untouched": [
@@ -110,5 +110,5 @@
     "on_verify_fail": "G1/G2 已实测：改善不足 k·σ 或守护劣化 → 回滚 + 进 Review，审查裁定继续/撤回/转人工（配额 3 次，G6）",
     "on_perception_fail": "G3 感知门禁失败 → 无条件回滚 + 转人工（基建 M7，当前 pending，工单不得被读成'感知已验'）"
   },
-  "created_at": "2026-11-09T12:34:13"
+  "created_at": "2026-11-09T13:42:53"
 }

@@ -42,7 +42,7 @@
 预期：{'metric': 'gc_alloc_per_frame', 'direction': 'down', 'min_delta': 20000.0, 'source': 'calibration:thresholds_2ba2656b6f17.json', 'note': '改善低于此线 G1 即判 not_significant（预期=判据重述）'}
 
 ## 4 回滚方式
-- 快照 tag：`upi/attempt-m4-123412`
+- 快照 tag：`upi/attempt-m4-134252`
 - 机制：G9：回滚只依赖 git，不依赖 Editor 可达；编译失败进 Safe Mode 时仍可按 tag 复位
 - 复位范围：git reset --hard + 仅夹具路径 clean；不动：非夹具路径, Editor 内存态（重启验证）
 
