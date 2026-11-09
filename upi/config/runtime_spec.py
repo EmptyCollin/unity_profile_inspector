@@ -33,6 +33,11 @@ class SpecItem:
     lo: int | None = None    # 数值下界（含）。bool 项不填
     hi: int | None = None    # 数值上界（含）
     unit: str = ""           # 展示单位，帮人判断量级（秒/次/窗口）
+    # 改这个值会带来的**非直观代价**。为什么要有这个字段：有些配置改下去
+    # 不会报错，只是把历史结论变得不可比（G7），而这种后果只在 yaml 注释里
+    # 写过。既然要求"配置一律走 UI"，代价就必须跟着 UI 表单一起出现，
+    # 否则 UI 反而比手改 yaml 更危险——用户在看不见后果的地方按了回车。
+    warn: str = ""
 
     def get(self, conf: dict):
         node = conf
@@ -82,10 +87,14 @@ class SpecItem:
 # 对齐 AGENTS 的 N=3 口径，边界只限制"别调失控"，不代表推荐值。
 SPEC: list[SpecItem] = [
     SpecItem("interval_s", "巡检间隔", int, ("interval_s",), 60, 86400, "秒"),
-    SpecItem("windows", "每夹具采样窗口数", int, ("windows",), 2, 12, "个"),
+    SpecItem("windows", "每夹具采样窗口数", int, ("windows",), 2, 12, "个",
+             warn="该值进协议指纹（n_samples）：改完与既有标定基线不可比，"
+                  "G7 会拒判本轮检出，须重新标定才能恢复检出能力"),
     SpecItem("cooldown_s", "唤起冷却", int, ("cooldown_s",), 0, 86400, "秒"),
     SpecItem("waterline_timeout_s", "重采超时", int,
              ("waterline_timeout_s",), 60, 7200, "秒"),
+    SpecItem("episode_heartbeat_max_age_s", "探针心跳最大可接受年龄", int,
+             ("episode", "heartbeat_max_age_s"), 2, 300, "秒"),
     SpecItem("max_consecutive_failures", "连续失败熔断阈值", int,
              ("max_consecutive_failures",), 1, 20, "次"),
     SpecItem("budget_max_review_rounds", "单问题审查轮上限", int,
