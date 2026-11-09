@@ -91,6 +91,34 @@ e = memory_guard_entry("monoUsedBytes", stat(105.0 * MB), stat(105.0 * MB),
                        {"monoUsedBytes": {"post_gc": 106.0 * MB}})
 check("缺 post_gc ⇒ fresh_missing（不猜值）", e["value_source"] == "fresh_missing")
 
+# ── 6. GC 无响应闸（真机 resume 实测撞出的口径修正）─────────────────
+# 本轮实况：monoHeapBytes 强制 GC 前后 156987392 -> 156987392（Δ=0）。
+# 这类计数器量的是会话累积的堆预留、不响应回收 ⇒ post_gc 不是净常驻代理，
+# 跨会话比较必然失真（实测假劣化 +43% 被误判 regressed）。
+hb = {"monoHeapBytes": {"pre_gc": 156987392.0, "post_gc": 156987392.0}}
+ha = {"monoHeapBytes": {"pre_gc": 225148928.0, "post_gc": 225148928.0}}
+e = memory_guard_entry("monoHeapBytes", stat(1.57e8), stat(2.25e8), hb, ha)
+check("两侧 GC 无响应 ⇒ gc_unresponsive（非净常驻代理，不可比）",
+      e["value_source"] == "gc_unresponsive")
+check("无响应 ⇒ 不判劣化（旧版在此判 +43%，是假劣化）", not is_regressed(e))
+check("无响应 ⇒ 也不判清白（basis 写明未评估盲区）",
+      "未评估" in e["basis"] and "盲区" in e["basis"])
+
+# 单侧响应 ⇒ 仍有信息量，保留判定能力（不误伤真响应指标）
+e = memory_guard_entry("m", stat(100.0), stat(100.0),
+                       {"m": {"pre_gc": 100.0, "post_gc": 100.0}},
+                       {"m": {"pre_gc": 100.0, "post_gc": 97.0}})
+check("单侧响应 ⇒ 仍可判定且记录哪侧响应",
+      e["value_source"] == "fresh_post_gc"
+      and e["gc_responsive"] == {"before": False, "after": True})
+
+# monoUsedBytes 真机数据：两侧响应（-1.68%/-1.5%）⇒ 不被误降级
+e = memory_guard_entry("monoUsedBytes", stat(103469056.0), stat(101.7e6),
+                       {"monoUsedBytes": {"pre_gc": 103469056.0,
+                                           "post_gc": 101728256.0}},
+                       {"monoUsedBytes": {"pre_gc": 101.7e6, "post_gc": 100.2e6}})
+check("响应性指标不被误降级（真机 monoUsedBytes 走 post_gc 口径）",
+      e["value_source"] == "fresh_post_gc" and not is_regressed(e))
 print(f"\n==== memory_guard 单测: {PASS} 通过, {len(FAIL)} 失败"
       + (f" {FAIL}" if FAIL else ""))
 sys.exit(1 if FAIL else 0)

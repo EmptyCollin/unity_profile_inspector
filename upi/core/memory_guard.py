@@ -47,6 +47,19 @@ FRESH_TOLERANCE = 0.02
 GROSS_STALENESS_TOLERANCE = 0.25
 
 
+# GC 响应性下限（真机 resume 实测撞出的口径修正）：post_gc 与 pre_gc 的相对
+# 变化小于此值 ⇒ 该计数器**不受 GC 影响**，"post_gc = 净常驻代理"的前提不成立，
+# 两侧读数只是会话累积量（受域重载/编译/编辑器重启次数支配），跨会话不可比。
+# 实测依据（runs/patrol_20261109_105554 改前侧）：
+#   monoUsedBytes      103.47MB -> 101.73MB  相对 -1.68%   响应
+#   monoHeapBytes      156.99MB -> 156.99MB  相对  0.00%   不响应
+#   totalAllocatedBytes 672.81MB -> 672.84MB 相对 +0.005%  不响应
+#   totalReservedBytes 同值不响应
+# 与 11-08 probe/gc_floor.cs 的编辑态实测（三类 delta=0）完全一致——当时已记下
+# 该事实，却仍把这四类一起放进取值集合，丢了区分（本轮 43% 假劣化的根因）。
+GC_UNRESPONSIVE_REL = 0.002
+
+
 def _rel_delta(a: float, b: float) -> float:
     return abs(a - b) / max(abs(b), 1e-9)
 
@@ -76,14 +89,33 @@ def memory_guard_entry(metric: str, bstat: dict, astat: dict,
     cc_b = _rel_delta(fb["pre_gc"], b_win) <= GROSS_STALENESS_TOLERANCE
     cc_a = _rel_delta(fa["pre_gc"], a_win) <= GROSS_STALENESS_TOLERANCE
     vb, va = float(fb["post_gc"]), float(fa["post_gc"])
+    # GC 无响应闸（本轮真机实测撞出）：pre_gc≈post_gc 说明强制 GC 没能动这个
+    # 计数器 ⇒ 它不是"未回收量"而是"会话累积量"，post_gc 不再是净常驻代理。
+    # 两侧同判：任一侧响应就仍有信息量；两侧都不响应 ⇒ 该指标跨会话不可比，
+    # 降级为未评估盲区（G20），既不判劣化也不判清白——上一轮 resolved 是
+    # 编辑器开久了堆顶格两侧同值的巧合，不是口径正确。
+    resp_b = _rel_delta(fb["post_gc"], fb["pre_gc"]) > GC_UNRESPONSIVE_REL
+    resp_a = _rel_delta(fa["post_gc"], fa["pre_gc"]) > GC_UNRESPONSIVE_REL
+    if not (resp_b or resp_a):
+        entry.update(value_before=None, value_after=None, delta=None,
+                     value_source="gc_unresponsive", cross_check_ok=None,
+                     basis=f"强制 GC 前后两侧读数变化均 ≤{GC_UNRESPONSIVE_REL:.1%}"
+                           "（该计数器不受回收影响=会话累积量，跨会话不可比）"
+                           "——记忆体守护未评估（盲区，进报告单列）；"
+                           "窗口差值仅留档不参与判定")
+        return entry
     dev_b = round(_rel_delta(fb["pre_gc"], b_win), 4)
     dev_a = round(_rel_delta(fa["pre_gc"], a_win), 4)
     entry.update(value_before=vb, value_after=va, delta=va - vb,
-                 value_source="fresh_post_gc", cross_check_ok=cc_b and cc_a,
+                 value_source="fresh_post_gc",
+                 cross_check_ok=cc_b and cc_a,
                  staleness_dev={"before": dev_b, "after": dev_a},
+                 gc_responsive={"before": resp_b, "after": resp_a},
                  basis=f"post_gc 口径（净常驻代理），容差 {FRESH_TOLERANCE:.0%}；"
-                      f"pre_gc 防抖偏差 before={dev_b:.1%} after={dev_a:.1%}"
-                      + ("" if cc_b and cc_a else " !!超 25%—fresh 疑似来自别的机器状态"))
+                       f"pre_gc 防抖偏差 before={dev_b:.1%} after={dev_a:.1%}"
+                       f"；GC 响应侧={'改前' if resp_b else ''}"
+                       f"{'改后' if resp_a else '' or '无'}"
+                       + ("" if cc_b and cc_a else " !!超 25%—fresh 疑似来自别的机器状态"))
     return entry
 
 
