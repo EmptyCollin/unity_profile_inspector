@@ -388,6 +388,31 @@ ok("嵌套 budget 项可改 ⇒ 发 set", sent == [("set", {"budget_wallclock_s"
 ok("嵌套项回显当前值（从扁平 conf 取到 3600）", "3600" in msg, msg)
 
 
+# 有修改代价的项（windows 进协议指纹）：必须先报代价并确认
+print("== ⑤c 配置项的修改代价提示（SPEC.warn）==")
+sent.clear()
+answers, lines = [_idx("windows"), "n"], []          # 看了代价后拒绝
+msg = U.edit_config(st_of(), spy_send, spy_line)
+ok("代价未确认 ⇒ 不发命令", not sent and "代价未确认" in msg, f"{msg} {sent}")
+ok("代价提示出现在确认问句里", "不可比" in (lines[1] or ""), str(lines)[:2])
+sent.clear()
+answers, lines = [_idx("windows"), "y", "6"], []     # 确认代价再改
+msg = U.edit_config(st_of(), spy_send, spy_line)
+ok("确认代价 ⇒ 正常提交", sent == [("set", {"windows": 6})], str(sent))
+ok("提交结果重复代价（改完就该想起要重标定）", "不可比" in msg, msg[:120])
+# 同值提交不该挂警告：填了个没变的窗口数，可比性没被破坏
+sent.clear()
+answers, lines = [_idx("windows"), "y", "4"], []     # st_of 的 windows 就是 4
+msg = U.edit_config(st_of(), spy_send, spy_line)
+ok("值未变 ⇒ 不谎报代价（4→4 不该提示不可比）",
+   sent == [("set", {"windows": 4})] and "不可比" not in msg, msg[:120])
+# 无代价项不该多问一道确认（否则每个配置都要多按一次）
+sent.clear()
+answers, lines = [_idx("interval_s"), "900"], []
+U.edit_config(st_of(), spy_send, spy_line)
+ok("无 warn 项不多问确认（问答数=选项+新值）", len(lines) == 2, str(lines))
+
+
 # ───────── ⑥ 命令通道语义（经总线，但不启守护） ─────────
 print("== ⑥ send 的 ack 语义 ==")
 # ⚠️ 上一版把"acked 路径"写成 E.ack_cmd(seq) 后再 send——那是错的：

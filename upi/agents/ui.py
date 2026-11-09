@@ -438,7 +438,8 @@ def edit_config(st_now: dict, send_, line_read) -> str:
         v = cur.get(item.key)
         shown = "未设" if v is None else v
         rng = "" if item.kind is bool else f"（{item.lo}{item.unit}~{item.hi}{item.unit}）"
-        lines.append(f"  {i}. {item.key}  {item.label}  当前={shown}{rng}")
+        flag = "  ⚠改动有代价" if item.warn else ""
+        lines.append(f"  {i}. {item.key}  {item.label}  当前={shown}{rng}{flag}")
     lines.append("")
     pick = line_read("\n".join(lines) + f"\n选哪项(1-{n})：")
     sel = (pick or "").strip()
@@ -446,6 +447,15 @@ def edit_config(st_now: dict, send_, line_read) -> str:
         return f"未选择有效项（需在 1-{n}），配置未改动"
     item = SPEC[int(sel) - 1]
     old = cur.get(item.key)
+    # 有代价的项先报代价再收新值。代价写在 SPEC.warn 里（单一真相源），
+    # 不在 UI 复述一遍——复述就会漂移，而"改了 windows 会让基线不可比"
+    # 这种后果漏报一次，代价是整轮检出静默失效。
+    if item.warn:
+        confirm = (line_read(f"⚠ {item.key}：{item.warn}\n"
+                             f"当前={old}。确认仍要改？(y=继续 / 其他=取消)：")
+                   or "").strip().lower()
+        if confirm != "y":
+            return f"已取消，{item.key} 仍为 {old}（代价未确认）"
     prompt = (f"给 {item.key}（{item.label}）填新值"
               f"{'，y/n' if item.kind is bool else f'，{item.lo}{item.unit}~{item.hi}{item.unit}'}"
               "，回车取消：")
@@ -460,6 +470,9 @@ def edit_config(st_now: dict, send_, line_read) -> str:
         return f"输入无效：{e}；{item.key} 未改动"
     ack, info = send_("set", **{item.key: val})
     tag = "" if ack else "（守护未确认受理，见告警）"
+    # 受理成功但值没变（如填了同一个窗口数）不该挂"待重新标定"的警告
+    if item.warn and ack and val != old:
+        tag += f"｜{item.warn}"
     return f"{item.key}: {old} → {val}{tag}"
 
 
