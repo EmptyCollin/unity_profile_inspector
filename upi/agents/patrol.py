@@ -149,7 +149,10 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
                        encoding="utf-8", errors="replace")
     bundle = workdir / "multiwin_full.json"
     if not bundle.exists():
-        out["blindspot"] = f"重采失败（rc={p.returncode}）：{p.stdout[-200:]}"
+        # 失败留痕必须带 stderr：实测 rc=1 崩溃的 traceback 全在 stderr，
+        # 只截 stdout 会把真凶记成空串（10:27 轮"重采失败（rc=1）："的成因）
+        out["blindspot"] = (f"重采失败（rc={p.returncode}）：stdout尾={p.stdout[-200:]}"
+                            f" stderr尾={p.stderr[-400:]}")
         return out
     # 判据链完全复用 m1_detect（含 G7 协议指纹校验与标定注入），不改一行判据
     from scripts.m1_detect import (apply_calibration, compare,

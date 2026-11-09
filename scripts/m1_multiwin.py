@@ -102,7 +102,7 @@ def sync_editor_code(max_wait: int = 240) -> tuple[bool, str]:
         if last.get("failed"):
             errs = [str(e) for e in (last.get("errors") or [])][:2]
             return False, f"编辑器重编译失败（盘上代码编译不过）：{errs}"
-        st = cmd("editor status").get("data", {}).get("result") or {}
+        st = (cmd("editor status").get("data") or {}).get("result") or {}
         settled = (not last.get("compiling") and "failed" in last
                    and st.get("status") == "ready"
                    and not st.get("domainReloadInProgress"))
@@ -176,7 +176,7 @@ def sample_scene(fixture: str, windows: int) -> dict:
     time.sleep(5)
     if not wait_ready():
         return {"error": "编辑器未就绪"}
-    print(f"  进 Play:", cmd("editor.playmode start").get("data", {}).get("result", "失败"))
+    print("  进 Play:", (cmd("editor.playmode start").get("data") or {}).get("result", "失败"))
     time.sleep(6)
     ev('UnityEngine.Application.targetFrameRate = -1; UnityEngine.Application.runInBackground = true; return "uncapped";')
 
