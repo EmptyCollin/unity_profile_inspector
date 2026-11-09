@@ -1,12 +1,21 @@
 {
   "run_id": "patrol_20261109_105554",
   "fixture": "F-CPU-01",
-  "route": "proceed",
-  "error": "fix snapshot_stale: HEAD(c77b218c) 已不在快照 upi/attempt-m4-122937(c0a800ec) 上——快照后发生过未登记的写入或回滚，禁止继续（I4）",
+  "route": "needs_human",
+  "error": "budget_exceeded(review_rounds)",
   "attempts": 1,
   "spent": {
-    "wallclock_s": 1046.8,
+    "wallclock_s": 1477.9,
     "tokens": 8867
   },
-  "verdict_status": "regressed"
+  "verdict_status": "regressed",
+  "final_rollback": {
+    "rolled_back_to": "upi/attempt-m4-125247",
+    "head_after": "8b3f338a6f0ae4037d957cb568f368ddcd8c9bc2",
+    "asset_manifest_restored": true,
+    "scene_restored": true,
+    "amh_expected": "8907f81a458d0419",
+    "amh_after": "8907f81a458d0419",
+    "editor_touched": false
+  }
 }

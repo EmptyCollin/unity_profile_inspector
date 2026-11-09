@@ -10,7 +10,7 @@
     "max_tokens": 60000
   },
   "spent": {
-    "wallclock_s": 1046.8,
+    "wallclock_s": 1478.2,
     "tokens": 8867
   },
   "findings": [
@@ -259,31 +259,31 @@
     "permission_tier": "blocked"
   },
   "snapshot": {
-    "attempt_id": "m4-123412",
-    "git_ref": "upi/attempt-m4-123412",
-    "head_before": "c77b218c0b43a4c0a38407e7ccc47fc9618e57d0",
+    "attempt_id": "m4-125247",
+    "git_ref": "upi/attempt-m4-125247",
+    "head_before": "1098e4442d8d02bcbd2abd9e41f3ba6ab2125380",
     "asset_manifest_hash": "8907f81a458d0419",
     "scene_guid": "filehash:7be81facbec7c6ac",
     "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
-    "created_at": "2026-11-09T12:34:13",
+    "created_at": "2026-11-09T12:52:51",
     "root": "D:\\unity_profile_inspector",
     "metadata": {}
   },
   "pre_attempt": {
-    "stamp": "123412",
-    "before_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\pre_attempt_123412\\multiwin_full.json",
+    "stamp": "125247",
+    "before_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_105554\\pre_attempt_125247\\multiwin_full.json",
     "floor_before": {
       "monoHeapBytes": {
-        "pre_gc": 156987392.0,
-        "post_gc": 156987392.0
+        "pre_gc": 392929280.0,
+        "post_gc": 392929280.0
       },
       "monoUsedBytes": {
-        "pre_gc": 103469056.0,
-        "post_gc": 101728256.0
+        "pre_gc": 88117248.0,
+        "post_gc": 85661696.0
       },
       "totalAllocatedBytes": {
-        "pre_gc": 672807911.0,
-        "post_gc": 672838285.0
+        "pre_gc": 706382296.5,
+        "post_gc": 706601253.5
       },
       "totalReservedBytes": {
         "pre_gc": 1585848320.0,
@@ -450,6 +450,87 @@
         "amh_after": "8907f81a458d0419",
         "editor_touched": false
       }
+    },
+    {
+      "kind": "fix",
+      "ts": "125247",
+      "git_ref": "upi/attempt-m4-125247",
+      "root_cause": "热路径每帧新建 Dictionary（可复用+Clear）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "snapshot": {
+        "attempt_id": "m4-125247",
+        "git_ref": "upi/attempt-m4-125247",
+        "head_before": "1098e4442d8d02bcbd2abd9e41f3ba6ab2125380",
+        "asset_manifest_hash": "8907f81a458d0419",
+        "scene_guid": "filehash:7be81facbec7c6ac",
+        "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+        "created_at": "2026-11-09T12:52:51",
+        "root": "D:\\unity_profile_inspector",
+        "metadata": {}
+      },
+      "execute": {
+        "playbook_id": "PB-FULL-REUSE",
+        "tier": "blocked",
+        "status": "applied",
+        "applied": [
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          },
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          }
+        ],
+        "compile": {
+          "ok": true,
+          "errors": []
+        },
+        "approval_note": "用户 于 2026-11-09T11:05:00 批准工单 APR-eaab522a2f：2026-11-09 对话直接指令授权：真实模型归因轮走保留通路，同意 PB-FULL-REUSE 对 CombatSkillManager.cs 的 2 条语义保持改动"
+      }
+    },
+    {
+      "kind": "verify",
+      "status": "regressed",
+      "target": {
+        "metric": "gc_alloc_per_frame",
+        "before": 82385.0,
+        "after": 13809.0,
+        "delta": 68576.0,
+        "sigma": 0.0,
+        "significant": true,
+        "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+        "degenerate": true
+      },
+      "unevaluated": [
+        {
+          "metric": "monoHeapBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "强制 GC 前后两侧读数变化均 ≤0.2%（该计数器不受回收影响=会话累积量，跨会话不可比）——记忆体守护未评估（盲区，进报告单列）；窗口差值仅留档不参与判定",
+          "window_before": 392929280.0,
+          "window_after": 392929280.0,
+          "window_delta": 0.0
+        },
+        {
+          "metric": "totalAllocatedBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "强制 GC 前后两侧读数变化均 ≤0.2%（该计数器不受回收影响=会话累积量，跨会话不可比）——记忆体守护未评估（盲区，进报告单列）；窗口差值仅留档不参与判定",
+          "window_before": 706316237.25,
+          "window_after": 723587263.0,
+          "window_delta": 17271025.75
+        },
+        {
+          "metric": "totalReservedBytes",
+          "value_source": "gc_unresponsive",
+          "cross_check_ok": null,
+          "basis": "强制 GC 前后两侧读数变化均 ≤0.2%（该计数器不受回收影响=会话累积量，跨会话不可比）——记忆体守护未评估（盲区，进报告单列）；窗口差值仅留档不参与判定",
+          "window_before": 1585848320.0,
+          "window_after": 1585848320.0,
+          "window_delta": 0.0
+        }
+      ],
+      "floor_before_err": null
     }
   ],
   "error": null
