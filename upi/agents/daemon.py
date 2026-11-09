@@ -92,7 +92,7 @@ def install_signals(owner) -> dict:
       · 以 DETACHED_PROCESS 起的守护**没有控制台**，CTRL_C/CTRL_BREAK
         送不到它，这两个处理器在那种启动方式下永不被触发；
       · Windows 上 SIGTERM 根本不可捕获（os.kill 的 SIGTERM 就是硬杀）；
-      · 真正会命中的场景是前台 `monitor` 与 POSIX 部署。
+      · 真正会命中的场景是前台 `upi dev monitor` 与 POSIX 部署。
       所以优雅停止的**主路径仍是命令通道（quit）**，信号只是第二道防线。
       返回值如实记录装上了哪些，UI/报告据此判断而不是默认相信。
     """
@@ -125,6 +125,24 @@ def install_signals(owner) -> dict:
     return done
 
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    """字典递归合并：over 覆盖 base，但**子字典逐层并**而不是整块顶掉。
+
+    规则只有两条，都不含糊：
+      · 两边同键都是 dict ⇒ 递归合并；
+      · 其余情况（含 list/标量/类型不同）⇒ over 的值整体替换。
+    list 选替换而非逐项并：fixtures 清单的语义就是"覆盖层说了算"，
+    逐项并不会产生"A 删了某夹具、B 加回来"这类无法解释的中间态。
+    """
+    out = dict(base or {})
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 def load_runtime_conf() -> dict:
     """llm_config 的 pipeline.monitor 打底，daemon_conf.json 覆盖。
     UI 改的配置活过重启（运行时开关与代码默认分离）。
@@ -148,10 +166,16 @@ def load_runtime_conf() -> dict:
                error=f"{type(e).__name__}: {str(e)[:160]}",
                action="sampling_disabled_fail_closed")
     ov = E.load_conf()
-    merged = {**base, **ov}
-    if base.get("auto_fix") or ov.get("auto_fix"):
-        merged["auto_fix"] = {**(base.get("auto_fix") or {}),
-                              **(ov.get("auto_fix") or {})}
+    # ⚠️ 必须**递归**合并，不能 {**base, **ov}：覆盖层现在会写嵌套子键
+    #   （episode.heartbeat_max_age_s、budget.max_review_rounds、auto_fix.*）。
+    #   浅合并时 ov["episode"] = {"heartbeat_max_age_s": 20} 会整个顶掉
+    #   base["episode"]，把探针路径 jsonl/heartbeat 从配置里抹掉——
+    #   patrol_episode 于是报"探针归档不存在（先跑 m2a_probe 布置）"，
+    #   发作通路静默退化成盲区，而且留痕把成因指向"没布置探针"，
+    #   引着人去重布一套本来好好的探针。旧代码只对 auto_fix 做深合并
+    #   就是这个坑的补丁，但补一个漏两个；改递归合并后一类问题一起消失。
+    #   列表按整体替换（fixtures 清单本就该被覆盖层整条改掉，不是逐项并）。
+    merged = _deep_merge(base, ov)
     # 两处都没明确写 enabled 才算"读不出来"：缺键 ⇒ False（fail-closed）
     has_explicit = ("enabled" in base) or ("enabled" in ov)
     if not has_explicit:
@@ -551,10 +575,10 @@ class Daemon:
         for d in sorted(E.RUNS.glob("patrol_*/approvals/*")):
             if not (d / "request.json").exists():
                 continue
-            dec = d / "decision.json"
-            if not dec.exists():
+            if _is_open(d):                 # 判据与自检同源（唯一真相源）
                 open_t.append(d)
                 continue
+            dec = d / "decision.json"
             dec_data, dec_err = E.load_json(dec)
             if dec_err:
                 # 损坏的决定文件：不能当"未批"静默放过，也不能当"批了"放行
@@ -677,7 +701,8 @@ class Daemon:
             E.release_lease(ticket)
 
     def _run_resume_ticket(self, run_id: str, ticket: Path):
-        """工单批准后由守护续跑：等价 python -m upi resume --run <id>。"""
+        """工单批准后由守护续跑：等价 python -m upi dev resume --run <id>。
+        正式审批路径是界面按 d（逐页读完 + 页脚码），这里是守护自己接力。"""
         E.write_json(ticket / "resume_done.json",
                      {"started_at": E.now(), "pid": os.getpid()},
                      what="resume_done", strict=False)
@@ -767,6 +792,62 @@ class Daemon:
             # 半截"）。SPEC 加字段，这里自动跟着走，不需要第二次改。
             "conf": {i.key: i.get(self.conf) for i in SPEC},
             "fixtures": self.conf.get("fixtures")})
+
+
+def _is_open(d: Path) -> bool:
+    """待批判据的唯一真相源：有 request.json 且**无** decision.json。
+
+    ⚠️ 全仓库只此一份。scan_open_tickets()（只读自检用）与 Daemon._tickets()
+      （调度用）都必须调它——两处各写一遍 glob+存在性判断，规则就会漂移，
+      漂移的表现是"自检说有单、守护说没单"，排查的人只能对着两份代码干瞪眼。
+    """
+    return (d / "request.json").exists() and not (d / "decision.json").exists()
+
+
+def scan_open_tickets() -> list[Path]:
+    """扫全盘待批工单目录（用 _is_open 判据，与守护调度侧同源）。
+
+    为什么不读 status 快照的 open_tickets：快照只在守护活着时刷新，守护停着
+    时那是旧值甚至没值——而那恰好是最需要知道"有没有单子在等"的时刻
+    （docs/使用说明.md 曾把这记成已知缺口，阶段 6 补上）。
+    """
+    return sorted(d for d in E.RUNS.glob("patrol_*/approvals/*") if _is_open(d))
+
+
+def spawn_detached(wait_s: int = 12) -> tuple[bool, str]:
+    """后台分离拉起守护，看到心跳才算成功。返回 (是否成功, 一行人可读结果)。
+
+    为什么放这里而不是留在 __main__ / ui 各写一份：两处曾经**逐字重复**这段
+    逻辑（DETACHED_PROCESS 标志、12 次心跳轮询、日志重定向），于是拉起命令
+    的字面量也写了两遍。阶段 6 把 monitor 移入 `upi dev` 时，只改一处就会
+    让另一处"启动失败"——看起来像守护坏了，其实是分层没同步（分层重构最
+    常见的自伤）。收敛成一个函数后，命令名只出现在这里一次。
+
+    ⚠️ 必须真的等到心跳才报成功：Popen 返回只代表进程被创建，不代表守护
+      初始化没崩（llm_config 坏、端口占用、包缺失都会让它立刻退出）。
+      把"还在起"报成"启动成功"，用户会以为已经在巡检了。
+    """
+    import subprocess
+    running, st = E.daemon_running()
+    if running:
+        return False, f"守护已在运行（pid={st.get('pid')}），无需重复启动"
+    flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
+    log_path = E.RUNS / "daemon_stdout.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open("ab", buffering=0) as log:
+            subprocess.Popen([sys.executable, "-m", "upi", "dev", "monitor"],
+                             cwd=str(ROOT), stdout=log, stderr=log,
+                             stdin=subprocess.DEVNULL, creationflags=flags)
+    except OSError as e:
+        return False, f"启动失败：{type(e).__name__}: {e}"
+    for _ in range(wait_s):
+        time.sleep(1)
+        running, st = E.daemon_running()
+        if running:
+            return True, f"守护已启动 pid={st.get('pid')}"
+    return False, (f"!! {wait_s} 秒内未见守护心跳，启动可能失败。"
+                   f"查 {log_path.name} 与 daemon_events.jsonl")
 
 
 def main(argv=None) -> int:

@@ -508,7 +508,7 @@ def footer(g: dict) -> str:
 （G20）；体检表六项齐（{cl['n_missing']} 项未计算已注明原因）；
 成本与质量同轴（G15）；证据链索引每格可回溯（视图 6）。
 <br><br>
-数据截至本轮聚合；重新生成：<code>python -m upi report</code>。
+数据截至本轮聚合；重新生成：<code>python -m upi dev report</code>。
 本报告只读，不提供任何改阈值或改权限的入口（§7.3 末条、AGENTS I3）。
 </footer>"""
 
