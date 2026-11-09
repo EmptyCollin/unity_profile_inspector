@@ -123,7 +123,8 @@ pipeline:
       # 其余夹具检出后进工单队列转人工——不是缺陷，是 §1.7 边界。
       enabled: true
       fixtures: [F-CPU-01]
-      live_llm: false                # 真模型归因需显式开启（I13：不擅自烧积分）
+      live_llm: true    # 2026-11-09 用户指令：真实模型归因全链实测
+      # 上一行是本轮临时开关（原值 false，I13：不擅自烧积分）
     cooldown_s: 1800                 # 同夹具两轮巡检的最小间隔（防循环烧成本）
     max_consecutive_failures: 3      # 连续失败即退出非零，不无脑重试
     budget: {max_review_rounds: 1, max_attempts_per_issue: 1,
