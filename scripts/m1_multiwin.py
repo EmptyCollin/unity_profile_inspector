@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -38,6 +39,45 @@ IDLE_ONLY = False
 WARMUP = 8            # 每窗口预热丢弃的轮询次数
 WINDOW = 20           # 每窗口轮询次数（多窗口设计下缩短单窗口）
 POLL = 1.0            # 目标轮询间隔（秒）
+
+# ── 进度上报（守护/控制台的可观测性入口，非判据件）─────────────────
+# 三条纪律：
+#   ① pid 写自己（os.getpid()）——写父 PID 会让 cancel 误杀守护本身；
+#   ② 原子替换（tmp+rename），读方永远不会看到半截 JSON；
+#   ③ 上报失败绝不中断采样——观测坏了可以修，采到一半崩了整轮作废。
+PROGRESS_FP = ROOT / "runs" / "daemon_progress.json"
+
+
+def report(stage: str, fixture: str = "", window: int = 0,
+           windows_total: int = 0, note: str = "") -> None:
+    try:
+        tmp = PROGRESS_FP.with_name(PROGRESS_FP.name + ".tmp")
+        tmp.write_text(json.dumps({
+            "pid": os.getpid(), "stage": stage, "fixture": fixture,
+            "window": window, "windows_total": windows_total,
+            "note": note[:120], "ts": time.strftime("%H:%M:%S"),
+            "alive": True}, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, PROGRESS_FP)
+    except OSError:
+        pass
+
+
+def report_done() -> None:
+    """采样退出时把 alive 置假：守护据此区分"结束了"与"卡住了"，
+    而不是拿一份陈旧进度文件继续当成在跑。"""
+    try:
+        cur = json.loads(PROGRESS_FP.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if cur.get("pid") == os.getpid():
+        cur["alive"] = False
+        cur["ts"] = time.strftime("%H:%M:%S")
+        try:
+            tmp = PROGRESS_FP.with_name(PROGRESS_FP.name + ".tmp")
+            tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, PROGRESS_FP)
+        except OSError:
+            pass
 ALL_FIXTURES = ["F-CPU-01", "F-GPU-01", "F-ANIM-01", "F-LOAD-01", "CLEAN"]
 WINDOWS_FULL = 4      # 全量会话窗口数（n=4≥3，窗口间 σ 成立）
 
@@ -172,17 +212,20 @@ def one_window(fixture: str, nonce: str) -> dict | None:
 def sample_scene(fixture: str, windows: int) -> dict:
     scene = SCENES_DIR / f"Scene_{fixture}.unity"
     print(f"  打开 Scene_{fixture}")
+    report("open_scene", fixture, note=scene.name)
     cmd("scene open", "--path", f"Assets/UpiFixtures/Scenes/Scene_{fixture}.unity")
     time.sleep(5)
     if not wait_ready():
         return {"error": "编辑器未就绪"}
     print("  进 Play:", (cmd("editor.playmode start").get("data") or {}).get("result", "失败"))
+    report("play_enter", fixture)
     time.sleep(6)
     ev('UnityEngine.Application.targetFrameRate = -1; UnityEngine.Application.runInBackground = true; return "uncapped";')
 
     if FULL_SESSION:
         out = ev(SAMPLER_SRC, timeout=260)
         print("  A2 注入:", out[:90])
+        report("a2_inject", fixture, note=out[:80])
         if out.startswith("ERR") or not ("ready" in out or "alive" in out):
             cmd("editor.playmode stop"); time.sleep(4)
             return {"error": "A2 注入失败: " + out[:200]}
@@ -191,6 +234,7 @@ def sample_scene(fixture: str, windows: int) -> dict:
     for i in range(windows):
         nonce = f"{fixture}-{i}-{int(time.time())}"
         print(f"    窗口 {i + 1}/{windows} …")
+        report("window", fixture, window=i + 1, windows_total=windows)
         w = one_window(fixture, nonce)
         if w:
             wins.append(w)
@@ -238,12 +282,15 @@ def main() -> int:
     # 采前同步闸（00:40 轮实测漏检的根治点）：编辑器内存程序集必须与磁盘代码
     # 一致才能采。回滚/手改文件不触发资产导入，脏内存会让采样测到"盘上不存在"
     # 的代码——这种数据比采不到更有害（漏检伪装成正常）。
+    fixtures = args.fixtures or (ALL_FIXTURES if FULL_SESSION else ["F-CPU-01", "F-GPU-01"])
+    report("sync_editor", windows_total=len(fixtures),
+           note="编辑器内存程序集与磁盘代码收敛中")
     ok_sync, why_sync = sync_editor_code()
     if not ok_sync:
         print(f"!! 采前同步未通过——本轮拒采：{why_sync}")
+        report("sync_failed", note=why_sync)
+        report_done()
         return 2
-
-    fixtures = args.fixtures or (ALL_FIXTURES if FULL_SESSION else ["F-CPU-01", "F-GPU-01"])
     doc = {"session": args.session, "windows_target": args.windows,
            "protocol": {"warmup": WARMUP, "window_polls": WINDOW, "poll_interval_s": POLL},
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "fixtures": {}}
@@ -268,11 +315,16 @@ def main() -> int:
         doc["fixtures"][fx] = sample_scene(fx, args.windows)
         fp = CALDIR / f"multiwin_{args.session}.json"
         fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        done_n = sum(1 for v in doc["fixtures"].values() if "windows" in v)
+        report("fixture_done", fx, window=done_n, windows_total=len(fixtures),
+               note=f"已采 {done_n}/{len(fixtures)} 个夹具")
         if not args.no_summary:
             (CALDIR / f"multiwin_{args.session}_summary.json").write_text(
                 json.dumps(summarize_bundle(doc), ensure_ascii=False, indent=2),
                 encoding="utf-8")
     print("写入", CALDIR / f"multiwin_{args.session}.json")
+    report("write_bundle", note=str(CALDIR / f"multiwin_{args.session}.json"))
+    report_done()
     return 0
 
 
