@@ -48,8 +48,15 @@ def _why_not_auto(plan: EditPlan) -> str:
 
 # anchor 机制 → 该机制对应的语义保持修复（PB-* 取自 DET-CPU-GC-FRAMEALLOC.playbooks，
 # 均 whitelisted / side_effect=none）。diff 模板与彩排同源，逐条对应证据。
-_T = (ROOT / CSFILE).read_text(encoding="utf-8").split("\n")
+# ⚠️ find 段取自**钉定的缺陷态参照**，不是工作区夹具：第三轮真跑走保留通路后
+# 工作区已是修复态，若从现场切片，find 会与文件现存内容逐字相同——apply 报
+# "成功"但实为原地空写（静默假成功，比报错更危险）。参照由 git 历史版本固化，
+# 内容校验不过就直接拒绝导入（宁可装不上，不可假修复）。
+DEFECT_REF = Path(__file__).resolve().parent / "_refs" / "F_CPU_01_defect.cs"
+_T = DEFECT_REF.read_text(encoding="utf-8").split("\n")
 _lines = lambda a, b: "\n".join(_T[a - 1:b])
+assert "var ready = new List<SkillRuntime>();" in "\n".join(_T), \
+    "缺陷态参照缺少缺陷特征：diff 模板会退化成空写，已拒绝装载"
 
 
 def _plan_for(anchor: str) -> Optional[EditPlan]:

@@ -46,6 +46,16 @@ def idx(prefix):
 
 def setup_mocks():
     DET.mkdir(parents=True, exist_ok=True)
+    # 候选检索必须看到**缺陷态**代码；保留通路跑完后工作区夹具是修复态，
+    # 真实检索会返回零候选（那不是 bug，是夹具已被修好）。故把检索根指向
+    # 缺陷态参照副本，使本测试与仓库当前状态解耦。
+    from upi.core import candidate_retrieval as CR
+    fx = TMP / "fx" / "F_CPU_01"
+    fx.mkdir(parents=True, exist_ok=True)
+    (fx / "CombatSkillManager.cs").write_bytes(
+        (ROOT / "upi" / "agents" / "_refs" / "F_CPU_01_defect.cs").read_bytes())
+    CR.FIXTURE_ASSETS = TMP / "fx"
+    CR.ROOT = TMP
     (DET / "detection.json").write_text(json.dumps({
         "results": {"F-CPU-01": {
             "verdict": "detected", "metric": "gc_alloc_per_frame",
