@@ -131,10 +131,14 @@ def snapshot() -> str:
         out.append(f"{CYAN}▸ 进行中{RESET} {ft}{win} "
                    f"{DIM}({pg.get('stage')}) {pg.get('note','')}{RESET}")
         bar_w = 40
-        # 进度条按"夹具×窗口"估算——估算就是估算，标注出来不含糊
-        tot = max(1, (len((st or {}).get('conf', {}).get('fixtures') or [1]) *
-                      int(pg.get("windows_total") or 1)))
-        done = (pg.get("window") or 0)
+        # 进度按"夹具序×窗口"累积：每个夹具都从窗口 1 重来，只取当前 window
+        # 会让进度条每换一个夹具就跳回低位，读不出"整体跑到哪"。用 fixture
+        # 在列表里的序号折算全局完成数，条子才单调递增。仍是估算，如实标注。
+        fixtures_list = (st or {}).get('conf', {}).get('fixtures') or []
+        wtot = int(pg.get("windows_total") or 1)
+        fidx = fixtures_list.index(ft) if ft in fixtures_list else 0
+        done = fidx * wtot + (pg.get("window") or 0)
+        tot = max(1, len(fixtures_list) * wtot)
         filled = int(bar_w * min(1.0, done / tot)) if tot else 0
         out.append(f"  {'█' * filled}{'░' * (bar_w - filled)} "
                    f"{DIM}按窗口估算{RESET}")
