@@ -177,6 +177,15 @@ class Daemon:
                 E.save_conf(self.conf)
                 E.emit("config_changed", **changed)
         elif cmd == "quit":
+            # 优雅停止也要收拾采样子进程：只置标志会让 m1_multiwin 变孤儿
+            # 继续占住编辑器（硬杀 finally 不执行，更不可能清）
+            if self.busy and self.child_pid:
+                try:
+                    os.kill(self.child_pid, 15)
+                    E.emit("cancel_sent", reason="daemon_quit",
+                           child_pid=self.child_pid)
+                except OSError as e:
+                    E.emit("cancel_failed", error=str(e)[:120])
             self.stop_requested = True
             E.emit("daemon_quit_cmd")
 
@@ -368,13 +377,24 @@ def main(argv=None) -> int:
             print("守护未在运行（无 pid 或心跳过期）")
             return 0
         pid = int(st.get("pid") or 0)
+        # 优雅停止优先走命令通道：Windows 上 os.kill(pid,15) 是 TerminateProcess
+        # 硬杀，守护不会执行 finally —— pid 文件残留、采样子进程变孤儿继续占
+        # 编辑器、也没有停止事件留痕。发 quit → 守护自己收子进程+清 pid+记事件。
+        E.send_cmd("quit")
+        for _ in range(20):
+            time.sleep(1)
+            if not E.daemon_running()[0]:
+                print(f"守护已优雅停止 pid={pid}")
+                return 0
+        # 超时兜底：quit 没被消费（主循环卡住），硬杀止血，再清残留 pid
         try:
             os.kill(pid, 15)
-            print(f"已请求停止守护 pid={pid}")
-            return 0
+            print(f"!! 20s 内 quit 未被消费，已硬杀 pid={pid}"
+                  f"（残留 pid 文件需手动清或下次 start 覆盖）")
         except OSError as e:
-            print(f"停止失败：{e}")
+            print(f"硬杀也失败：{e}")
             return 1
+        return 0
     running, _ = E.daemon_running()
     if running:
         print("!! 已有守护在跑（pid 文件 + 心跳双判据）。先 stop 或直接用 UI 控制")

@@ -94,7 +94,6 @@ def main():
     check("enable 还原=True", E.load_conf().get("enabled") is True)
 
     E.emit("marker-clear")
-    n_before = len(E.tail_events(50))
     d._apply_cmd({"cmd": "teleport", "args": {}})
     got = [e for e in E.tail_events(5) if e.get("kind") == "command_ignored"]
     check("未知命令 ⇒ command_ignored 留痕（不静默）", len(got) == 1
@@ -105,6 +104,25 @@ def main():
           and d.conf["auto_fix"]["live_llm"] is False)
     check("set 落盘（活过重启）",
           E.load_conf().get("interval_s") == 600)
+
+    print("== ②b quit 优雅停止：先收子进程再退出 ==")
+    # 空闲态 quit：不该发 cancel，只置 stop 标志并留痕
+    d.busy, d.child_pid, d.stop_requested = False, None, False
+    d._apply_cmd({"cmd": "quit", "args": {}})
+    check("空闲 quit ⇒ stop_requested 且不发 cancel",
+          d.stop_requested is True
+          and not any(e.get("kind") == "cancel_sent"
+                      for e in E.tail_events(6)))
+    # 忙态 quit：必须尝试收子进程（活体实测证明硬杀会留孤儿占编辑器）
+    d.busy, d.stop_requested = True, False
+    d.child_pid = 999998          # 不存在的 pid：走 cancel_failed 而非崩
+    d._apply_cmd({"cmd": "quit", "args": {}})
+    tail = E.tail_events(6)
+    kinds = [e.get("kind") for e in tail]
+    check("忙态 quit ⇒ 尝试收子进程（失败也留痕不崩）",
+          "cancel_failed" in kinds or "cancel_sent" in kinds)
+    check("quit 后 stop_requested=True", d.stop_requested is True)
+    d.busy, d.child_pid = False, None
 
     print("== ③ 续跑判据：历史已跑完的绝不复活 ==")
     run_dir = TMP / "runs" / "patrol_test1"

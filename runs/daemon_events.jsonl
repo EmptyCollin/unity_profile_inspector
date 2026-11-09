@@ -1,0 +1,20 @@
+{"ts": "2026-11-09T16:43:03", "kind": "daemon_started", "pid": 3040, "interval_s": 1800, "enabled": false, "auto_fix": {"enabled": true, "fixtures": ["F-CPU-01"], "live_llm": true}}
+{"ts": "2026-11-09T16:43:03", "kind": "round_skipped", "reason": "sampling_disabled"}
+{"ts": "2026-11-09T16:43:23", "kind": "command_received", "seq": 1, "cmd": "pause", "args": {}}
+{"ts": "2026-11-09T16:43:23", "kind": "paused"}
+{"ts": "2026-11-09T16:43:25", "kind": "command_received", "seq": 2, "cmd": "resume", "args": {}}
+{"ts": "2026-11-09T16:43:25", "kind": "resumed"}
+{"ts": "2026-11-09T16:45:36", "kind": "command_received", "seq": 3, "cmd": "enable", "args": {}}
+{"ts": "2026-11-09T16:45:36", "kind": "sampling_enabled"}
+{"ts": "2026-11-09T16:45:38", "kind": "command_received", "seq": 4, "cmd": "disable", "args": {}}
+{"ts": "2026-11-09T16:45:38", "kind": "sampling_disabled"}
+{"ts": "2026-11-09T16:45:42", "kind": "command_received", "seq": 5, "cmd": "cancel", "args": {}}
+{"ts": "2026-11-09T16:45:42", "kind": "command_ignored", "reason": "no_round_running", "cmd": "cancel"}
+{"ts": "2026-11-09T16:51:24", "kind": "daemon_started", "pid": 28048, "interval_s": 1800, "enabled": true, "auto_fix": {"enabled": true, "fixtures": ["F-CPU-01"], "live_llm": true}}
+{"ts": "2026-11-09T16:51:24", "kind": "round_started", "trigger": "interval", "fixtures": ["CLEAN", "F-CPU-01", "F-GPU-01", "F-ANIM-01", "F-LOAD-01"], "sampling": true, "auto_fix": {"enabled": true, "fixtures": ["F-CPU-01"], "live_llm": true}}
+{"ts": "2026-11-09T16:51:26", "kind": "progress", "fixture": "", "stage": "sync_editor", "window": 0, "windows_total": 5, "note": "编辑器内存程序集与磁盘代码收敛中"}
+{"ts": "2026-11-09T16:51:38", "kind": "command_received", "seq": 6, "cmd": "quit", "args": {}}
+{"ts": "2026-11-09T16:51:38", "kind": "cancel_sent", "reason": "daemon_quit", "child_pid": 9972}
+{"ts": "2026-11-09T16:51:38", "kind": "daemon_quit_cmd"}
+{"ts": "2026-11-09T16:51:38", "kind": "round_finished", "seconds": 14.1, "findings": 0, "quiet": false, "blindspots": ["重采失败（rc=15）：stdout尾= stderr尾="], "wakes": [], "cancelled": true}
+{"ts": "2026-11-09T16:51:40", "kind": "daemon_stopped", "pid": 28048}
