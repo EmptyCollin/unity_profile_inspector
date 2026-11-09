@@ -28,6 +28,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import time
@@ -115,26 +116,60 @@ TMP_STALE_S = 300
 LEASE_TTL_S = 45 * 60
 # ack 等待：命令通道是单槽，UI 必须等上一条被受理才能发下一条
 ACK_WAIT_S = 6.0
+# 原子替换的有限重试次数。只针对"目标被瞬时锁定"这类暂时性失败
+# （实测并发 replace 报 WinError 5）；真故障（只读、磁盘满）重试完照样上抛，
+# 不静默吞。5 次 × 递增退避 ≈ 0.75s 上限，远小于一次心跳周期，不拖慢交互。
+REPLACE_RETRY = 5
 
 
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+_tmp_seq = itertools.count()
+
+
 def atomic_write(p: Path, text: str) -> None:
-    """原子替换写（tmp + os.replace）。
+    """原子替换写（唯一临时名 + os.replace）。
+
+    ⚠️ 临时名**必须带唯一后缀**（不能用固定的 `名字.tmp`）：
+      daemon_cmd.json 是双写者文件（界面写命令、守护写回执）。固定名时
+      A 写完 tmp、B 也写同一个 tmp，A 先 replace 把 tmp 搬走，B 的
+      os.replace 就 FileNotFoundError——实测就是这么炸的（模拟回执线程
+      与主线程并发写命令通道）。原子性靠"不同名字互不干涉"，不是靠
+      大家都挤进同一个临时文件。
+      前缀仍保证以 .tmp 结尾，让启动期的 sweep_residuals 能一并回收残骸。
 
     ⚠️ 这里**不做**"写后回读比对"（我曾加上，随即回退，理由记下来防再犯）：
-      daemon_cmd.json 是**双写者**文件（UI 写命令、守护写回执），两次写的
-      replace 之间本来就可能夹进对方的新内容——回读比对会把这种**合法的
-      并发覆盖**误判成"落盘不一致"而抛错，把一个能正常工作的系统改得偶发
-      崩溃。落盘确认只该用在**单写者**的关键文件上（decision.json 在
-      approval.write_decision 里做了），并且要写清是谁在写。
+      双写者文件两次 replace 之间本来就可能夹进对方的新内容，回读比对会把
+      这种**合法的并发覆盖**误判成"落盘不一致"而抛错，把一个能正常工作的
+      系统改得偶发崩溃。落盘确认只用在**单写者**的关键文件上
+      （decision.json 在 approval.write_decision 里做了）。
     """
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.{next(_tmp_seq)}.tmp")
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, p)
+    # 唯一临时名解决的是"两个写者挤同一个 tmp"；实测还剩第二类失败：
+    # 并发 replace 时报 [WinError 5] 拒绝访问——**目标文件**被瞬时占用
+    # （Windows 下换入瞬间的索引/杀软扫描）。这不是锁竞争（tmp 名字唯一），
+    # 也不该一次就放弃：把它记成 write_failed 会让界面显示"命令未受理"，
+    # 而重试一次其实就成功了——假故障比慢一点危害大。
+    # 有限次 + 递增退避：重试总退避约 0.75s（0.05×1+2+3+4+5），仍失败就照原样上抛，绝不静默吞。
+    last_err: OSError | None = None
+    for i in range(REPLACE_RETRY):
+        try:
+            os.replace(tmp, p)
+            return
+        except OSError as e:
+            last_err = e
+            time.sleep(0.05 * (i + 1))
+    # 真的换不进去：收掉半写的 tmp（不留残骸），把最后一次错误抛出去，
+    # 由调用方决定留痕还是降级（write_json 会发 write_failed）
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    raise last_err if last_err else OSError(f"替换失败：{p.name}")
 
 
 def atomic_write_text(p: Path, text: str) -> None:

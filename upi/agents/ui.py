@@ -4,9 +4,13 @@
 conf/tickets），UI 不持有自己的状态——界面崩了不影响守护，守护崩了界面
 会如实显示"心跳过期"而不是继续演。
 
-键位：
-  s  开/关采样     p 暂停/继续      r 立即巡检一次
-  c  取消当前轮    a 打开待批工单   q 退出（只退 UI，不停守护）
+交互规则（阶段 4）：
+  指令菜单**按当前状态动态给出**（状态从 daemon_status.json + 工单派生，
+  UI 不自造状态）。不可用的指令**显示但置灰并附原因**——藏起来会让人以为
+  功能缺失，下次在错误的态里按它更摸不着头脑。
+  确认强度三档：只读按了就走；可逆（开关/暂停/巡检/取消）需再按一次确认；
+  不可逆（停守护/注册/批准）需手输 token。肌肉记忆是审批的头号敌人。
+  键位含义见每帧底部实时菜单，本文不重复列举（列举就会腐坏，历史上已错过）。
 
 非 TTY（管道/重定向）自动退化成一次性快照打印，便于脚本与 CI 取用。
 """
@@ -21,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from upi.agents import ui_actions as UA  # noqa: E402
 from upi.core import events as E  # noqa: E402
 
 RESET, BOLD, DIM = "\x1b[0m", "\x1b[1m", "\x1b[2m"
@@ -207,7 +212,18 @@ def snapshot() -> str:
         detail = _fmt_ev(ev)
         out.append(f"  {DIM}{ev.get('ts','')[11:]}{RESET} {col}{k:<17}{RESET} {detail}")
 
-    out.append(f"{BOLD}{BG_GREY} s开关采样  p暂停  r立即巡检  c取消本轮  a看工单  q退出{RESET}")
+    # ── 动态指令菜单（按状态给可用项；禁用项置灰，原因在按下时给出）──
+    state = UA.derive_state(st, calibrated=UA.is_calibrated())
+    acts = UA.actions_for(state)
+    on = [a for a in acts if a["enabled"]]
+    off = [a for a in acts if not a["enabled"]]
+    out.append(f"{BOLD}指令{RESET} {DIM}[状态：{state}]{RESET}")
+    out.append("  " + "  ".join(f"{GREEN}[{a['key']}]{RESET}{a['label']}"
+                                for a in on))
+    if off:
+        # 显示禁用项但不写全原因（原因可能很长）：按下去时 check_guard 会把
+        # 确切原因打到屏幕上，这里只标"为什么整片不可用"的态名。
+        out.append(f"  {DIM}置灰不可用：{'  '.join('[' + a['key'] + ']' + a['label'] for a in off)}{RESET}")
     return "\n".join(out)
 
 
@@ -271,47 +287,257 @@ def view_latest_ticket() -> str:
         return f"请手工打开：{p}"
 
 
+def start_daemon() -> str:
+    """UI 内拉起守护（阶段 6 会加开机自启，这里先把'起来'这件事收进界面）。
+
+    复用 cmd_start 的两道防呆：① 已有守护就拒绝（双判据）；② 必须真的
+    看到心跳才报成功——否则会把"还在起进程"报成"启动成功"（假安心）。
+    """
+    if E.daemon_running()[0]:
+        return "守护已在运行，无需重复启动"
+    import subprocess
+    import sys as _sys
+    # 路径用本模块的 ROOT（ui.py 顶部已定义）。此处曾写成
+    # `from upi.__main__ import ROOT`——那是多余的绕路，而且有真风险：
+    # 用户跑 `python -m upi ui` 时 __main__ 正在执行中，从它 import
+    # 会撞上半初始化模块（循环导入）。取常量不该跨模块绕。
+    log = open(ROOT / "runs" / "daemon_stdout.log", "ab", buffering=0)
+    flags = 0x00000008 | 0x00000200 if _sys.platform == "win32" else 0
+    try:
+        subprocess.Popen([_sys.executable, "-m", "upi", "monitor"],
+                         cwd=str(ROOT), stdout=log, stderr=log,
+                         stdin=subprocess.DEVNULL, creationflags=flags)
+    except OSError as e:
+        return f"启动失败：{e}"
+    for _ in range(12):
+        time.sleep(1)
+        running, st = E.daemon_running()
+        if running:
+            return f"守护已启动 pid={st.get('pid')}"
+    return "!! 12 秒内未见心跳，启动可能失败（查 runs/daemon_stdout.log）"
+
+
+# 可编辑的运行配置：与守护 _dispatch_cmd 的 set 分支**逐键对应**。
+# 数值项守护按 int 收，布尔项写进 auto_fix 子字典；名字对不上就是空操作，
+# 故 test_ui_actions 会用源码交叉断言"这里列的键守护都认"。
+CFG_FIELDS = [
+    ("interval_s", "巡检间隔秒", int),
+    ("cooldown_s", "唤起冷却秒", int),
+    ("windows", "每夹具窗口数", int),
+    ("waterline_timeout_s", "重采超时秒", int),
+    ("live_llm", "真模型归因(花积分)", bool),
+    ("auto_fix_enabled", "自动修复总开关", bool),
+]
+
+
+def _cfg_current(st_now: dict):
+    """读当前配置值（展示用，取不到就 None，不编一个数）。"""
+    conf = (st_now or {}).get("conf") or {}
+    af = conf.get("auto_fix") or {}
+    cur = {}
+    for k, _label, _ty in CFG_FIELDS:
+        if k == "live_llm":
+            cur[k] = af.get("live_llm")
+        elif k == "auto_fix_enabled":
+            cur[k] = af.get("enabled")
+        else:
+            cur[k] = conf.get(k)
+    return cur
+
+
+def _parse_val(kind, raw):
+    """解析输入。返回 (值, 错误)。空输入一律视为取消。"""
+    s = (raw or "").strip()
+    if not s:
+        return None, "cancelled"
+    if kind is bool:
+        if s.lower() in ("y", "yes", "true", "1"):
+            return True, ""
+        if s.lower() in ("n", "no", "false", "0"):
+            return False, ""
+        return None, f"布尔项只能填 y/n，收到 {s!r}"
+    try:
+        v = int(s)
+    except ValueError:
+        return None, f"需要整数，收到 {s!r}"
+    if v < 0:
+        return None, "不允许负数"
+    return v, ""
+
+
+def edit_config(st_now: dict, send_, line_read) -> str:
+    """一次改一个运行配置项（数值/开关）。取消不改变任何东西。
+
+    为什么不让用户一次填一整张表：改配置直接影响成本（间隔、窗口数决定
+    每轮花多久花多少积分），逐项确认 + 立即回显 old→new 才敢让人改。
+    """
+    cur = _cfg_current(st_now)
+    lines = ["可改的运行配置（回车取消，不改任何东西）："]
+    for i, (k, label, _ty) in enumerate(CFG_FIELDS, 1):
+        v = cur.get(k)
+        shown = "未设" if v is None else v
+        lines.append(f"  {i}. {k}  {label}  当前={shown}")
+    lines.append("")
+    pick = line_read("\n".join(lines) + "\n选哪项(1-6)：")
+    sel = (pick or "").strip()
+    if not sel.isdigit() or not (1 <= int(sel) <= len(CFG_FIELDS)):
+        return "未选择有效项，配置未改动"
+    field, label, kind = CFG_FIELDS[int(sel) - 1]
+    old = cur.get(field)
+    prompt = f"给 {field}（{label}）填新值{'，y/n' if kind is bool else ''}，回车取消："
+    raw = line_read(prompt)
+    val, err = _parse_val(kind, raw)
+    if err == "cancelled":
+        return f"已取消，{field} 仍为 {old}"
+    if err:
+        return f"输入无效：{err}；{field} 未改动"
+    if kind is int and field == "interval_s" and val < 60:
+        # 配置加载层本就拒 interval<60，这里提前挡，免得发出去被守护拒后
+        # 只剩一句"未确认"让人摸不着头脑
+        return f"间隔 {val}s < 60s 下限，未提交（防高频烧积分）"
+    ack, info = send_("set", **{field: val})
+    tag = "" if ack else f"（{info.get('reason')}）"
+    return f"{field}: {old} → {val}{tag}"
+
+
+
+def step(state: str, st_now: dict, key: str, pending=None, *,
+         sender=None, runner=None, token_input=None, line_reader=None,
+         calib=True):
+    """处理一次按键，返回 (提示文本, 新的待确认动作, 是否退出)。
+
+    为什么单独成一个函数而不是留在 while 里：交互规则（白名单、禁用原因
+    回显、三档确认）是这套 UI 最容易出错的部分——状态误判会让人在错误的
+    时刻发出破坏性命令。逻辑埋在渲染循环里就只能真开终端手点才能验，
+    手点测不到"拒绝路径"。抽出来后测试可以直接喂一串按键断言每一步。
+
+    依赖全部以参数注入（sender/runner/token_input），默认走真实通道：
+    测试因此能断言"到底发了哪条命令"，而不是只看界面文字。
+    """
+    send_ = sender or send
+    run_ = runner if runner is not None else start_daemon
+    # 读一行统一走 line_read：配置表单要读两次（选项 + 新值），token 确认读一次。
+    # 注入而非直接 input()，是为了让交互逻辑能被测试驱动——真终端手点测不到
+    # 拒绝路径（取消、越界、类型不符）。
+    line_read = line_reader or (lambda prompt: (sys.stdout.write(prompt),
+                                               input())[-1])
+    tin = token_input or line_read
+
+    def out(msg, pend=None, quit_=False):
+        return msg, pend, quit_
+
+    act = UA.resolve(state, key)
+    if act is None:
+        # 未识别键：作废待确认（否则下一次按键会被当成它的确认而误执行）
+        return out(f"未识别按键 {key!r}", None)
+
+    allowed, why = UA.check_guard(state, act, st_now)
+    if not allowed:
+        # 禁用原因必须回显——"显示并置灰"只做了一半，另一半是让人知道为什么
+        return out(f"{act['label']} 当前不可用：{why}", None)
+
+    if act["tier"] == UA.TIER_HARD and not act.get("wired", True):
+        # 未接线动作在这里再拦一次：actions_for 已置灰，但矩阵若被改坏，
+        # 这里不兜住就会把"看起来能用其实必然失败"的动作真的执行
+        return out(f"{act['label']} 尚未实现", None)
+
+    if act["tier"] == UA.TIER_SOFT:
+        # 软确认用"再按一次同一键"，不弹文字输入框：控制台是全屏刷新的，
+        # 中途弹 input 会和渲染打架（也测不到）。只有不可逆动作（TIER_HARD）
+        # 才临时让出屏幕收一行 token。
+        if pending == act["name"]:
+            pass                              # 二次按键 = 确认，继续执行
+        else:
+            hint = (f"⚠ 待确认「{act['label']}」：再按 [{act['key']}] 生效，"
+                    "按其他键作废")
+            return out(hint, act["name"])
+
+    if act["tier"] == UA.TIER_HARD:
+        tok = act["key"].upper()
+        try:
+            got = tin(f"不可逆操作「{act['label']}」，请输入 {tok} 后回车：")
+        except (EOFError, KeyboardInterrupt):
+            return out("已取消该操作", None)
+        if (got or "").strip() != tok:
+            return out(f"token 不匹配，未执行「{act['label']}」", None)
+
+    # 放行执行
+    if act["name"] == UA.ACT_QUIT_UI:
+        return out("", None, True)
+    if act["name"] == UA.ACT_START_DAEMON:
+        return out(run_(), None)
+    if act["name"] == UA.ACT_VIEW_TICKET:
+        return out(view_latest_ticket(), None)
+    if act["name"] == UA.ACT_SNAPSHOT:
+        return out("已刷新（本帧即快照）", None)
+    if act["name"] == UA.ACT_TOGGLE_SAMPLING:
+        return out(send_("disable" if st_now.get("sampling_enabled")
+                         else "enable")[1], None)
+    if act["name"] == UA.ACT_CONFIG:
+        return out(edit_config(st_now, send_, line_read), None)
+    if act["name"] == UA.ACT_CANCEL:
+        # 取消粒度是"下一个采样边界"，不是瞬时停：走文件通道才换得来子进程
+        # 的 finally 真执行（退 Play、卸回调、写完自己的留痕）。这句话必须说
+        # ——否则按下 c 之后界面看似毫无反应，人只会连按几次，或者干脆去
+        # 硬杀进程，而那正是 G10 禁止的（会连带关掉别的项目）。
+        # GRACE_S 是父进程侧的强杀兜底上界，所以"最长"是有依据的数字，不是安慰话。
+        from .patrol import GRACE_S
+        okc, msg = send_("cancel")
+        return out(msg + ("" if not okc else
+                          f"｜已受理，等下一个采样边界收尾（最长 {GRACE_S}s）"),
+                   None)
+    if act.get("cmd"):
+        return out(send_(act["cmd"])[1], None)
+    return out(f"动作 {act['name']} 未实现（不应被放行）", None)
+
+
 def run_loop(fps: float = 2.0) -> int:
     if not sys.stdout.isatty():
         print(snapshot())
         return 0
     vt = enable_vt()
-    toast = ""                                      # 上一次操作的受理结果
+    toast = ""
+    pending = None                                  # 待软确认的动作名
     try:
         while True:
+            st_now = E.read_status() or {}
+            state = UA.derive_state(st_now, calibrated=UA.is_calibrated())
             frame = snapshot()
-            # 清屏 + 归位；无 VT 支持时退化为逐帧追加（可读但不美观）
             sys.stdout.write("\x1b[2J\x1b[H" if vt else "\n" * 2)
             sys.stdout.write(frame + "\n")
-            if toast:
-                # 受理结果必须落在屏幕上：send 现在会真报"没被受理"，
-                # 不显示就等于把失败又变回静默（这正是本次要消灭的形态）
-                sys.stdout.write(toast + "\n")
+            line = toast
+            if not line and pending:
+                # 待确认提示由 pending 反查键名，不硬编码——菜单是动态的
+                line = (f"⚠ 待确认「{_label_of(pending)}」："
+                        f"再按 [{_key_of(pending)}] 生效，按其他键作废")
+            if line:
+                sys.stdout.write(line + "\n")
             sys.stdout.flush()
             key = read_key(1.0 / fps)
-            if key == "q":
+            if not key:
+                continue
+            toast, pending, should_quit = step(state, st_now, key, pending)
+            if should_quit:
                 return 0
-            elif key == "s":
-                st = E.read_status() or {}
-                toast = send("disable" if st.get("sampling_enabled")
-                             else "enable")[1]
-            elif key == "p":
-                st = E.read_status() or {}
-                toast = send("resume" if st.get("paused") else "pause")[1]
-            elif key == "r":
-                toast = send("run_now")[1]
-            elif key == "c":
-                # 取消的粒度是"下一个窗口边界"（约 2.4 分钟），不是立即：
-                # 走文件通道换来了子进程 finally 真执行（退 Play、卸回调）
-                ok, msg = send("cancel")
-                toast = msg + ("" if not ok else "｜取消已受理，等待窗口边界收尾")
-            elif key == "a":
-                print("\n" + view_latest_ticket())
-                read_key(3.0)
     except KeyboardInterrupt:
         return 0
     finally:
         sys.stdout.write(RESET + "\n")
+
+
+def _key_of(action_name: str) -> str:
+    for a in UA._ALL_ACTIONS:
+        if a["name"] == action_name:
+            return a["key"]
+    return ""
+
+
+def _label_of(action_name: str) -> str:
+    """动作名 → 中文标签。菜单与待确认提示都只显示标签，不暴露内部名。"""
+    for a in UA._ALL_ACTIONS:
+        if a["name"] == action_name:
+            return a["label"]
+    return action_name
 
 
 if __name__ == "__main__":
