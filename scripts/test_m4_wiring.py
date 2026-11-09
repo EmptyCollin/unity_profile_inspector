@@ -179,8 +179,8 @@ def main():
     ei = idx("execute:")
     check("resample 先于 execute", 0 <= idx("resample:") < ei)
     check("floor 先于 execute", 0 <= idx("floor:") < ei)
-    check("applied ⇒ attempts=1 + pre_attempt 带 floor_before",
-          f.get("attempts") == 1 and f["pre_attempt"]["floor_before"] is not None)
+    check("applied ⇒ fix 不计 attempts（计数移到 verify）+ pre_attempt 带 floor_before",
+          "attempts" not in f and f["pre_attempt"]["floor_before"] is not None)
     check("record 带 root_cause（回环重选判据）",
           f["records"][-1]["root_cause"] == hs[0]["root_cause"])
 
@@ -191,6 +191,8 @@ def main():
     CALLS.clear()
     v = nodes["verify"](vst)
     check("verdict 收到两侧 fresh", "verdict:fb=True,fa=True" in CALLS)
+    check("判定产出 ⇒ attempts=1（作废不烧额配对断言）",
+          v.get("attempts") == 1)
     # 标签形如 "<run>/after_<stamp>"；before 束绝不重采（复用 pre_attempt 文件）
     check("before 未重采（复用 pre_attempt 文件）",
           len(has("resample:")) == 1 and "before" not in has("resample:")[0])
