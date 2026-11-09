@@ -24,8 +24,9 @@
      判定指标必须在统计里，缺一整轮按盲区记）；盲区轮不产"静默"结论。
      失焦轮实测撞出：五个夹具全部采集失败，旧版却记成"零检出无盲区"。
 
-调度形态：`python -m upi monitor` 前台循环（日志到 stdout + patrol_runs.jsonl），
-或 `python -m upi patrol-once` 单轮（外部调度器拉起：Windows 任务计划/CI）。
+调度形态：`python -m upi dev monitor` 前台循环（日志到 stdout + patrol_runs.jsonl），
+或 `python -m upi dev patrol-once` 单轮（外部调度器拉起：Windows 任务计划/CI）。
+（dev 是开发/诊断通道；日常操作走 `upi ui`，生命周期走 upi start/stop。）
 """
 from __future__ import annotations
 

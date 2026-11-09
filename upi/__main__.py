@@ -1,16 +1,24 @@
-"""`python -m upi <command>` —— 管线统一入口（独立进程，与 AI 助手无关）。
+"""`python -m upi <command>` —— 生命周期入口（日常操作请用 `upi ui`）。
 
+  ui            控制台界面：**唯一的日常交互入口**（进度、开关采样、暂停、
+                立即巡检、取消、改配置、批工单全部在这里按键完成）
   status        环境自检：CLI / Editor / 标定链 / 探针 / 密钥 / 巡检配置 / 守护存活
+  start         后台启动常驻守护（不占终端；之后用 upi ui 附着观察与控制）
+  stop          停止后台守护（走命令通道优雅收尾，不是硬杀）
+
+开发/诊断通道（`python -m upi dev <command>`，日常操作不需要，文档不再宣传）：
+  monitor       前台跑常驻守护（start 内部就是这样拉起守护的）
   detect        水位检测一轮（等价 scripts/m1_detect.py）
-  patrol-once   巡检单轮（前台阻塞）：发作(只读) + 水位(重采)，检出即出工单
-  start         后台启动常驻守护（不占终端；进度落 runs/daemon_* 供 UI 读）
-  ui            控制台界面：实时进度 + 单键开关采样/暂停/立即巡检/取消
-  stop          停止后台守护
-  monitor       前台跑常驻守护（想后台用 start；外部调度器用 patrol-once）
-  resume        工单批准后续跑（--run <run_id>：从 fix 断点，不重烧采样/归因）
-  drill ...     演练两阶段（透传 scripts/m4_drill.py 参数）
-  report        生成历史统计报告（单文件 HTML：§7.3 七视图 + 体检表 + G20 清单）
-  stats         终端快览统计指标（JSON，脚本/CI 取数用；不出 HTML）
+  patrol-once   巡检单轮（外部调度器拉起：Windows 任务计划 / CI）
+  resume        工单批准后续跑（--run <run_id>；正式审批请走 UI 按 d）
+  drill         演练两阶段（透传 scripts/m4_drill.py 参数）
+  report        生成历史统计报告 HTML
+  stats         终端快览统计指标（JSON，脚本/CI 取数用）
+
+"彻底唯一入口"的诚实边界（阶段 6）：任何进程都得有人第一次把它启动，可执行
+入口消灭不掉；真正落地的形态是**用户永远只在 UI 里操作，不需要知道命令行的
+存在**。dev 通道保留给开发与诊断，它产生的决定在留痕里如实标注来源
+（decided_via=external），与界面审批可区分、可分层统计。
 
 设计约定（与 AGENTS 全局不变量对齐）：
 - 本入口不产生任何数值（I1），只做组装与调度；
@@ -96,12 +104,19 @@ def cmd_status(_args=None) -> int:
             print(f"  守护进程        : 已停止（最后心跳 {dst.get('updated_at')}）")
         else:
             print("  守护进程        : 从未启动（python -m upi start 后台起）")
-        ot = (dst or {}).get("open_tickets") or []
+        # 待批队列**自己扫盘**，不读上面 dst 快照的 open_tickets：快照只在
+        # 守护活着时刷新，守护停着的时候恰好最需要知道"有没有单子在等"
+        # （文档曾把这记成已知缺口）。判据取自 daemon._is_open，与守护
+        # 调度侧同源 ⇒ 不会出现"自检说有单、守护说没单"。
+        from upi.agents.daemon import scan_open_tickets
+        ot = scan_open_tickets()
         if ot:
             print(f"  待批工单        : {len(ot)} 张"
-                  f"（守护在等，未批不采基线）")
+                  f"{'（守护在等，未批不采基线）' if running else '（守护未运行，批了也要等它起来才续跑）'}")
             for p in ot[:2]:
                 print(f"                    {p}")
+        else:
+            print("  待批工单        : 无")
     except Exception as e:  # noqa: BLE001
         print(f"  守护进程        : 探测失败 {type(e).__name__}: {str(e)[:120]}")
 
@@ -166,31 +181,18 @@ def cmd_monitor(_args=None) -> int:
 def cmd_start(_args=None) -> int:
     """后台分离启动守护：不占终端，之后用 upi ui 附着观察与控制。
 
-    两道防呆：① 已有守护在跑就拒绝（双判据防僵尸）；② 启动后必须真的看到
-    心跳才报成功——否则会把"还在起进程"报成"启动成功"（假安心）。"""
-    import os
-    import subprocess
-    from upi.core import events as E
-    if E.daemon_running()[0]:
-        print("!! 守护已在运行（pid 存活且心跳新鲜）。要重启先 python -m upi stop")
-        return 1
-    flags = 0
-    if os.name == "nt":
-        flags = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
-    log = open(ROOT / "runs" / "daemon_stdout.log", "ab", buffering=0)
-    subprocess.Popen([sys.executable, "-m", "upi", "monitor"],
-                     cwd=str(ROOT), stdout=log, stderr=log,
-                     stdin=subprocess.DEVNULL, creationflags=flags)
-    for _ in range(12):
-        time.sleep(1)
-        running, st = E.daemon_running()
-        if running:
-            print(f"守护已后台启动 pid={st.get('pid')}，"
-                  f"界面：python -m upi ui ｜ 停止：python -m upi stop")
-            return 0
-    print("!! 12 秒内没看到守护心跳，启动可能失败。"
-          "查 runs/daemon_stdout.log 与 runs/daemon_events.jsonl")
-    return 1
+    实现收在 daemon.spawn_detached()——以前这里与 ui.start_daemon() 各写
+    一份完整逻辑（DETACHED 标志、12 次心跳轮询、日志重定向），拉起命令的
+    字面量因此写了两遍。阶段 6 把 monitor 移入 `upi dev` 时，只改一处就会让
+    另一处报"启动失败"，看起来像守护坏了，其实是分层没同步。防呆（已在跑
+    就拒绝、必须看到心跳才算成功）都在那个函数里，两处行为必然一致。
+    """
+    from upi.agents.daemon import spawn_detached
+    ok, msg = spawn_detached()
+    print(msg)
+    if ok:
+        print("界面：python -m upi ui ｜ 停止：python -m upi stop")
+    return 0 if ok else 1
 
 
 def cmd_stop(_args=None) -> int:
@@ -199,19 +201,26 @@ def cmd_stop(_args=None) -> int:
 
 
 def cmd_ui(_args=None) -> int:
-    """控制台界面：实时进度 + 单键控制（s 开关采样 / p 暂停 / r 立即巡检 /
-    c 取消本轮 / a 看工单 / q 退出）。非终端环境自动退化成一次性快照。"""
+    """控制台界面：唯一日常入口。键位随状态动态给出（菜单里禁用项也会显示并附原因）。
+
+    s 开关采样 / p 暂停继续 / r 立即巡检 / c 取消本轮 / k 改运行配置 /
+    a 看工单 / d 审批工单 / b 界面内起守护 / x 刷新 / q 只退界面 / Q 停守护。
+    非终端环境自动退化成一次性快照打印。
+    """
     from upi.agents.ui import run_loop
     return run_loop()
 
 
 def cmd_resume(args) -> int:
-    """工单批准后续跑：python -m upi resume --run <run_id>
+    """工单批准后续跑（开发通道）：python -m upi dev resume --run <run_id>
 
-    巡检进程停在 awaiting_approval 的轮次，人在终端写 decision.json 之后，
-    用本命令从 fix 断点续跑（不重烧 detect 采样与 diagnose 归因积分）。
-    这是批准回流的**独立入口**——不依赖 AI 助手，也不依赖 m4_drill，
-    补上它才算闭环：巡检发现 → 出工单 → 人批 → 自动修复验证 → 留证。
+    巡检进程停在 awaiting_approval 的轮次，从 fix 断点续跑（不重烧 detect
+    采样与 diagnose 归因积分）。
+
+    ⚠️ 这是开发/诊断通道，不是正式审批路径：正式审批在界面按 d（逐页读完
+      五件套 + 手输页脚校验码）。本命令只读已有的 decision.json，若那份决定
+      是终端手放的（decided_via=external），会打印警告——它绕过了读毕校验，
+      统计里必须能与界面审批区分开。
     """
     import argparse as _ap
     ap = _ap.ArgumentParser(prog="upi resume")
@@ -280,12 +289,18 @@ def cmd_drill(args) -> int:
     return p.returncode
 
 
-_CMDS = {"status": cmd_status, "detect": cmd_detect,
-         "patrol-once": cmd_patrol_once,
-         "start": cmd_start, "stop": cmd_stop,
-         "monitor": cmd_monitor, "ui": cmd_ui,
-         "resume": cmd_resume, "drill": cmd_drill,
-         "report": cmd_report, "stats": cmd_stats}
+# 主表 = 界面 + 生命周期。日常操作全部走 ui（阶段 6 唯一入口收口）。
+_CMDS = {"ui": cmd_ui, "status": cmd_status,
+         "start": cmd_start, "stop": cmd_stop}
+# 开发/诊断通道：`upi dev <name>`。仍在仓库里、仍可复现，只是不再作为
+# 宣传用法（阶段 6 完成判据要求"文档命令表与 _CMDS/_DEV_CMDS 差集为空"，
+# 所以两张表就是帮助文本的唯一事实来源，改表必须同步改 __doc__）。
+# 拉起守护的 `-m upi dev monitor` 字面量只在 daemon.spawn_detached() 出现
+# 一次（cmd_start 与 UI 都调它）。分层时若仍两处各写，漏改一处的表现是
+# "点启动守护报失败"，看起来像守护坏了——分层重构最常见的自伤，已消除。
+_DEV_CMDS = {"monitor": cmd_monitor, "detect": cmd_detect,
+             "patrol-once": cmd_patrol_once, "resume": cmd_resume,
+             "drill": cmd_drill, "report": cmd_report, "stats": cmd_stats}
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -294,11 +309,29 @@ def main(argv: Optional[list] = None) -> int:
         print(__doc__)
         return 0
     cmd, rest = argv[0], argv[1:]
+    if cmd == "dev":
+        if not rest:
+            print(f"用法: python -m upi dev <{'|'.join(sorted(_DEV_CMDS))}>")
+            return 2
+        fn = _DEV_CMDS.get(rest[0])
+        if fn is None:
+            print(f"未知开发子命令: {rest[0]}\n"
+                  f"可用: {', '.join(sorted(_DEV_CMDS))}")
+            return 2
+        return fn(rest[1:])
     fn = _CMDS.get(cmd)
-    if fn is None:
-        print(f"未知命令: {cmd}\n可用: {', '.join(sorted(_CMDS))}")
+    if fn is not None:
+        return fn(rest)
+    if cmd in _DEV_CMDS:
+        # 旧命令名给迁移路径而不是冷冰冰的"未知命令"：分层是本仓库自己的
+        # 变更，按老文档敲命令的人需要知道去哪儿找它。
+        tail = (" " + " ".join(rest)) if rest else ""
+        print(f"该命令已移入开发通道：python -m upi dev {cmd}{tail}")
+        print("日常操作请用界面：python -m upi ui（见 使用说明.md）")
         return 2
-    return fn(rest)
+    print(f"未知命令: {cmd}\n可用: {', '.join(sorted(_CMDS))}"
+          f"（另有 dev 开发通道）")
+    return 2
 
 
 if __name__ == "__main__":

@@ -140,7 +140,17 @@ def main():
     d.busy, d.child_pid = False, None
 
     print("== ③ 续跑判据：历史已跑完的绝不复活 ==")
-    run_dir = TMP / "runs" / "patrol_test1"
+    # 直接测**真实的** Daemon._tickets()：总线已 isolate 到 TMP（E.RUNS 就在
+    # 临时区），不需要另造扫描根。上一版在这里写了个 _tickets_with_root()
+    # **复刻**产品判据来测——那测的是副本：产品里改了规则，复刻不会跟着变，
+    # 断言照样绿，等于把最该被钉住的东西放到没人在看的地方。
+    # 同时删掉 `d._tickets_roots = lambda: ...`：全仓库没有任何代码读这个
+    # 属性（实测 grep 只有这一行赋值），是纯装饰的假接线。
+    run_dir = E.RUNS / "patrol_test1"      # ⚠️ 必须在真实扫描根（E.RUNS）下
+    # 上一版写成 TMP/"runs"/patrol_test1：isolate(TMP) 后 E.RUNS 就是 TMP，
+    # 守护扫的是 TMP/patrol_*，工单却在 TMP/runs/patrol_test1 ⇒ 扫不到，
+    # 四条断言里两条直接变红（"停在待批该续跑"、"无决定⇒open"）。
+    # 红得明确是好事：改判据前它靠复刻函数掩盖，现在路径一错就露出来。
     tk = run_dir / "approvals" / "APR-x"
     tk.mkdir(parents=True)
     (tk / "request.json").write_text("{}", encoding="utf-8")
@@ -151,8 +161,7 @@ def main():
         {"verdict": {"status": "resolved"},
          "records": [{"kind": "fix", "execute": {"status": "applied"}}]}),
         encoding="utf-8")
-    d._tickets_roots = lambda: (TMP / "runs").iterdir()   # 便于覆盖扫描根
-    open_t, go = _tickets_with_root(d, TMP / "runs")
+    open_t, go = d._tickets()
     check("已跑完(有verdict)的批准工单 ⇒ 不续跑", go == [])
 
     # 情形 B：批准过 + 无 verdict + 停在 awaiting_approval ⇒ 该续跑
@@ -160,13 +169,13 @@ def main():
         {"verdict": None,
          "records": [{"kind": "fix", "execute": {"status": "awaiting_approval"}}]}),
         encoding="utf-8")
-    open_t, go = _tickets_with_root(d, TMP / "runs")
+    open_t, go = d._tickets()
     check("停在待批且无判定 ⇒ 进续跑队列",
           len(go) == 1 and go[0][0] == "patrol_test1")
 
     # 情形 C：无决定 ⇒ open
     (tk / "decision.json").unlink()
-    open_t, go = _tickets_with_root(d, TMP / "runs")
+    open_t, go = d._tickets()
     check("无决定的工单 ⇒ open（等，不续跑）",
           len(open_t) == 1 and go == [])
 
@@ -174,8 +183,23 @@ def main():
     (tk / "decision.json").write_text(
         json.dumps({"decision": "approve"}), encoding="utf-8")
     (tk / "resume_done.json").write_text("{}", encoding="utf-8")
-    open_t, go = _tickets_with_root(d, TMP / "runs")
+    open_t, go = d._tickets()
     check("已标记 resume_done ⇒ 幂等不重复续跑", go == [])
+
+    # 判据同源（阶段 6）：自检扫盘与守护调度侧必须给出**同一个**待批队列。
+    # 两处各写规则时，漂移的表现是"自检说有单、守护说没单"，而排查的人
+    # 手里只有这两份输出，对着代码看还都觉得自己对。
+    (tk / "decision.json").unlink()
+    (tk / "resume_done.json").unlink()
+    from upi.agents.daemon import scan_open_tickets
+    open_t, _go = d._tickets()
+    check("自检扫盘与守护 _tickets 判据完全一致",
+          scan_open_tickets() == open_t,
+          f"scan={scan_open_tickets()} daemon={open_t}")
+    shutil.rmtree(run_dir, ignore_errors=True)   # 本用例夹具收尾：
+    # 不删就会有一张"待批工单"留在扫描根里，后续节的 _refresh_status()/
+    # UI 渲染用例看到的 open_tickets 就不是它们自己造的那份了（跨用例串味，
+    # 表现是别处断言莫名变红，排查方向整个错位）。
 
     print("== ④ 进度上报（m1_multiwin report）==")
     import scripts.m1_multiwin as M
@@ -393,38 +417,64 @@ def main():
     check("save_conf 返回落盘结果", E.save_conf({"enabled": False}) is True
           and E.load_conf()["enabled"] is False)
 
+    # ── 配置源递归合并（阶段 5 引入嵌套配置后暴露的真缺陷回归）──
+    # 覆盖层现在会写 episode.heartbeat_max_age_s / budget.max_review_rounds
+    # 这类**子键**。浅合并 {**base, **ov} 时 ov["episode"] 只含一个子键也会
+    # 整个顶掉 base["episode"]，探针路径 jsonl/heartbeat 就此消失 ⇒ 发作通路
+    # 静默变盲区，而且 patrol_episode 的留痕谎报"探针没布置"，引着人去重布
+    # 一套本来好好的探针。旧代码只给 auto_fix 开后门做深合并，补一个漏两个。
+    _b = {"episode": {"jsonl": "a.jsonl", "heartbeat": "hb",
+                      "heartbeat_max_age_s": 12},
+          "auto_fix": {"enabled": True, "live_llm": False,
+                       "fixtures": ["F-CPU-01"]},
+          "fixtures": ["A", "B"], "interval_s": 1800}
+    _o = {"episode": {"heartbeat_max_age_s": 30},
+          "auto_fix": {"live_llm": True},
+          "fixtures": ["C"]}
+    _m = D._deep_merge(_b, _o)
+    check("子字典递归并：改心跳年龄不抹掉探针路径",
+          _m["episode"].get("jsonl") == "a.jsonl"
+          and _m["episode"].get("heartbeat") == "hb"
+          and _m["episode"].get("heartbeat_max_age_s") == 30, str(_m["episode"]))
+    check("auto_fix 同样递归（不给单个键开后门）",
+          _m["auto_fix"] == {"enabled": True, "live_llm": True,
+                             "fixtures": ["F-CPU-01"]}, str(_m["auto_fix"]))
+    check("list 整体替换而非逐项并（避免删了又被加回的中间态）",
+          _m["fixtures"] == ["C"], str(_m["fixtures"]))
+    check("未被覆盖的标量保持打底值", _m["interval_s"] == 1800,
+          str(_m["interval_s"]))
+    _ep, _af = _o["episode"], _o["auto_fix"]
+    check("合并不改动入参（覆盖层对象别处还会用到）",
+          _b["episode"]["heartbeat_max_age_s"] == 12
+          and _ep == {"heartbeat_max_age_s": 30}
+          and _af == {"live_llm": True}, f"{_b['episode']} {_ep} {_af}")
+    check("打底缺子字典 ⇒ 覆盖层照常落位",
+          D._deep_merge({}, {"budget": {"max_review_rounds": 2}})
+          == {"budget": {"max_review_rounds": 2}}, "空打底")
+    check("类型冲突按覆盖层替换（合并自身不许崩）",
+          D._deep_merge({"x": 1}, {"x": {"a": 2}}) == {"x": {"a": 2}}, "冲突")
+
+    # 真链路：走 set 分支改嵌套子键 ⇒ 覆盖层只含改动项，重启合并后
+    # 兄弟键（探针路径）仍在。这条才是要害——上面几条只证明函数本身对。
+    _live = {"interval_s": 1800,
+             "episode": {"jsonl": "runs/_probe/pb_breach.jsonl",
+                         "heartbeat": "runs/_probe/pb_hb.txt",
+                         "heartbeat_max_age_s": 12}}
+    _d = _mk_daemon_state(_live)
+    _d._dispatch_cmd({"cmd": "set", "args": {"episode_heartbeat_max_age_s": 30}})
+    _ov = E.load_conf()
+    check("set 只把改动子键写进覆盖层",
+          _ov.get("episode") == {"heartbeat_max_age_s": 30}, str(_ov))
+    _re = D._deep_merge(_live, _ov)
+    check("重启合并后探针通路仍可用",
+          all(k in _re["episode"] for k in ("jsonl", "heartbeat"))
+          and _re["episode"]["heartbeat_max_age_s"] == 30, str(_re["episode"]))
+    E._p_conf().unlink(missing_ok=True)
+
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n==== 守护层离线测试: {len(PASS)} 通过, {len(FAIL)} 失败"
           + (f" {FAIL}" if FAIL else ""))
     return 1 if FAIL else 0
-
-
-def _tickets_with_root(d, runs_root):
-    """复刻 Daemon._tickets 的判据但用临时根，验证分类逻辑本身。"""
-    open_t, go = [], []
-    for tk in sorted(runs_root.glob("patrol_*/approvals/*")):
-        if not (tk / "request.json").exists():
-            continue
-        dec = tk / "decision.json"
-        if not dec.exists():
-            open_t.append(tk)
-            continue
-        try:
-            approved = json.loads(dec.read_text(encoding="utf-8")).get("decision") == "approve"
-        except (json.JSONDecodeError, OSError):
-            approved = False
-        if not approved or (tk / "resume_done.json").exists():
-            continue
-        run_dir = tk.parents[1]
-        try:
-            st = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        fixes = [r for r in st.get("records", []) if r.get("kind") == "fix"]
-        last = (fixes[-1].get("execute") or {}).get("status") if fixes else None
-        if st.get("verdict") is None and last == "awaiting_approval":
-            go.append((run_dir.name, tk))
-    return open_t, go
 
 
 if __name__ == "__main__":

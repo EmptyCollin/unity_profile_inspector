@@ -377,33 +377,17 @@ def view_latest_ticket() -> str:
 
 
 def start_daemon() -> str:
-    """UI 内拉起守护（阶段 6 会加开机自启，这里先把'起来'这件事收进界面）。
+    """UI 内拉起守护（阶段 6 把"起来"这件事收进界面）。
 
-    复用 cmd_start 的两道防呆：① 已有守护就拒绝（双判据）；② 必须真的
-    看到心跳才报成功——否则会把"还在起进程"报成"启动成功"（假安心）。
+    实现收在 daemon.spawn_detached()，与 cmd_start 共用一份：两处曾各自
+    写完整逻辑，拉起命令的字面量写了两遍，分层改动时漏改一处就会让另一处
+    报"启动失败"。防呆（已在跑就拒绝、必须看到心跳才算成功）都在那边。
+    ⚠️ 不 import upi.__main__ 取常量：用户跑 `python -m upi ui` 时
+    __main__ 正在执行中，从它 import 会撞上半初始化模块（循环导入）。
     """
-    if E.daemon_running()[0]:
-        return "守护已在运行，无需重复启动"
-    import subprocess
-    import sys as _sys
-    # 路径用本模块的 ROOT（ui.py 顶部已定义）。此处曾写成
-    # `from upi.__main__ import ROOT`——那是多余的绕路，而且有真风险：
-    # 用户跑 `python -m upi ui` 时 __main__ 正在执行中，从它 import
-    # 会撞上半初始化模块（循环导入）。取常量不该跨模块绕。
-    log = open(ROOT / "runs" / "daemon_stdout.log", "ab", buffering=0)
-    flags = 0x00000008 | 0x00000200 if _sys.platform == "win32" else 0
-    try:
-        subprocess.Popen([_sys.executable, "-m", "upi", "monitor"],
-                         cwd=str(ROOT), stdout=log, stderr=log,
-                         stdin=subprocess.DEVNULL, creationflags=flags)
-    except OSError as e:
-        return f"启动失败：{e}"
-    for _ in range(12):
-        time.sleep(1)
-        running, st = E.daemon_running()
-        if running:
-            return f"守护已启动 pid={st.get('pid')}"
-    return "!! 12 秒内未见心跳，启动可能失败（查 runs/daemon_stdout.log）"
+    from upi.agents.daemon import spawn_detached
+    _ok, msg = spawn_detached()
+    return msg
 
 
 # 可编辑的运行配置：与守护 _dispatch_cmd 的 set 分支**逐键对应**。
