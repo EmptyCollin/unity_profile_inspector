@@ -46,9 +46,20 @@ def cmd_status(_args=None) -> int:
     print(f"  Unity CLI      : {'可用（' + u + '）' if u else '缺失——先装 CLI'}")
     ok = ok and bool(u)
 
-    proj = ROOT / "fixtures" / "upi-fixture"
-    print(f"  夹具工程        : {'存在' if proj.is_dir() else '缺失'}")
-    ok = ok and proj.is_dir()
+    # ⚠️ 档案只解析一次。上一版在 except 分支里又调了一次 active_profile()
+    #   ——档案不可用时那次调用同样抛错，自检命令自己崩掉（本该"报缺失"变成
+    #   "报不出来"），并且 proj=None 时 .is_dir() 还会 AttributeError。
+    #   自检是排查入口，它自己不许有任何一种"读不出来"的形态。
+    from upi.config.project_profile import active_profile, ProfileError
+    try:
+        _pf = active_profile()
+        _prof_name, proj = _pf.profile_id, _pf.abs_project
+        print(f"  工程档案        : {_prof_name}")
+        print(f"  夹具工程        : {'存在' if proj.is_dir() else '缺失（档案指向的目录不在）'}")
+        ok = ok and proj.is_dir()
+    except ProfileError as e:          # 档案坏了：如实报，绝不拿内置路径凑"存在"
+        print(f"  工程档案        : 不可用 —— {str(e)[:160]}")
+        ok = False
 
     inst = None
     try:

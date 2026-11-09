@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from upi.core import events as E  # noqa: E402
+from upi.config.project_profile import active_profile  # noqa: E402
 from upi.config.runtime_spec import SPEC, spec_for  # noqa: E402
 
 # 进度文件路径**每次现算**（与总线其余路径同纪律）：写成模块常量时，
@@ -183,8 +184,32 @@ def load_runtime_conf() -> dict:
         E.emit("config_incomplete", reason="enabled 未在任何配置源声明",
                action="sampling_disabled_fail_closed")
     merged["enabled"] = bool(merged.get("enabled", False))
-    merged.setdefault("fixtures", ["CLEAN", "F-CPU-01", "F-GPU-01",
-                                   "F-ANIM-01", "F-LOAD-01"])
+    # 阶段 7：缺省清单来自 profile（对照 + 被测机制）。
+    # 优先级是"配置文件显式声明 > 档案缺省"（用户写的意图优先，与 enabled
+    # 同规则）。⚠️ 判"有没有显式声明"不能用 `"fixtures" in merged`：
+    #   MonitorConfig.fixtures 有 default_factory=list，model_dump() **永远**
+    #   会带一个 fixtures 键（没写就是 []）——那样档案缺省永远不生效，
+    #   而且"用户没写"会被当成"清单与档案不一致"告警，把没配错的东西
+    #   报成配错了。判据只能是"值非空"。
+    _pf = active_profile()
+    _prof_fixtures = _pf.fixture_universe()
+    _cfg_fixtures = [f for f in (merged.get("fixtures") or []) if f]
+    if not _cfg_fixtures:
+        merged["fixtures"] = _prof_fixtures
+    else:
+        merged["fixtures"] = _cfg_fixtures
+        # 换工程时 yaml 里遗留的旧清单会让守护去采新工程里根本不存在的
+        # 机制——表现为每轮大面积采集失败或静默少采，而排查的人第一反应
+        # 是"档案配错了"，方向整个错位。所以不一致必须当场说出来。
+        _extra = [f for f in _cfg_fixtures if f not in _prof_fixtures]
+        _absent = [f for f in _prof_fixtures if f not in _cfg_fixtures]
+        if _extra or _absent:
+            degraded.append(f"fixtures_mismatch(in={_extra},out={_absent})")
+            E.emit("profile_fixtures_mismatch", profile=_pf.profile_id,
+                   configured=_cfg_fixtures, from_profile=_prof_fixtures,
+                   extra=_extra, not_in_profile=_absent,
+                   note="配置文件显式声明优先于档案；若这是换工程留下的旧清单，"
+                        "请删掉 pipeline.monitor.fixtures 让它回落到档案")
     if degraded:
         merged.setdefault("degraded", []).extend(degraded)
     return merged

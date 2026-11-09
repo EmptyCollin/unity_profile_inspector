@@ -47,6 +47,8 @@ def _threshold(field: str) -> Optional[tuple[str, float]]:
     return None
 
 
+from upi.config.project_profile import active_profile
+
 ROOT = AG.ROOT
 
 
@@ -55,7 +57,10 @@ def fmt_rate(v) -> str:
     return "无观测" if v is None else f"{v:.3f}"
 
 
-FIXTURE_SPEC = ROOT / "fixtures" / "upi-fixture" / "Assets" / "UpiFixtures" / "Runtime" / "fixture_spec.json"
+# 阶段 7：路径来自 profile（工程侧数据的位置），但**保持模块属性形态**——
+# scripts/check_fixture_split.py 靠覆盖 CL.FIXTURE_SPEC 把体检表整体隔离到
+# 临时目录（那里有注释明说）。改成函数就没这个入口了，所以这里在导入时取一次值。
+FIXTURE_SPEC = active_profile().fixture_spec
 
 
 CLEAN_ID = "CLEAN"

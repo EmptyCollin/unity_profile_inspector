@@ -23,6 +23,7 @@ from typing import Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from upi.config.project_profile import active_profile
 from upi.core import events as E
 from upi.tooling.trace import Tracer, environment_fingerprint
 
@@ -210,7 +211,7 @@ class Runner:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.tracer = Tracer(run_id, root=str(ROOT / "runs"), channel="dev",
                              env_fingerprint=environment_fingerprint(
-                                 str(ROOT / "fixtures" / "upi-fixture")))
+                                 str(active_profile().abs_project)))
         self.budget = {"max_issues": 1, "max_review_rounds": 3,
                        "max_attempts_per_issue": 3, "wallclock_s": 2400,
                        "max_tokens": 60_000, **(budget or {})}
@@ -218,7 +219,7 @@ class Runner:
 
     def initial_state(self) -> RunState:
         return {"run_id": self.dir.name, "fixture": self.fixture,
-                "quality_tier": "urp-balanced", "budget": self.budget,
+                "quality_tier": active_profile().quality_tier, "budget": self.budget,
                 "spent": {"wallclock_s": 0.0, "tokens": 0}, "findings": [],
                 "issue": None, "hypotheses": [], "edit_plan": None,
                 "snapshot": None, "verdict": None, "review_decision": None,

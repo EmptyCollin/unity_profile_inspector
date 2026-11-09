@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 from upi.agents import fixer
 from upi.agents.verify import (gc_floor_measure, resample, verdict_from_bundles)
+from upi.config.project_profile import active_profile
 from upi.config.settings import load_config
 from upi.core.approval import ApprovalStore, build_request
 from upi.core.candidate_retrieval import retrieve_candidates
@@ -32,9 +33,44 @@ from upi.core import events as E
 from upi.core.models import EditPlan, Hypothesis, Issue
 from upi.tooling import snapshot as snapmod
 
-PROJECT = ROOT / "fixtures" / "upi-fixture"
-SCENE = PROJECT / "Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity"
-CSFILE = "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs"
+# ───────────────── 工程上下文（阶段 7：由 ProjectProfile 注入）─────────────────
+# ⚠️ 这里**不在模块级取快照**，而是每次调用现取 active_profile()：
+#   写成 PROJECT = active_profile().abs_project 这类模块常量，值在导入瞬间
+#   就冻结了，同一进程里 use_profile() 换工程后代码仍读旧路径——
+#   "不改代码即可切换工程"（阶段 7 完成判据）会假通过：测试只要先 import
+#   再切档案，拿到的还是上一个工程的路径，却看不出问题。
+#   内置档案的派生值与旧字面量**逐字一致**，所以既有回归不变（验收线有断言钉）。
+def _prof():
+    return active_profile()
+
+
+def _project() -> Path:
+    return _prof().abs_project
+
+
+def _scene_for(subject: str) -> Optional[Path]:
+    """按机制取场景路径（回滚/重采要的是**被改的那个机制**的场景）。
+
+    与旧实现的区别要说清：旧代码 SCENE 写死 Scene_F-CPU-01.unity，
+    而 fix/verify 实际会处理 detection 出的任意夹具。按 subject 取才正确——
+    只有 F-CPU-01 有修复模板，所以现状下二者取值相同（回归不变），
+    将来多个机制有模板时才显出差别。
+    """
+    p = _prof()
+    return p.scene_of(subject) if subject else None
+
+
+def _ctx(st: dict) -> tuple[Path, Optional[Path]]:
+    """从 state 取 (工程根, 被改机制的场景)。
+
+    机制优先取 issue.fixture（真正在修的那个），取不到才兜底 profile.fix_subject：
+    走到兜底说明确实没有上下文，此时用"有模板的那个机制"比 None 更能让
+    rollback 复位到可解释的场景。兜底也拿不到 ⇒ 返回 None，由 rollback
+    自行处理（不会静默改错工程）。
+    """
+    iss = st.get("issue") or {}
+    subject = iss.get("fixture") or _prof().fix_subject
+    return _project(), _scene_for(subject)
 
 
 def _why_not_auto(plan: EditPlan) -> str:
@@ -51,28 +87,87 @@ def _why_not_auto(plan: EditPlan) -> str:
 # 均 whitelisted / side_effect=none）。diff 模板与彩排同源，逐条对应证据。
 # ⚠️ find 段取自**钉定的缺陷态参照**，不是工作区夹具：第三轮真跑走保留通路后
 # 工作区已是修复态，若从现场切片，find 会与文件现存内容逐字相同——apply 报
-# "成功"但实为原地空写（静默假成功，比报错更危险）。参照由 git 历史版本固化，
-# 内容校验不过就直接拒绝导入（宁可装不上，不可假修复）。
-DEFECT_REF = Path(__file__).resolve().parent / "_refs" / "F_CPU_01_defect.cs"
-_T = DEFECT_REF.read_text(encoding="utf-8").split("\n")
-_lines = lambda a, b: "\n".join(_T[a - 1:b])
-assert "var ready = new List<SkillRuntime>();" in "\n".join(_T), \
-    "缺陷态参照缺少缺陷特征：diff 模板会退化成空写，已拒绝装载"
+# "成功"但实为原地空写（静默假成功，比报错更危险）。参照由 git 历史版本固化。
+class TemplateUnavailable(RuntimeError):
+    """修复模板构造不出来（参照缺失/内容不合格/档案未声明修复能力）。
+
+    为什么惰性 + 显式异常（阶段 7 的关键解耦）：这段原来是**模块导入期**
+    读盘 + `assert`——一枚参照文件缺失或内容不对，`upi.agents.nodes` 直接
+    ImportError，连带 patrol / daemon / CLI / 检测链全部起不来，而那几条链
+    压根不用模板。装载期零读盘之后，读盘失败只拦"出修复方案"这一条链，
+    plan 节点据此走 needs_human 并如实带出成因（不冒充"假设已穷尽"）。
+    """
+
+
+def _playbook_map() -> dict[str, tuple]:
+    """按需构造 anchor → (playbook_id, diffs, invariants)，每次现读参照。
+
+    不缓存：一个 run 里最多调几次（按候选假设循环），读一枚百来行的参照
+    文件成本可忽略；而缓存会跨 profile 切换留下脏值——测试里 use_profile()
+    之后拿到的还是上一个工程的模板，那是更难查的错。
+    """
+    prof = _prof()
+    csfile = prof.subject_file
+    if not prof.fix_subject:
+        raise TemplateUnavailable(
+            f"档案 {prof.profile_id} 未声明 fix_subject：本工程当前只报不改"
+            "（shadow_only），无修复模板")
+    if not csfile:
+        raise TemplateUnavailable(
+            f"档案 {prof.profile_id} 未声明 subject_file：无修复目标文件")
+    ref = prof.defect_ref(prof.fix_subject)
+    try:
+        text = ref.read_text(encoding="utf-8")
+    except OSError as e:
+        raise TemplateUnavailable(
+            f"缺陷态参照读不出来：{ref}（{type(e).__name__}: {str(e)[:100]}）") from None
+    sig = prof.defect_signature
+    if sig and sig not in text:
+        # 宁可不改，不可空写：参照里没有缺陷特征 ⇒ 它多半已是修复态，
+        # 用它切出来的 find 段会与文件现状逐字相同，apply 报"成功"而实际
+        # 什么都没改。这种静默假成功比直接报错危险得多。
+        raise TemplateUnavailable(
+            f"缺陷态参照 {ref.name} 缺少缺陷特征串（{sig[:40]}…）："
+            "diff 会退化成原地空写，已拒绝出方案")
+    t = text.split("\n")
+    ln = lambda a, b: "\n".join(t[a - 1:b])          # 1-based 闭区间
+    d1 = {"file": csfile, "find": ln(*_TPL_D1), "replace": _NEW_AWAKE,
+          "expect_count": 1, "_why": _WHY_D1}
+    d2 = {"file": csfile, "find": ln(*_TPL_D2), "replace": _NEW_UPDATE,
+          "expect_count": 1, "_why": _WHY_D2}
+    # 四个 CPU 机制锚点共享同一套 full-reuse 模板（夹具就是这四类叠加）
+    return {a: (PB, [d1, d2], _INVS) for a in _ANCHORS}
 
 
 def _plan_for(anchor: str) -> Optional[EditPlan]:
-    """把选定根因机制映射到 EditPlan（找不到模板 = 不硬编，交上层 needs_human）。"""
-    tpl = PLAYBOOK_DIFFS.get(anchor)
+    """把选定根因机制映射到 EditPlan（找不到模板 = 不硬编，交上层 needs_human）。
+
+    ⚠️ TemplateUnavailable **原样上抛**，不在这里吞成 None：
+      None 的含义是"这个机制没有对应模板"（正常的 needs_human 路径，
+      plan 节点会说"候选假设已穷尽"）；而"参照文件坏了/缺了"是完全不同的
+      成因——被吞掉之后，运维看到"假设已穷尽"会去改归因，实际要修的是参照文件。
+      成因不可区分 = 排查方向整个错位（本轮已多次撞同类）。
+    """
+    tpl = _playbook_map().get(anchor)
     if tpl is None:
         return None
     pid, diffs, invs = tpl
     return EditPlan(playbook_id=pid, diffs=diffs, invariants_assert=invs,
-                    side_effect="none", touched_assets=[CSFILE],
+                    # touched_assets 从 diffs 自身派生（与模板同源）：
+                    # 原来另取一份模块常量，profile 切换时两处可能不同步
+                    # ——"改的是 A 文件、申报影响的是 B 文件"会让权限判定
+                    # 与工单第 2 件套都对不上。
+                    side_effect="none", touched_assets=[d["file"] for d in diffs],
                     permission_tier="blocked")   # 夹具脚本恒 blocked（§3 维度一）
 
 
 # 复用彩排的三段 diff（Awake 预生成 + Update 分配清零），按主锚点归一个 playbook
 PB = "PB-FULL-REUSE"
+# diff 的"为什么改这一处"说明。⚠️ 它是**判据数据**不只是文案：_anchor_of 用
+# _WHY_D1 做第二个匹配判据（root_cause 命中这句 ⇒ 归到该模板），所以文本
+# 一改，归因映射就跟着变。抽成常量让两处共用一份，不在两处各写一遍。
+_WHY_D1 = "缓冲/组件/键 预生成（Awake 扩展）"
+_WHY_D2 = "Update 热路径分配清零"
 _NEW_AWAKE = '''        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();
 
         // 修复（PB-FULL-REUSE）：缓存 + 预生成。语义等价前提——state/level
@@ -113,19 +208,18 @@ _NEW_UPDATE = '''            // 每帧分配清零：
                 _reusedCooldown[i] = Time.time + 0.1f * i;
             _cooldownMap = _reusedCooldown;'''
 
-_D1 = {"file": CSFILE, "find": _lines(21, 27), "replace": _NEW_AWAKE,
-       "expect_count": 1, "_why": "缓冲/组件/键 预生成（Awake 扩展）"}
-_D2 = {"file": CSFILE, "find": _lines(31, 57), "replace": _NEW_UPDATE,
-       "expect_count": 1, "_why": "Update 热路径分配清零"}
-
-# 四个 CPU 机制锚点共享同一套 full-reuse 模板（夹具就是这四类叠加）
+# 模板的行段与锚点归属。刻意**不**在导入期切 find 段（见 _playbook_map 说明）。
+_TPL_D1 = (21, 27)     # 字段区 + Awake（预生成缓冲/组件/键）
+_TPL_D2 = (31, 57)     # Update 热路径分配段
 _INVS = ["state/level 仅 Awake 赋值（静态核对）",
          "map[key]=level;score=map[key] ⇒ score=level 恒等",
          "_cooldownMap 声明保留（对外语义不破坏），改指向复用缓冲",
          "P2 语义断言基建 pending（M7）——本条如实标注"]
-PLAYBOOK_DIFFS = {a: (PB, [_D1, _D2], _INVS) for a in (
-    "per_frame_heap_alloc_in_hot_path", "linq_enumerator_closure_per_frame",
-    "repeated_getcomponent_in_update", "enum_tostring_concat_per_frame")}
+# 四个 CPU 机制锚点共享同一套 full-reuse 模板（夹具就是这四类叠加）
+_ANCHORS = ("per_frame_heap_alloc_in_hot_path",
+            "linq_enumerator_closure_per_frame",
+            "repeated_getcomponent_in_update",
+            "enum_tostring_concat_per_frame")
 
 
 def _run_detect():
@@ -239,7 +333,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         note = approval_note or ""
         fp = "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0"
         stamp = time.strftime("%H%M%S")
-        snap = snapmod.snapshot(f"m4-{stamp}", PROJECT, SCENE, fp, root=ROOT)
+        proj, scene = _ctx(st)
+        # root 一律取 profile.git_root：diff 的 file、快照脏区、apply 落盘
+        # 三者共用同一个基准，才不会出现"改的是 A、申报的是 B"。
+        snap = snapmod.snapshot(f"m4-{stamp}", proj, scene, fp,
+                                root=_prof().git_root)
 
         # ── 先报后批（M4 / I3：修改权限只来自权限矩阵，不来自模型自评）──
         # 顺序讲究：快照先建（秒级、无副作用，且工单第 4 件套要写真实 tag），
@@ -292,8 +390,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         except Exception as e:  # noqa: BLE001 — 缺侧即盲区，fail-open 到未评估
             fb_err = str(e)[:160]
 
-        rep = fixer.execute(ep, snap, project_path=PROJECT, scene_path=SCENE,
-                            root=ROOT, human_approved=bool(note.strip()),
+        rep = fixer.execute(ep, snap, project_path=proj, scene_path=scene,
+                            root=_prof().git_root, human_approved=bool(note.strip()),
                             approval_note=note)
         rec = {"kind": "fix", "ts": stamp, "git_ref": snap.git_ref,
                "root_cause": top["root_cause"],
@@ -345,7 +443,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         rec = {"kind": "review", "round": n_review, "verdict_status": status}
         if status == "regressed":
             # 引入新问题 → 撤回重评（回滚交 git，review 不自己改文件）
-            rb = snapmod.rollback(_snap_from(st), PROJECT, SCENE)
+            _p, _s = _ctx(st)
+            rb = snapmod.rollback(_snap_from(st), _p, _s)
             rec["rollback"] = rb
             decision = "rollback_and_replan" if n_review < st["budget"]["max_review_rounds"] \
                 else "escalate_human"
@@ -416,7 +515,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         recs = st.get("records", [])
         if _needs_final_rollback(recs, final.get("verdict_status")):
             try:
-                rb = snapmod.rollback(_snap_from(st), PROJECT, SCENE)
+                _p, _s = _ctx(st)
+                rb = snapmod.rollback(_snap_from(st), _p, _s)
                 final["final_rollback"] = rb
             except Exception as e:  # noqa: BLE001 — 回滚失败必须可见，不静默
                 final["final_rollback"] = {"error": str(e)[:200]}
@@ -472,10 +572,21 @@ def _offline_hypotheses(cands, issue) -> list:
 
 
 def _anchor_of(root_cause: str) -> str:
-    for a in PLAYBOOK_DIFFS:
-        if a in root_cause or root_cause in PLAYBOOK_DIFFS[a][1][0].get("_why", ""):
+    """root_cause 文本 → 模板锚点名。
+
+    ⚠️ 刻意保持**零读盘**：它只是词法映射，不该把"参照文件坏了"这件事
+      伪装成归因问题。_why 文本是模块常量（与 _playbook_map 里用的同源），
+      原来从 PLAYBOOK_DIFFS[a][1][0]["_why"] 取，本质仍是这几个固定串。
+    """
+    for a in _ANCHORS:
+        # 两个判据缺一不可（与原实现等价）：
+        #   a in root_cause        —— 假设文本里直接带锚点名
+        #   root_cause in _WHY_D1  —— 假设文本是模板说明里的那句话
+        # 第二项与 a 无关，所以命中时必然返回首个锚点；漏掉它会让这类
+        # 假设白跑一趟，落进兜底分支（结果看似一样，但"为什么命中"变了）。
+        if a in root_cause or root_cause in _WHY_D1:
             return a
-    return "per_frame_heap_alloc_in_hot_path"   # CPU 四类共享模板，兜底取首个
+    return _ANCHORS[0]      # CPU 四类共享模板，兜底取首个
 
 
 def _pattern_id(issue_d: dict, top: dict) -> str:

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from scripts.m1_detect import apply_calibration, latest_calibration, stats_from_windows  # noqa: E402
+from upi.config.project_profile import active_profile  # noqa: E402
 from upi.core.conflicts import run_pair  # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY  # noqa: E402
 from upi.core.models import Conflict, GuardMetric, Perception, Verdict  # noqa: E402
@@ -70,7 +71,7 @@ def instrument_state() -> dict:
     vals = []
     for _ in range(3):
         r = run_unity(["command", "diagnostics get_performance",
-                       "--project-path", str(ROOT / "fixtures" / "upi-fixture")],
+                       "--project-path", str(active_profile().abs_project)],
                       timeout_s=60)
         ft = ((r.data or {}).get("result") or {}).get("frameTiming") or {}
         if ft.get("cpuFrameTimeMs") is not None:
@@ -127,12 +128,13 @@ def gc_floor_measure(fixture: str, polls: int = 10, timeout_s: int = 420) -> dic
     调用方须保证夹具处于待验状态；本函数只管测量不动代码。"""
     import statistics as stx
     from upi.tooling.unity_cli import run_unity
-    proj = str(ROOT / "fixtures" / "upi-fixture")
+    _p = active_profile()
+    proj = str(_p.abs_project)          # 阶段 7：工程路径来自 profile
     t0 = time.time()
     run_unity(["command", "editor.playmode stop", "--project-path", proj], timeout_s=60)
     time.sleep(3)
     r = run_unity(["command", "scene open", "--project-path", proj,
-                   "--path", f"Assets/UpiFixtures/Scenes/Scene_{fixture}.unity"],
+                   "--path", _p.scene_rel(fixture)],
                   timeout_s=200)
     if not r.success:
         raise RuntimeError(f"地板复核开场景失败: {r.errors[:1]}")

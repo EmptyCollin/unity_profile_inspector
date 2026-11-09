@@ -24,6 +24,12 @@ sys.path.insert(0, str(ROOT))
 
 import upi.agents.nodes as N          # noqa: E402
 
+# 档案接口在模块顶部导入：setup_mocks 里登记临时工程档案、main 收尾注销。
+# 上一版只在 setup_mocks 内局部 import，于是 main 里的 unregister_profile()
+# 直接 NameError——断言全绿但退出码非零，"测试通过"与"测试可用"是两件事。
+from upi.config.project_profile import (ProjectProfile, register_profile,  # noqa: E402
+                                        unregister_profile)
+
 PASS, FAIL = [], []
 CALLS = []
 TMP = ROOT / "runs" / "_m4w_tmp"
@@ -49,13 +55,28 @@ def setup_mocks():
     # 候选检索必须看到**缺陷态**代码；保留通路跑完后工作区夹具是修复态，
     # 真实检索会返回零候选（那不是 bug，是夹具已被修好）。故把检索根指向
     # 缺陷态参照副本，使本测试与仓库当前状态解耦。
-    from upi.core import candidate_retrieval as CR
     fx = TMP / "fx" / "F_CPU_01"
     fx.mkdir(parents=True, exist_ok=True)
     (fx / "CombatSkillManager.cs").write_bytes(
         (ROOT / "upi" / "agents" / "_refs" / "F_CPU_01_defect.cs").read_bytes())
-    CR.FIXTURE_ASSETS = TMP / "fx"
-    CR.ROOT = TMP
+    # ⚠️ 阶段 7 换了注入方式。原来写 `CR.FIXTURE_ASSETS = TMP/"fx"`，
+    #   profile 化之后那个模块常量已不存在——赋值只会"设一个没人读的属性"，
+    #   静默无效，表现为候选检索返回空、端到端三条断言变红，
+    #   看着像产品坏了其实是测试写法过期（地基改动让上层写法悄悄失效）。
+    #   正确做法：登记一个 project_path 指向临时区的档案，测试与真实接入
+    #   （UPI_PROFILE / projects/*.json）走同一入口，不会出现
+    #   "测试能注入、生产注入不了"的假通过。
+    #   assets_root="fx" ⇒ subject_asset_dir("F-CPU-01") 正好等于上面的 fx/。
+    register_profile(ProjectProfile(
+        profile_id="m4w-tmp", project_path=TMP, assets_root="fx",
+        subjects=["F-CPU-01"], clean_subject="CLEAN",
+        subject_file=("fixtures/upi-fixture/Assets/UpiFixtures"
+                      "/F_CPU_01/CombatSkillManager.cs"),
+        fix_subject="F-CPU-01",
+        defect_signature="var ready = new List<SkillRuntime>();"))
+    # 原来这里还有 `CR.ROOT = TMP`：profile 化之后候选锚点的基准改成档案
+    # git_root，那个模块常量已无消费者——留着就是"设一个没人读的属性"
+    # （静默无效，还会误导后人以为改它能换基准）。已删。
     (DET / "detection.json").write_text(json.dumps({
         "results": {"F-CPU-01": {
             "verdict": "detected", "metric": "gc_alloc_per_frame",
@@ -257,6 +278,7 @@ def main():
     print("边界声明：本测试验证节点逻辑与时序，不是判定结论——resample/floor/"
           "verdict 全为替身；判定语义由 test_memory_guard/test_m3_gates 覆盖，"
           "图拓扑由 test_orchestrator 覆盖。")
+    unregister_profile("m4w-tmp")   # 撤掉临时工程档案（见 setup_mocks）
     shutil.rmtree(TMP, ignore_errors=True)
     return 1 if FAIL else 0
 

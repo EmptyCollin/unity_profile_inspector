@@ -25,13 +25,28 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from upi.config.project_profile import active_profile
 from upi.core import events as E
 from upi.core.models import EditPlan
 from upi.tooling.snapshot import Snapshot, pre_execute_check, rollback
 from upi.tooling.unity_cli import run_unity
 
 ROOT = Path(__file__).resolve().parents[2]
-PROJECT = ROOT / "fixtures" / "upi-fixture"
+# 默认工程路径来自 profile（阶段 7）。project_path/scene_path 仍是可注入参数，
+# 单测继续用临时目录跑，不受这里影响。
+PROJECT = active_profile().abs_project
+
+
+def _default_scene() -> Optional[Path]:
+    """缺省回滚场景：取档案里有修复模板的那个机制。
+
+    为什么用 fix_subject 而不是第一个夹具：rollback 的场景复位是给"刚改过
+    代码的机制"用的，而一个 profile 当前只带一套修复模板（fix_subject 就是
+    它的归属声明）。没声明 ⇒ 返回 None，由调用方（rollback）按无场景处理，
+    不在这里编一个场景名出来。
+    """
+    prof = active_profile()
+    return prof.scene_of(prof.fix_subject) if prof.fix_subject else None
 
 
 class FixError(RuntimeError):
@@ -126,7 +141,10 @@ def execute(plan: EditPlan, snap: Optional[Snapshot], *,
             human_approved: bool = False, approval_note: str = "") -> dict:
     """一个 attempt 的修复执行。返回执行报告（含回滚信息），永不抛半路异常。"""
     project_path = project_path or PROJECT
-    scene_path = scene_path or (project_path / "Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity")
+    # 缺省场景由 profile 派生（阶段 7）：仅在调用方没传 scene_path 时兜底，
+    # 用途是编译失败后的场景复位（rollback）。显式传参不受影响，
+    # 单测继续用临时目录跑。
+    scene_path = scene_path or _default_scene()
     rep = {"playbook_id": plan.playbook_id, "tier": plan.permission_tier,
            "status": "unknown"}
 

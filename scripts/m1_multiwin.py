@@ -37,8 +37,14 @@ from upi.core import events as EV        # noqa: E402  取消通道（父进程�
 # 完全不同（前者已退 Play、卸了回调；后者编辑器还停在 Play 态）。
 RC_CANCELLED = 3
 
-PROJECT = ROOT / "fixtures" / "upi-fixture"
-SCENES_DIR = PROJECT / "Assets/UpiFixtures/Scenes"
+# 阶段 7：工程根/场景目录来自 profile。本脚本是**子进程**（由 verify.resample
+# 或标定链以 --fixtures/--windows 拉起），profile 经环境变量 UPI_PROFILE 传入，
+# 在进程启动时就固定，因此模块级快照不会造成"同进程换档案读到旧值"的问题。
+from upi.config.project_profile import active_profile   # noqa: E402
+
+_PROF = active_profile()
+PROJECT = _PROF.abs_project
+SCENES_DIR = PROJECT / _PROF.scenes_dir
 PROBE = ROOT / "runs/_probe"
 CALDIR = ROOT / "calibration"
 FULL_SESSION = False
@@ -226,10 +232,10 @@ def one_window(fixture: str, nonce: str) -> dict | None:
 
 
 def sample_scene(fixture: str, windows: int) -> dict:
-    scene = SCENES_DIR / f"Scene_{fixture}.unity"
-    print(f"  打开 Scene_{fixture}")
+    scene = _PROF.scene_of(fixture)
+    print(f"  打开 {scene.name}")
     report("open_scene", fixture, note=scene.name)
-    cmd("scene open", "--path", f"Assets/UpiFixtures/Scenes/Scene_{fixture}.unity")
+    cmd("scene open", "--path", _PROF.scene_rel(fixture))
     time.sleep(5)
     if not wait_ready():
         return {"error": "编辑器未就绪"}
