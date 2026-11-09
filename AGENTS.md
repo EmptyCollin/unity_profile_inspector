@@ -1,8 +1,8 @@
 # AGENTS.md — AI 性能优化管线 · Agent 角色契约
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
-> 适用范围：`upi/`（管线代码）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`llm_config.yaml`（模型服务配置，见 DESIGN §2.3）。
-> 最后更新：2026-11-08（v0.7，范式重排并入（DESIGN v0.12 / DP-1，D12~D17 拍板）：新增 G18 finding 等级归属、G19 逐帧源与归因源、G20 盲区显式声明三条门禁；Detect 输出扩为 `Finding[]`，Verify 顺带跑矛盾规则表；采样三问拆分（水位 A / 发作探针+A4 / 潜在 C+）。承前 v0.6：I9 幂等判据=心跳文件新鲜度；采样协议秒级口径；G17 静止分布门禁）
+> 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护与 `agents/ui.py` 控制台）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
+> 最后更新：2026-11-09（v0.8，真机全链实测后的三处判据修正：**G11 预算护栏改节点感知**（`attempts` 只拦 fix 入口、计数点在 verify 产出判定处，作废崩溃不烧配额）；**§1.5 守护对比分两支**（时间/渲染走窗口中位，记忆体走两侧各自 fresh post-GC，不响应 GC 者记未评估盲区）；**G20 盲区清单补第四项**（记忆体守护实际只剩 `monoUsedBytes` 一项受保护）。同时纳入独立运行形态：常驻守护 + 控制台 UI + 手动开关采样 + 优雅停止（stop 走命令通道而非硬杀）。承前 v0.7：G18/G19/G20 三条门禁、Detect 输出扩为 `Finding[]`、采样三问拆分）
 
 ---
 
@@ -77,6 +77,9 @@
   - 必须对比**全量守护指标**，不只是当初的异常指标（防"按下葫芦浮起瓢"）。
   - 改善量必须超过 `k·σ`（k 默认 3），否则判 `not_significant` = 视为未解决 → 触发回滚。
   - 守护指标劣化超过 `guard_tolerance`（默认 1%）→ 无条件 `rollback`，硬规则优先，不走 LLM 判断。
+  - **守护对比分两支（真机实测确立，v0.8）**：
+    - 时间/渲染计数类（`cpuFrameTimeMs`、`drawCalls`…）：用 bundle **窗口中位**对比，走上面 1% 容差。
+    - 记忆体类（`monoUsedBytes` 等）：窗口值量的是"此刻未回收多少"而非净占用，回收时点一变即失真（实测 7.82MB 窗口 Δ 里净常驻只 1.94MB）。⇒ 必须两侧**各自**采 fresh（进 Play→强制 GC→再读），只用 `post_gc` 对比；任一侧缺 ⇒ 记 `value_source=fresh_missing/gc_unresponsive` = **未评估盲区**，既不判劣化也不判清白，进报告单列（G20）。**禁止拿被污染或不响应的窗口值冒充守护结论。**
   - 感知门禁失败 → 无条件 `rollback` 并转人工。
   - 矛盾规则违反（如 drawCalls 升 + triangles 降 + batches 不变 = 合批修复未生效反而碎描）→ 记 `conflicts[]` 进 Review，不自行解释成因。
 - **不可以做**：修改代码，批准自己的结论。
@@ -249,7 +252,7 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G8 **编译门禁前置于采样**：EditPlan 落地后先 `recompile` 并过滤 `error CS####`；编译失败 → attempt 直接失败并回滚，**不消耗一整轮采样成本**。
 - G9 **回滚不得依赖 Editor 可达**：改出编译错误时 Editor 会进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上。回滚路径只允许依赖 git；回滚后再重启 Editor 验证。Detect/Verify 遇到"连不上"必须先跑 `unity pipeline list` 区分 Safe Mode 与真的没有实例，禁止把"连不上"当作"没有编辑器"进而手改场景 YAML。
 - G10 **停止编辑器只按 PID**：禁止按名字批量杀（`taskkill /IM Unity.exe` 等），会连带关闭其他项目的未保存工作。
-- G11 **预算护栏**：单 Issue 最大 attempt 数、最大采样轮数、墙钟时长、LLM token 上限，任一超限 → `needs_human`，不允许继续消耗积分打转。
+- G11 **预算护栏**：单 Issue 最大 attempt 数、最大采样轮数、墙钟时长、LLM token 上限，任一超限 → `needs_human`，不允许继续消耗积分打转。**节点感知（真机续跑实测修正）**：`attempts` 只在 fix 入口判——它管"要不要开始下一次修复尝试"，不该拦本次尝试的 verify（旧版不分节点，attempts 满后 verify 被拦，修复已落地、改前基线已花钱采好，唯独 after 采样+判定被拦 = 整轮 attempt 白烧还得靠出口回滚擦脏写）；`review_rounds` 只在 review 入口判（G6 配额）；墙钟/token 为全局消耗，各入口都拦。**attempt 计数点=verify 产出判定，不在 fix 落地时计**——基础设施崩溃（仪器漂移/编辑器消失）导致无判定的作废尝试不烧配额，否则环境抖一下就把重试机会吃光（实测死锁：resume 被 `budget_exceeded(attempts)` 永久拦停）。
 - G12 **所有数据模型一律 pydantic v2**：Python 3.14 上 pydantic v1 模型无法运行（LangChain 上游已知问题），引入携带 v1 的依赖视为阻塞项。
 - G13 **无 trace 不入统计**：任何出现在报告/控制台里的数字，必须能定位到产生它的 `TraceSpan` 与证据文件；缺 span 的 run 标 `untraced` 并从趋势中剔除。统计开销本身受 `max_probe_overhead_pct` 约束，超限时该 bundle 标 `instrument_distorted`。
 - G14 **过拟合体检表是上线前置条件**：阈值、权重、pattern 权限的任何变更，必须先由 §7 控制台算出 DESIGN §8.7 六项数值并全部达标；缺项或不达标 → 变更 `blocked`，不允许提交人工批准。
@@ -257,7 +260,7 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G17 **静止分布门禁**：重复采样的分布退化时禁用相对判据——`unique/n < 0.1` **或 `MAD == 0`**（小样本下 n=4 时比例判据永不触发，`mad==0` 分支即为此补，实测 drawCalls 类离散整数指标必然撞上）→ 标 `degenerate_distribution`，只走 `min_magnitude` 绝对门限；夹具回放必须含动态（DESIGN §2.2.1）。
 - G18 **finding 等级归属门禁**：`potential`（P3 潜在）不得进入修复循环、成功率分母、FP 分母——其断言"规模到 S 才发作"在当前规模下不可证伪，混入即失真（DESIGN §3A）。升级路径只有一条：T5 压测（10×/100×，D15）复现 → 转 `confirmed`；不复现 → 撤回。代码层：Pydantic 构造期拒绝 `kind=potential` 进入 Issue 通道；负例测试必配。
 - G19 **逐帧源与归因源门禁**：判"发作（episode）"的 detector 必须声明逐帧数据源（`data_tier ∈ {A2, A4, probe}`）——A 档秒级抽样判发作 = 漏检 + 把被跳过的异常值当正常（最危险失效）。渲染计数无逐帧源（A2 静默 0 / A3 -1 / FD 程序侧不可解读，实测 ①-⑫）⇒ **禁止注册 GPU 逐笔 spike detector**；GPU 发作只能建在 A4 `gpuFrameTime`（固定 4 帧延迟，环形缓冲向后 ≥14 承接，D17；未回填帧 `gpu=0 且 completeTs=0` 按 -1 哨兵同规则拒收）。episode detector 必须带 `attribution_source` 字段，无自动化归因源时填 `human`——finding 只给"哪帧/哪个指标/越多少"，根因转人工。**虚报检出能力按 I1 处理。**
-- G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前三项：GPU 尖峰逐笔归因→EX-1/B 档；未放大的代码风险→M3.5 C+；感知类退化→M7 T8）。缺该清单的报告无效。
+- G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前四项：GPU 尖峰逐笔归因→EX-1/B 档；未放大的代码风险→M3.5 C+；感知类退化→M7 T8；**记忆体守护覆盖面窄**——`monoHeapBytes/totalAllocatedBytes/totalReservedBytes/total_used_per_frame` 经实测**不受强制 GC 影响**（Δ≈0），是会话累积量而非净占用，跨会话不可比 ⇒ 已降级为未评估盲区，"修复是否多吃内存"当前**只能靠 `monoUsedBytes` 一个口径回答**；解锁路径=B 档真机/更长隔离的 fresh 采集）。缺该清单的报告无效。
 
 ---
 
