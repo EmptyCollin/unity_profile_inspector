@@ -9,6 +9,8 @@
   monitor       前台跑常驻守护（想后台用 start；外部调度器用 patrol-once）
   resume        工单批准后续跑（--run <run_id>：从 fix 断点，不重烧采样/归因）
   drill ...     演练两阶段（透传 scripts/m4_drill.py 参数）
+  report        生成历史统计报告（单文件 HTML：§7.3 七视图 + 体检表 + G20 清单）
+  stats         终端快览统计指标（JSON，脚本/CI 取数用；不出 HTML）
 
 设计约定（与 AGENTS 全局不变量对齐）：
 - 本入口不产生任何数值（I1），只做组装与调度；
@@ -128,6 +130,30 @@ def cmd_patrol_once(_args=None) -> int:
         return 2
     rec = patrol_once(mon.model_dump())
     print(json.dumps(rec, ensure_ascii=False, indent=2, default=str)[:2000])
+    return 0
+
+
+def cmd_report(_args=None) -> int:
+    """生成历史统计报告（单文件 HTML，DESIGN §7.3 A 形态 / M7）。
+
+    先重灌 SQLite 再渲染：聚合库是派生缓存，跳过这步会让人对着
+    旧缓存里的数字读新留档，报告与真相脱节。"""
+    from upi.tooling import aggregate as AG
+    from upi.tooling.report import build
+    st = AG.rebuild()
+    print(f"聚合：纳入 {st['runs_total']} 轮次"
+          f"（新建 {st['created']}、更新 {st['updated']}、"
+          f"未追踪 {st['untraced']}）")
+    p = build()
+    print(f"报告已生成：{p}")
+    return 0
+
+
+def cmd_stats(_args=None) -> int:
+    """终端快览统计指标（不出 HTML，脚本/CI 取数用）。"""
+    from upi.tooling import aggregate as AG
+    m = AG.meta_metrics()
+    print(json.dumps(m, ensure_ascii=False, indent=2, default=str))
     return 0
 
 
@@ -253,7 +279,8 @@ _CMDS = {"status": cmd_status, "detect": cmd_detect,
          "patrol-once": cmd_patrol_once,
          "start": cmd_start, "stop": cmd_stop,
          "monitor": cmd_monitor, "ui": cmd_ui,
-         "resume": cmd_resume, "drill": cmd_drill}
+         "resume": cmd_resume, "drill": cmd_drill,
+         "report": cmd_report, "stats": cmd_stats}
 
 
 def main(argv: Optional[list] = None) -> int:

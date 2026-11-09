@@ -1,0 +1,240 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI 性能优化管线 · 历史统计与总结报告</title><style>
+:root{--ink:#1a202c;--mut:#4a5568;--line:#e2e8f0;--bg:#fff;--warn:#c05621;
+--bad:#c53030;--good:#276749;--acc:#2b6cb0;--dim:#718096}
+*{box-sizing:border-box}
+body{margin:0;padding:0 0 60px;background:#f7fafc;color:var(--ink);
+font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:0 22px}
+h1{font-size:26px;margin:34px 0 6px;letter-spacing:-.3px}
+h2{font-size:19px;margin:42px 0 4px;padding-top:16px;border-top:2px solid var(--line)}
+h3{font-size:16px;margin:26px 0 6px;color:var(--mut)}
+p.sub{color:var(--mut);margin:2px 0 18px;font-size:13.5px}
+.badge{display:inline-block;padding:2px 9px;border-radius:11px;font-size:12px;
+font-weight:600;vertical-align:2px;margin-left:6px}
+.b-good{background:#c6f6d5;color:var(--good)}.b-bad{background:#fed7d7;color:var(--bad)}
+.b-warn{background:#feebc8;color:var(--warn)}.b-dim{background:#edf2f7;color:var(--dim)}
+table{border-collapse:collapse;width:100%;margin:10px 0 4px;font-size:13px}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:left;
+vertical-align:top}
+th{background:#edf2f7;font-weight:600;font-size:12.5px;white-space:nowrap}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.chart{width:100%;height:auto;display:block;margin:6px 0}
+.ax{font-size:11px;fill:var(--mut)}.tick{font-size:10.5px;fill:var(--dim)}
+.ptlbl{font-size:10px;fill:var(--mut)}
+.empty{padding:14px;border:1px dashed var(--line);border-radius:6px;
+color:var(--dim);font-size:13px;background:#fff}
+.note{background:#fffbeb;border-left:3px solid var(--warn);padding:10px 14px;
+margin:12px 0;font-size:13px;border-radius:0 5px 5px 0}
+.dec{background:#ebf8ff;border-left:3px solid var(--acc);padding:10px 14px;
+margin:12px 0;font-size:13px;border-radius:0 5px 5px 0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+details{margin:8px 0;font-size:13px}
+summary{cursor:pointer;color:var(--mut);font-size:12.5px}
+code{background:#edf2f7;padding:1px 5px;border-radius:3px;font-size:12px;
+font-family:ui-monospace,Consolas,monospace}
+.heat td{text-align:center;font-variant-numeric:tabular-nums;padding:5px 6px}
+.heat td.r{background:#fed7d7;color:var(--bad);font-weight:700}
+.heat td.i{background:#fef5e7;color:var(--warn)}
+.heat td.g{background:#f0fff4;color:var(--good)}
+.heat td.u{background:#edf2f7;color:var(--dim);font-style:italic}
+footer{margin-top:48px;padding:20px 0 0;border-top:2px solid var(--line);
+font-size:12.5px;color:var(--dim)}
+.kpi{display:flex;gap:26px;flex-wrap:wrap;margin:16px 0 4px}
+.kpi div{min-width:110px}
+.kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:12px;color:var(--mut)}
+</style></head><body><div class="wrap">
+<h1>AI 性能优化管线 · 历史统计与总结报告</h1>
+<p class="sub">本文档由 <code>upi report</code> 从 <code>runs/*/trace.jsonl</code> 与
+轮次产物聚合生成，只读、离线可看。数据源：SQLite 缓存
+<code>dashboard/stats.db</code>（可整库重建的派生缓存，真相在 jsonl 留档）。
+生成时纳入 38 个轮次，其中 38 个有 trace、
+0 个标 untraced（G13：无 trace 不入统计）。</p>
+<div class="kpi">
+  <div><b>38</b><span>纳入轮次</span></div>
+  <div><b>2.5ks</b><span>累计墙钟</span></div>
+  <div><b>8,867</b><span>累计 token</span></div>
+  <div><b>1.00</b>
+      <span>修复成功率（n=1）</span></div>
+  <div><b>4</b><span>不可检出项（G20）</span></div>
+</div>
+<div class="note"><b>版本轴说明（§7.3 硬要求）</b>：时间轴本应在
+detector / weights / pipeline 版本上线处打竖线。当前实测各轴取值——
+detector 版本 <code>v1</code>、
+weights <code>hand-set-prior-v1</code>、
+pipeline <code>m1detect, patrol</code>
+——<b>均无跳变，故本报告不画竖线</b>。这不是漏掉规则：一旦出现两个取值，
+趋势图上必须打线，否则"代码改了"会被读成"越用越好"。</div>
+<div class="dec"><b>本轮次诚实边界（AGENTS §5 必须显式声明）</b>：
+全部数据来自 <b>PC GUI Unity Editor（6000.6.7f1 + URP 17.2.6）侧 A 档秒级抽样与
+A2 注入按帧采样 + 帧预算模拟</b>，<b>不等于真机中低端机型数据</b>；
+判定样本 n_effective 为个位数，因此本报告中一切趋势与泛化表述
+都只是<b>方法学示范</b>（机制跑通、口径可算），不构成"越用越好用"的验证结论
+（DESIGN §8.8）。</div>
+
+<h2>视图 1｜成本-质量双轴 <span class="badge b-good">样本充足</span></h2>
+<p class="sub">口径：成本=runreport.spent.wallclock_s（无则取该轮 trace span 的 wallclock_ms 之和）；质量=该轮 state.json 的 findings 条数。两者必须同屏（G15），只报质量会让&quot;变准但变贵&quot;不可见。</p>
+<div class='grid2'><h3>成本轴：单轮墙钟秒数</h3><svg viewBox="0 0 760 210" class="chart" role="img"><line x1="62" y1="180" x2="742" y2="180" stroke="#cbd5e0"/><line x1="62" y1="14" x2="62" y2="180" stroke="#cbd5e0"/><text x="54" y="184.0" text-anchor="end" class="tick">0.00</text><line x1="62" y1="180.0" x2="742" y2="180.0" stroke="#edf2f7"/><text x="54" y="101.0" text-anchor="end" class="tick">941.65</text><line x1="62" y1="97.0" x2="742" y2="97.0" stroke="#edf2f7"/><text x="54" y="18.0" text-anchor="end" class="tick">1.9k</text><line x1="62" y1="14.0" x2="742" y2="14.0" stroke="#edf2f7"/><circle cx="62" cy="179.938" r="5" fill="#c05621"><title>patrol_20261108_232305 墙钟 0.70s（patrol）</title></circle><text x="62" y="170.938" text-anchor="middle" class="ptlbl">0.70</text><circle cx="353.429" cy="162.363" r="5" fill="#c05621"><title>patrol_20261109_001120 墙钟 200.10s（patrol）</title></circle><text x="353.429" y="153.363" text-anchor="middle" class="ptlbl">200.10</text><circle cx="547.714" cy="143.879" r="5" fill="#c05621"><title>patrol_20261109_073147 墙钟 409.80s（patrol）</title></circle><text x="547.714" y="134.879" text-anchor="middle" class="ptlbl">409.80</text><circle cx="742" cy="14" r="5" fill="#c05621"><title>patrol_20261109_105554 墙钟 1.9ks（patrol）</title></circle><text x="742" y="5" text-anchor="middle" class="ptlbl">1.9k</text><text x="380.0" y="204" text-anchor="middle" class="ax">轮次序号（n=38）</text><text x="12" y="105.0" class="ax" transform="rotate(-90 12 105.0)" text-anchor="middle">墙钟 s</text></svg><h3>质量轴：检出条数</h3><svg viewBox="0 0 760 210" class="chart" role="img"><line x1="62" y1="180" x2="742" y2="180" stroke="#cbd5e0"/><line x1="62" y1="14" x2="62" y2="180" stroke="#cbd5e0"/><text x="54" y="184.0" text-anchor="end" class="tick">0</text><line x1="62" y1="180.0" x2="742" y2="180.0" stroke="#edf2f7"/><text x="54" y="101.0" text-anchor="end" class="tick">2.00</text><line x1="62" y1="97.0" x2="742" y2="97.0" stroke="#edf2f7"/><text x="54" y="18.0" text-anchor="end" class="tick">4.00</text><line x1="62" y1="14.0" x2="742" y2="14.0" stroke="#edf2f7"/><circle cx="62" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_170901 检出 0 条</title></circle><text x="62" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="80.3784" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_170937 检出 0 条</title></circle><text x="80.3784" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="98.7568" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_171630 检出 0 条</title></circle><text x="98.7568" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="117.135" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_172904 检出 0 条</title></circle><text x="117.135" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="135.514" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_172927 检出 0 条</title></circle><text x="135.514" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="153.892" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_190155 检出 0 条</title></circle><text x="153.892" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="172.27" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261107_190853 检出 0 条</title></circle><text x="172.27" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="190.649" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_004057 检出 0 条</title></circle><text x="190.649" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="209.027" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_004301 检出 0 条</title></circle><text x="209.027" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="227.405" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_004402 检出 0 条</title></circle><text x="227.405" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="245.784" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_105034 检出 0 条</title></circle><text x="245.784" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="264.162" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_110651 检出 0 条</title></circle><text x="264.162" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="282.541" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_130451 检出 0 条</title></circle><text x="282.541" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="300.919" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_173808 检出 0 条</title></circle><text x="300.919" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="319.297" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_173924 检出 0 条</title></circle><text x="319.297" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="337.676" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_174004 检出 0 条</title></circle><text x="337.676" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="356.054" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_174355 检出 0 条</title></circle><text x="356.054" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="374.432" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_184826 检出 0 条</title></circle><text x="374.432" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="392.811" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_190815 检出 0 条</title></circle><text x="392.811" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="411.189" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_193025 检出 0 条</title></circle><text x="411.189" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="429.568" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_194147 检出 0 条</title></circle><text x="429.568" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="447.946" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_200035 检出 0 条</title></circle><text x="447.946" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="466.324" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_201636 检出 0 条</title></circle><text x="466.324" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="484.703" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_222305 检出 0 条</title></circle><text x="484.703" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="503.081" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_232307 检出 0 条</title></circle><text x="503.081" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="521.459" cy="14" r="5" fill="#2b6cb0"><title>patrol_20261108_232305 检出 4 条</title></circle><text x="521.459" y="5" text-anchor="middle" class="ptlbl">4</text><circle cx="539.838" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261108_234535 检出 0 条</title></circle><text x="539.838" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="558.216" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_001121 检出 0 条</title></circle><text x="558.216" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="576.595" cy="14" r="5" fill="#2b6cb0"><title>patrol_20261109_001120 检出 4 条</title></circle><text x="576.595" y="5" text-anchor="middle" class="ptlbl">4</text><circle cx="594.973" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_073150 检出 0 条</title></circle><text x="594.973" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="613.351" cy="14" r="5" fill="#2b6cb0"><title>patrol_20261109_073147 检出 4 条</title></circle><text x="613.351" y="5" text-anchor="middle" class="ptlbl">4</text><circle cx="631.73" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_105556 检出 0 条</title></circle><text x="631.73" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="650.108" cy="14" r="5" fill="#2b6cb0"><title>patrol_20261109_105554 检出 4 条</title></circle><text x="650.108" y="5" text-anchor="middle" class="ptlbl">4</text><circle cx="668.486" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_153455 检出 0 条</title></circle><text x="668.486" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="686.865" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_154821 检出 0 条</title></circle><text x="686.865" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="705.243" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_170156 检出 0 条</title></circle><text x="705.243" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="723.622" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_175843 检出 0 条</title></circle><text x="723.622" y="171" text-anchor="middle" class="ptlbl">0</text><circle cx="742" cy="180" r="5" fill="#2b6cb0"><title>m1detect_20261109_195521 检出 0 条</title></circle><text x="742" y="171" text-anchor="middle" class="ptlbl">0</text><text x="380.0" y="204" text-anchor="middle" class="ax">轮次序号（n=38）</text><text x="12" y="105.0" class="ax" transform="rotate(-90 12 105.0)" text-anchor="middle">检出条数</text></svg></div>
+<h2>视图 2｜检出率 × 误报率，按 detector 版本分面 <span class="badge b-good">样本充足</span></h2>
+<p class="sub">口径：检出率 = 该 detector 在缺陷夹具上判 detected 的观测数 / 观测总数（观测=夹具×轮次）；误报率 = CLEAN 自比自（阈值来自 CLEAN 自身中位，任何 detected 都是误报，D6 口径）的 detected 数 / CLEAN 观测数。两列同屏是 G15 的硬要求；Wilson 下界用 95% 置信，防止小样本点估计虚高。</p>
+<table>
+<tr><th>detector</th><th>版本</th><th>缺陷观测 n</th><th>检出数</th>
+<th>检出率</th><th>Wilson 下界</th><th>CLEAN 误报率</th><th>CLEAN 观测 n</th></tr>
+<tr><td><code>DET-ANIM-PARAMRTT</code></td><td>v1</td><td class='n'>33</td><td class='n'>30</td><td class='n'>0.909</td><td class='n'>0.764</td><td class='n'>0.000</td><td class='n'>4</td></tr><tr><td><code>DET-CPU-GC-FRAMEALLOC</code></td><td>v1</td><td class='n'>34</td><td class='n'>32</td><td class='n'>0.941</td><td class='n'>0.809</td><td class='n'>0.000</td><td class='n'>4</td></tr><tr><td><code>DET-GPU-BATCHBREAK</code></td><td>v1</td><td class='n'>34</td><td class='n'>34</td><td class='n'>1.000</td><td class='n'>0.898</td><td class='n'>0.000</td><td class='n'>4</td></tr><tr><td><code>DET-LOAD-SYNCPEAK</code></td><td>v1</td><td class='n'>33</td><td class='n'>33</td><td class='n'>1.000</td><td class='n'>0.896</td><td class='n'>0.000</td><td class='n'>4</td></tr>
+</table>
+<svg viewBox="0 0 760 210" class="chart" role="img"><line x1="62" y1="180" x2="742" y2="180" stroke="#cbd5e0"/><line x1="62" y1="14" x2="62" y2="180" stroke="#cbd5e0"/><text x="54" y="184.0" text-anchor="end" class="tick">0.00</text><line x1="62" y1="180.0" x2="742" y2="180.0" stroke="#edf2f7"/><text x="54" y="101.0" text-anchor="end" class="tick">0.53</text><line x1="62" y1="97.0" x2="742" y2="97.0" stroke="#edf2f7"/><text x="54" y="18.0" text-anchor="end" class="tick">1.05</text><line x1="62" y1="14.0" x2="742" y2="14.0" stroke="#edf2f7"/><circle cx="62" cy="36.2914" r="5" fill="#2b6cb0"><title>DET-ANIM-PARAMRTT 检出率 0.909（n=33）</title></circle><text x="62" y="27.2914" text-anchor="middle" class="ptlbl">0.91</text><circle cx="288.667" cy="31.2324" r="5" fill="#2b6cb0"><title>DET-CPU-GC-FRAMEALLOC 检出率 0.941（n=34）</title></circle><text x="288.667" y="22.2324" text-anchor="middle" class="ptlbl">0.94</text><circle cx="515.333" cy="21.9048" r="5" fill="#2b6cb0"><title>DET-GPU-BATCHBREAK 检出率 1.000（n=34）</title></circle><text x="515.333" y="12.9048" text-anchor="middle" class="ptlbl">1.00</text><circle cx="742" cy="21.9048" r="5" fill="#2b6cb0"><title>DET-LOAD-SYNCPEAK 检出率 1.000（n=33）</title></circle><text x="742" y="12.9048" text-anchor="middle" class="ptlbl">1.00</text><text x="380.0" y="204" text-anchor="middle" class="ax">detector（分面即版本，当前各仅 1 版）</text><text x="12" y="105.0" class="ax" transform="rotate(-90 12 105.0)" text-anchor="middle">检出率</text></svg>
+<p class="sub">另有 <b>2</b> 条观测因缺
+<code>detector</code> 字段被排除出分母（2026-11-07 早期产物只有 verdict/why 两键）。
+排除而非混入：混进去会算出"检出率 0"这类假结论；显式报数则缺口可见（I1）。</p>
+
+<h3>不可检出清单（G20，与本视图同屏，不可拆分）</h3>
+<p class="sub">口径：AGENTS G20：每份报告必须含本清单并与检出率同屏，逐项注明受阻原因与解锁路径；缺清单的报告无效。每项证据从留档现算，非抄文档。</p>
+<table>
+<tr><th>#</th><th>检不出什么</th><th>状态</th><th>受阻根因</th><th>解锁路径</th><th>实测证据</th></tr>
+<tr><td class='n'>1</td><td>GPU 尖峰的逐笔归因（哪一笔 draw call 造成这一帧越线）</td><td><span class='badge b-bad'>blocked</span></td><td>G19 逐帧源门禁：渲染计数器无可用逐帧源（A2 静默读 0 / A3 -1 哨兵 / FD 程序侧不可解读，DESIGN §12 实测 ①-⑫）</td><td>EX-1（切 DX11 验证 RenderDoc 程序化解析）或 M8 B 档真机采样；期间 GPU 发作 detector 只能建在 A4 gpuFrameTime 上，且 finding 只给越线事实、attribution_source=human</td><td><details><summary>展开</summary><code>{
+ &quot;gpu_detector_registered&quot;: [
+  &quot;DET-GPU-BATCHBREAK&quot;
+ ],
+ &quot;spike_detector_present&quot;: false
+}</code></details></td></tr><tr><td class='n'>2</td><td>未放大的代码风险（热路径 new List、材质实例膨胀等——当前规模零痕迹）</td><td><span class='badge b-bad'>blocked</span></td><td>M3.5 C+ 静态扫描 + 斜率投影未建：P3 的证据在代码里不在运行时数据里，A 档采样原理上抓不到（DP-1 §1.1 仪器选型）</td><td>M3.5：代码模式扫描器（C+）+ 斜率投影器 + 压测协议（10×/100×，D15）；上线前 T5 压测复现是 potential→confirmed 的唯一路径（G18）</td><td><details><summary>展开</summary><code>{
+ &quot;potential_dirs_found&quot;: 0,
+ &quot;potential_records&quot;: []
+}</code></details></td></tr><tr><td class='n'>3</td><td>感知类退化（画面 SSIM / 动画事件序列 / 固定种子回放发散）</td><td><span class='badge b-warn'>partially_blocked</span></td><td>M7 T8 感知门禁基建未落地：无截图 SSIM、无动画事件 diff、无种子回放 ⇒ G3 目前只在纸面（AGENTS §1.5 感知门禁失败即回滚）</td><td>M7 T8：种子回放 + 截图 SSIM + 动画事件 diff；凡 EditPlan 触碰 §3 维度一列表即强制 semi（先报后批），自动判定不依赖 LLM 主观（I5）</td><td><details><summary>展开</summary><code>{
+ &quot;perception_实算轮次&quot;: 0,
+ &quot;perception_空壳轮次&quot;: 2,
+ &quot;说明&quot;: &quot;空壳=字段存在但数值未测，不得当作已通过&quot;
+}</code></details></td></tr><tr><td class='n'>4</td><td>记忆体守护覆盖面：修复是否多吃内存，当前只有 monoUsedBytes 一个口径能答</td><td><span class='badge b-bad'>blocked</span></td><td>实测 monoHeapBytes / totalAllocatedBytes / totalReservedBytes / total_used_per_frame 强制 GC 后 Δ≈0（不受回收影响）——它们是会话累积量而非净占用，跨会话不可比；窗口值量的是&#x27;此刻未回收多少&#x27;，回收时点一变即失真</td><td>M8 B 档真机采样，或更长隔离的 fresh post-GC 采集（两侧各自 fresh，任一侧缺即记未评估盲区，既不判劣化也不判清白，§1.5）</td><td><details><summary>展开</summary><code>{
+ &quot;本轮/历史实测未评估次数&quot;: {
+  &quot;monoHeapBytes&quot;: 1,
+  &quot;totalAllocatedBytes&quot;: 1,
+  &quot;totalReservedBytes&quot;: 1,
+  &quot;total_used_per_frame&quot;: 1
+ },
+ &quot;受保护记忆体指标全集&quot;: [
+  &quot;monoHeapBytes&quot;,
+  &quot;monoUsedBytes&quot;,
+  &quot;totalAllocatedBytes&quot;,
+  &quot;totalReservedBytes&quot;
+ ],
+ &quot;已知不响应 GC 者&quot;: [
+  &quot;monoHeapBytes&quot;,
+  &quot;totalAllocatedBytes&quot;,
+  &quot;totalReservedBytes&quot;,
+  &quot;total_used_per_frame&quot;
+ ]
+}</code></details></td></tr>
+</table>
+<div class="note">上面第 3 项（记忆体守护覆盖面）与视图 5 的"未评估盲区"列是同一事实的
+两种呈现：清单说"哪些指标答不了"，热力图说"这轮具体哪几项没测"。
+两者数字必须一致，本文件由同一次 <code>gather()</code> 取数保证。</div>
+
+<h2>视图 3｜阶段耗时与事故标记 <span class="badge b-good">样本充足</span></h2>
+<p class="sub">口径：按 (stage, 环境指纹) 分组后取该组 p50/p95（单位秒）。不同环境的同阶段不合并——跨环境混算正是 G7 在采样层禁止的事。阶段样本 = 该阶段 span 条数，跨环境时 p50 取各组均值（故可能与单次实测略有出入）。</p>
+<svg viewBox="0 0 760 188" class="chart"><text x="142" y="19.0" text-anchor="end" class="ax">fix（n=5，失败 0）</text><rect x="150" y="10" width="536" height="14" fill="#2b6cb0" opacity="0.22"><title>p95 103.48 s</title></rect><rect x="150" y="13" width="534.166" height="10" fill="#2b6cb0"><title>fix（n=5，失败 0）：103.12 s</title></rect><text x="754" y="19.0" text-anchor="end" class="tick">103.12</text><text x="142" y="41.0" text-anchor="end" class="ax">verify（n=3，失败 1）</text><rect x="150" y="32" width="516.653" height="14" fill="#2b6cb0" opacity="0.22"><title>p95 99.74 s</title></rect><rect x="150" y="35" width="515.32" height="10" fill="#2b6cb0"><title>verify（n=3，失败 1）：99.48 s</title></rect><text x="754" y="41.0" text-anchor="end" class="tick">99.48</text><text x="142" y="63.0" text-anchor="end" class="ax">escalate（n=7，失败 0）</text><rect x="150" y="54" width="0.947935" height="14" fill="#2b6cb0" opacity="0.22"><title>p95 0.18 s</title></rect><rect x="150" y="57" width="0.5" height="10" fill="#2b6cb0"><title>escalate（n=7，失败 0）：0.00 s</title></rect><text x="754" y="63.0" text-anchor="end" class="tick">0.00</text><text x="142" y="85.0" text-anchor="end" class="ax">detect（n=35，失败 0）</text><rect x="150" y="76" width="0.800305" height="14" fill="#2b6cb0" opacity="0.22"><title>p95 0.15 s</title></rect><rect x="150" y="79" width="0.5" height="10" fill="#2b6cb0"><title>detect（n=35，失败 0）：0.00 s</title></rect><text x="754" y="85.0" text-anchor="end" class="tick">0.00</text><text x="142" y="107.0" text-anchor="end" class="ax">record（n=2，失败 0）</text><rect x="150" y="98" width="0.429938" height="14" fill="#2b6cb0" opacity="0.22"><title>p95 0.08 s</title></rect><rect x="150" y="101" width="0.5" height="10" fill="#2b6cb0"><title>record（n=2，失败 0）：0.05 s</title></rect><text x="754" y="107.0" text-anchor="end" class="tick">0.05</text><text x="142" y="129.0" text-anchor="end" class="ax">diagnose（n=1，失败 0）</text><rect x="150" y="123" width="0.5" height="10" fill="#2b6cb0"><title>diagnose（n=1，失败 0）：0.00 s</title></rect><text x="754" y="129.0" text-anchor="end" class="tick">0.00</text><text x="142" y="151.0" text-anchor="end" class="ax">plan（n=2，失败 0）</text><rect x="150" y="145" width="0.5" height="10" fill="#2b6cb0"><title>plan（n=2，失败 0）：0.00 s</title></rect><text x="754" y="151.0" text-anchor="end" class="tick">0.00</text><text x="150" y="180" class="ax">实心=p50，淡色=p95（单位 s；口径见下方表格）</text></svg>
+<table>
+<tr><th>阶段</th><th>span 数</th><th>非零退出</th><th>p50 (s)</th><th>p95 (s)</th>
+<th>最长 (s)</th><th>累计 (s)</th><th>token</th></tr>
+<tr><td><code>fix</code></td><td class='n'>5</td><td class='n'>0</td><td class='n'>103.12</td><td class='n'>103.48</td><td class='n'>206.57</td><td class='n'>612.5</td><td class='n'>0</td></tr><tr><td><code>verify</code></td><td class='n'>3</td><td class='n'>1</td><td class='n'>99.48</td><td class='n'>99.74</td><td class='n'>199.48</td><td class='n'>397.9</td><td class='n'>0</td></tr><tr><td><code>escalate</code></td><td class='n'>7</td><td class='n'>0</td><td class='n'>0.00</td><td class='n'>0.18</td><td class='n'>0.37</td><td class='n'>0.4</td><td class='n'>0</td></tr><tr><td><code>detect</code></td><td class='n'>35</td><td class='n'>0</td><td class='n'>0.00</td><td class='n'>0.15</td><td class='n'>0.31</td><td class='n'>0.3</td><td class='n'>0</td></tr><tr><td><code>record</code></td><td class='n'>2</td><td class='n'>0</td><td class='n'>0.05</td><td class='n'>0.08</td><td class='n'>0.08</td><td class='n'>0.1</td><td class='n'>0</td></tr><tr><td><code>diagnose</code></td><td class='n'>1</td><td class='n'>0</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.0</td><td class='n'>0</td></tr><tr><td><code>plan</code></td><td class='n'>2</td><td class='n'>0</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.0</td><td class='n'>0</td></tr>
+</table>
+<h3>编译门禁（G8）与 Safe Mode 事故（G9）</h3>
+<table><tr><th>轮次</th><th>阶段</th><th>退出码</th><th>次数</th></tr><tr><td><code>patrol_20261108_232305</code></td><td>verify</td><td class='n'>1</td><td class='n'>1</td></tr></table>
+<p class="sub">G8 的语义是"编译失败不消耗整轮采样成本"，因此这里出现的 fix/verify 非零
+退出（1 类）都应结合该轮 span 顺序判断是否为门禁前拦截；
+无事故不等于无风险——当前 span 的 <code>exit_status</code> 仅在少数阶段被写入。</p>
+<h3>工具调用分布</h3>
+<table><tr><th>类别</th><th>名称</th><th>次数</th><th>均值 (ms)</th></tr>
+<tr><td>sqlite</td><td><code>read_calibration_windows</code></td><td class='n'>29</td><td class='n'>0.00</td></tr><tr><td>sqlite</td><td><code>read_baseline</code></td><td class='n'>3</td><td class='n'>0.00</td></tr>
+</table>
+<h2>视图 4｜可靠性曲线（校准图）+ ECE <span class="badge b-bad">本阶段不计算</span></h2>
+<p class="sub">口径：校准图 = 把每个假设的置信度分箱，画&quot;预测置信度 vs 实际成功率&quot;，对角线即完美校准；ECE = 各箱 |预测−实际| 的样本量加权平均。训练集与留出集两条线同屏，差值即过拟合度（§8.7 第 3 项）。</p>
+<div class="empty">
+不计算的原因（非偷懒，是样本量；数字随留档实况取，不写死）：<br>
+· 假设侧：<b>4</b> 个轮次共
+<b>20</b> 条带置信度的归因假设；<br>
+· 结局侧：跑到出判定的轮次仅 <b>2</b> 个 ⇒ 置信度与结局<b>无法成对</b>，
+分箱后每箱 n≤2，任何"校准"都是噪声。<br>
+· 留出分组本身可用（按 fixture_spec 的 holdout 标记，三态建模，
+CLEAN 作第三态不参与分组）；真正缺的是每侧的置信度×结局配对样本。
+缺项登记：分组已可用（按 fixture_spec.holdout，见 checklist.split_of 三态建模）；缺的是每侧的置信度×结局分箱样本。<br>
+· 已登记的缺失说明：<code>ece</code> → 需校准曲线：置信度分箱后与结局对齐，可配对观测仅 2 个（每轮只有被采纳的 Top1 假设才有结局，其余假设的反事实不可观测）。<br>
+按 §7.3「n 全部随值返回；n&lt;30 的报告禁止画折线，只画点（§7.3）」，此处一律不给图、只给缺项说明——
+画出来会诱导读者把噪声读成"校准良好"。
+</div>
+<h2>视图 5｜全量守护指标热力图（夹具 × 指标，前后 Δ）</h2>
+<p class="sub">口径：每格 = 该轮该指标的 after − before（负值=改善）。判定容差：时间/渲染计数类走窗口中位 + guard_tolerance 1%；记忆体类走两侧各自 fresh post-GC（§1.5 分两支），hover 显示该格 value_source 与依据原文。</p>
+<table class="heat">
+<tr><th>轮次</th><th>animator_process_animations_ns</th><th>animator_process_graph_ns</th><th>batches</th><th>cpuFrameTimeMs</th><th>cpuMainThreadFrameTimeMs</th><th>drawCalls</th><th>gpuFrameTimeMs</th><th>monoHeapBytes</th><th>monoUsedBytes</th><th>setPassCalls</th><th>totalAllocatedBytes</th><th>totalReservedBytes</th><th>total_used_per_frame</th><th>triangles</th><th>vertices</th></tr>
+<tr><td><code>patrol_20261109_073147</code><br><span class="ax">F-CPU-01</span></td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td><td class="g" title="window 改善｜1.92→1.75">-0.17 ▲</td><td class="g" title="window 改善｜0.85→0.65">-0.20 ▲</td><td title="window 未劣化（容差内）">0.00</td><td class="g" title="window 改善｜1.65→1.55">-0.10 ▲</td><td title="fresh_post_gc 未劣化（容差内）">0.00</td><td class="g" title="fresh_post_gc 改善｜2377.43M→115.04M">-2262.39M ▲</td><td title="window 未劣化（容差内）">0.00</td><td class="g" title="fresh_post_gc 改善｜7102.09M→6427.84M">-674.26M ▲</td><td title="fresh_post_gc 未劣化（容差内）">0.00</td><td class="g" title="window 改善｜10261.03M→7282.61M">-2978.42M ▲</td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td></tr><tr><td><code>patrol_20261109_105554</code><br><span class="ax">F-CPU-01</span></td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td><td class="g" title="window 改善｜2.13→1.90">-0.24 ▲</td><td class="g" title="window 改善｜0.77→0.56">-0.20 ▲</td><td title="window 未劣化（容差内）">0.00</td><td class="g" title="window 改善｜0.11→0.10">-0.01 ▲</td><td class="u" title="未评估盲区（G20）：Mono 堆预留量，实测 Δ=0（只增不减，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档｜窗口值 before=392.93M after=392.93M Δ=0.00（不可用于判定）">未评估</td><td class="g" title="fresh_post_gc 改善｜92.30M→87.28M">-5.02M ▲</td><td title="window 未劣化（容差内）">0.00</td><td class="u" title="未评估盲区（G20）：A 档字段，实测强制 GC 后 Δ=+0.005%（不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+2.16% 仅留档｜窗口值 before=743.71M after=759.75M Δ=16.03M（不可用于判定）">未评估</td><td class="u" title="未评估盲区（G20）：A 档字段，实测 Δ=0（原生堆预留，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档｜窗口值 before=1854.35M after=1854.35M Δ=0.00（不可用于判定）">未评估</td><td class="u" title="未评估盲区（G20）：A2 计数器 Total Used Memory，与 totalAllocatedBytes 同一物理量；缺陷态跨会话自然极差 192%——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+1.82% 仅留档｜窗口值 before=1383.13M after=1408.32M Δ=25.19M（不可用于判定）">未评估</td><td title="window 未劣化（容差内）">0.00</td><td title="window 未劣化（容差内）">0.00</td></tr>
+</table>
+<p class="sub">图例：<span class="badge b-bad">红=判为劣化（0 格）</span>
+<span class="badge b-good">绿=改善</span>
+<span class="badge b-warn">灰底=未评估盲区（4 格，G20 单列项）</span>
+——<b>灰底既不算劣化也不算清白</b>：拿被污染或不响应的窗口值冒充守护结论，
+正是 §1.5 明令禁止的。</p>
+<div class="note">这张表的空白本身就是信息：只有 2 个轮次跑到出判定，
+所以 15 个守护指标 × 轮次的矩阵绝大多数格是"无此项"。
+守护覆盖面要等常驻长跑累积（见文末待办）。</div>
+
+<h2>视图 6｜失败与回滚钻取（2 次回滚 · 1 次审查）</h2>
+<p class="sub">口径：回滚来源有两处：state.json 的 review 记录内嵌 rollback（审查裁定撤回），以及 runreport.final_rollback（出口兜底，未产出保留决定的轮次）。G9：回滚只依赖 git，不依赖 Editor 可达。</p>
+<table>
+<tr><th>轮次</th><th>回滚到</th><th>回滚后 HEAD</th><th>资产清单还原</th>
+<th>场景还原</th><th>类型</th></tr>
+<tr><td><code>patrol_20261109_001120</code></td><td><code>upi/attempt-m4-001954</code></td><td><code>7481c1bd</code></td><td>是</td><td>是</td><td>出口兜底</td></tr><tr><td><code>patrol_20261109_105554</code></td><td><code>upi/attempt-m4-123412</code></td><td><code>d8e731e7</code></td><td>是</td><td>是</td><td>审查裁定</td></tr>
+</table>
+<h3>审查轮次消耗</h3>
+<table><tr><th>轮次</th><th>审查第几轮</th><th>被审判定</th><th>裁定回滚</th></tr>
+<tr><td><code>patrol_20261109_105554</code></td><td class='n'>1</td><td>regressed</td><td>是</td></tr>
+</table>
+<p class="sub">G6：单 Issue 审查最多 3 次，耗尽即记 failed 并保留全部证据链
+（失败样本与成功样本同等重要）。当前未出现 failed 轮次。</p>
+<h3>证据链索引（每格数字可回溯）</h3>
+<ul>
+<li><code>patrol_20261108_232305</code> — patrol，判定 <b>无</b>，路由 needs_human，attempt 0，墙钟 0.70s，token 0，检出 4 条、未评估守护 0 项；<a href="file:///D:/unity_profile_inspector/runs/patrol_20261108_232305">证据目录</a>（trace.jsonl / state.json / runreport.json）</li><li><code>patrol_20261109_001120</code> — patrol，判定 <b>无</b>，路由 needs_human，attempt 1，墙钟 200.10s，token 0，检出 4 条、未评估守护 0 项；<a href="file:///D:/unity_profile_inspector/runs/patrol_20261109_001120">证据目录</a>（trace.jsonl / state.json / runreport.json）</li><li><code>patrol_20261109_073147</code> — patrol，判定 <b>resolved</b>，路由 proceed，attempt 1，墙钟 409.80s，token 0，检出 4 条、未评估守护 0 项；<a href="file:///D:/unity_profile_inspector/runs/patrol_20261109_073147">证据目录</a>（trace.jsonl / state.json / runreport.json）</li><li><code>patrol_20261109_105554</code> — patrol，判定 <b>resolved</b>，路由 proceed，attempt 1，墙钟 1.9ks，token 8,867，检出 4 条、未评估守护 4 项；<a href="file:///D:/unity_profile_inspector/runs/patrol_20261109_105554">证据目录</a>（trace.jsonl / state.json / runreport.json）</li>
+</ul>
+<h2>视图 7｜成本分布 <span class="badge b-warn">n=1＜30 仅散点</span></h2>
+<p class="sub">口径：token 取 span 的 llm.token_in+token_out，缺则取 runreport.spent.tokens；墙钟同理取 spent.wallclock_s，缺则取该轮 span 之和。两者都是实测记账值，非估算。</p>
+<div class="grid2">
+<div><h3>每轮 token</h3><svg viewBox="0 0 760 210" class="chart" role="img"><line x1="62" y1="180" x2="742" y2="180" stroke="#cbd5e0"/><line x1="62" y1="14" x2="62" y2="180" stroke="#cbd5e0"/><text x="54" y="184.0" text-anchor="end" class="tick">0</text><line x1="62" y1="180.0" x2="742" y2="180.0" stroke="#edf2f7"/><text x="54" y="101.0" text-anchor="end" class="tick">4.4k</text><line x1="62" y1="97.0" x2="742" y2="97.0" stroke="#edf2f7"/><text x="54" y="18.0" text-anchor="end" class="tick">8.9k</text><line x1="62" y1="14.0" x2="742" y2="14.0" stroke="#edf2f7"/><circle cx="402" cy="14" r="5" fill="#2b6cb0"><title>patrol_20261109_105554：8,867 token</title></circle><text x="402" y="5" text-anchor="middle" class="ptlbl">8,867</text><text x="380.0" y="204" text-anchor="middle" class="ax">轮次序号</text><text x="12" y="105.0" class="ax" transform="rotate(-90 12 105.0)" text-anchor="middle">token</text></svg></div>
+<div><h3>每轮墙钟</h3><svg viewBox="0 0 760 210" class="chart" role="img"><line x1="62" y1="180" x2="742" y2="180" stroke="#cbd5e0"/><line x1="62" y1="14" x2="62" y2="180" stroke="#cbd5e0"/><text x="54" y="184.0" text-anchor="end" class="tick">0.00</text><line x1="62" y1="180.0" x2="742" y2="180.0" stroke="#edf2f7"/><text x="54" y="101.0" text-anchor="end" class="tick">941.65</text><line x1="62" y1="97.0" x2="742" y2="97.0" stroke="#edf2f7"/><text x="54" y="18.0" text-anchor="end" class="tick">1.9k</text><line x1="62" y1="14.0" x2="742" y2="14.0" stroke="#edf2f7"/><circle cx="62" cy="179.938" r="5" fill="#c05621"><title>patrol_20261108_232305：0.70s</title></circle><text x="62" y="170.938" text-anchor="middle" class="ptlbl">0.70</text><circle cx="353.429" cy="162.363" r="5" fill="#c05621"><title>patrol_20261109_001120：200.10s</title></circle><text x="353.429" y="153.363" text-anchor="middle" class="ptlbl">200.10</text><circle cx="547.714" cy="143.879" r="5" fill="#c05621"><title>patrol_20261109_073147：409.80s</title></circle><text x="547.714" y="134.879" text-anchor="middle" class="ptlbl">409.80</text><circle cx="742" cy="14" r="5" fill="#c05621"><title>patrol_20261109_105554：1.9ks</title></circle><text x="742" y="5" text-anchor="middle" class="ptlbl">1.9k</text><text x="380.0" y="204" text-anchor="middle" class="ax">轮次序号</text><text x="12" y="105.0" class="ax" transform="rotate(-90 12 105.0)" text-anchor="middle">秒</text></svg></div>
+</div>
+<h3>按阶段的 token 占比</h3>
+<div class="empty">span 里没有 llm token 明细（历史 span 的 llm 字段多为空，实测如此）；成本只能按轮汇总看上面的每轮 token。</div>
+<p class="sub">单轮成本中位 8,867 token，最大 8,867，最小 8,867，n=1（箱线图需 ≥30 样本才画，当前只给三个数）。</p>
+<h2>前后对比全量指标表（含未评估项单列）</h2>
+<p class="sub">口径：对比只在 protocol_fingerprint 一致时成立（G7）。记忆体类走 fresh post-GC，时间/渲染类走窗口中位（§1.5 两支）。未评估行的窗口值仅作参考，不参与判定。</p>
+<table>
+<tr><th>轮次</th><th>夹具</th><th>指标</th><th>改前</th><th>改后</th><th>Δ</th>
+<th>取值来源</th><th>结论</th><th>依据（截断）</th></tr>
+<tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>animator_process_animations_ns</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>animator_process_graph_ns</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>batches</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>cpuFrameTimeMs</td><td class='n'>1.92</td><td class='n'>1.75</td><td class='n'>-0.17</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>cpuMainThreadFrameTimeMs</td><td class='n'>0.85</td><td class='n'>0.65</td><td class='n'>-0.20</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>drawCalls</td><td class='n'>47.00</td><td class='n'>47.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>gpuFrameTimeMs</td><td class='n'>1.65</td><td class='n'>1.55</td><td class='n'>-0.10</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>monoHeapBytes</td><td class='n'>26086.52M</td><td class='n'>26086.52M</td><td class='n'>0.00</td><td>fresh_post_gc</td><td><span class="badge b-good">未劣化</span></td><td class='sub'>post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.0% after=0.0%</td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>monoUsedBytes</td><td class='n'>2377.43M</td><td class='n'>115.04M</td><td class='n'>-2262.39M</td><td>fresh_post_gc</td><td><span class="badge b-good">未劣化</span></td><td class='sub'>post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.2% after=4.1%</td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>setPassCalls</td><td class='n'>9.00</td><td class='n'>9.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>totalAllocatedBytes</td><td class='n'>7102.09M</td><td class='n'>6427.84M</td><td class='n'>-674.26M</td><td>fresh_post_gc</td><td><span class="badge b-good">未劣化</span></td><td class='sub'>post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=1.6% after=1.6%</td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>totalReservedBytes</td><td class='n'>12077.70M</td><td class='n'>12077.70M</td><td class='n'>0.00</td><td>fresh_post_gc</td><td><span class="badge b-good">未劣化</span></td><td class='sub'>post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.0% after=0.0%</td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>total_used_per_frame</td><td class='n'>10261.03M</td><td class='n'>7282.61M</td><td class='n'>-2978.42M</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>triangles</td><td class='n'>2.2k</td><td class='n'>2.2k</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_073147</code></td><td>F-CPU-01</td><td>vertices</td><td class='n'>6.0k</td><td class='n'>6.0k</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>animator_process_animations_ns</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>animator_process_graph_ns</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>batches</td><td class='n'>0.00</td><td class='n'>0.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>cpuFrameTimeMs</td><td class='n'>2.13</td><td class='n'>1.90</td><td class='n'>-0.24</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>cpuMainThreadFrameTimeMs</td><td class='n'>0.77</td><td class='n'>0.56</td><td class='n'>-0.20</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>drawCalls</td><td class='n'>47.00</td><td class='n'>47.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>gpuFrameTimeMs</td><td class='n'>0.11</td><td class='n'>0.10</td><td class='n'>-0.01</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>monoUsedBytes</td><td class='n'>92.30M</td><td class='n'>87.28M</td><td class='n'>-5.02M</td><td>fresh_post_gc</td><td><span class="badge b-good">未劣化</span></td><td class='sub'>post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.5% after=10.2%；GC 响应侧=改前改后</td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>setPassCalls</td><td class='n'>9.00</td><td class='n'>9.00</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>triangles</td><td class='n'>2.2k</td><td class='n'>2.2k</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>vertices</td><td class='n'>6.0k</td><td class='n'>6.0k</td><td class='n'>0.00</td><td>window</td><td><span class="badge b-good">未劣化</span></td><td class='sub'></td></tr>
+<tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>monoHeapBytes</td><td class='n'>392.93M</td><td class='n'>392.93M</td><td class='n'>0.00</td><td>gc_unresponsive</td><td><span class='badge b-dim'>未评估</span></td><td class='sub'>Mono 堆预留量，实测 Δ=0（只增不减，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档</td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>totalAllocatedBytes</td><td class='n'>743.71M</td><td class='n'>759.75M</td><td class='n'>16.03M</td><td>gc_unresponsive</td><td><span class='badge b-dim'>未评估</span></td><td class='sub'>A 档字段，实测强制 GC 后 Δ=+0.005%（不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+2.16% 仅留档</td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>totalReservedBytes</td><td class='n'>1854.35M</td><td class='n'>1854.35M</td><td class='n'>0.00</td><td>gc_unresponsive</td><td><span class='badge b-dim'>未评估</span></td><td class='sub'>A 档字段，实测 Δ=0（原生堆预留，不响应）——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+0.00% 仅留档</td></tr><tr><td><code>patrol_20261109_105554</code></td><td>F-CPU-01</td><td>total_used_per_frame</td><td class='n'>1383.13M</td><td class='n'>1408.32M</td><td class='n'>25.19M</td><td>gc_unresponsive</td><td><span class='badge b-dim'>未评估</span></td><td class='sub'>A2 计数器 Total Used Memory，与 totalAllocatedBytes 同一物理量；缺陷态跨会话自然极差 192%——不受强制 GC 影响，跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；窗口 Δ+1.82% 仅留档</td></tr>
+</table>
+<h2>§8.7 过拟合体检表（实际数值，G14 上线门禁的输入）</h2>
+<p class="sub">口径：阈值单一来源 upi.core.knowledge._CHECKLIST（本表通过反查判定函数得到符号与边界值，不抄第二份数字）；判定结果同时喂给 propose_promotion，保证提案与本表不会出现分歧。</p>
+<table>
+<tr><th>体检项</th><th>通过条件</th><th>实测值</th><th>n</th><th>结论</th><th>取数说明 / 缺项原因</th></tr>
+<tr><td><code>tuning_holdout_gap</code></td><td>&lt;=0.15</td><td class='n'>0.016</td><td class='n'>66</td><td><span class='badge b-good'>达标</span></td><td>按 fixture_spec.holdout 分组：tuning=[&#x27;F-CPU-01&#x27;, &#x27;F-GPU-01&#x27;] 检出率 0.971（n=68）、holdout=[&#x27;F-ANIM-01&#x27;, &#x27;F-LOAD-01&#x27;] 检出率 0.955（n=66）；CLEAN 已排除（无缺陷，专供 FP 测量）</td></tr><tr><td><code>clean_fp_rate</code></td><td>&lt;=0.05</td><td class='n'>0.000</td><td class='n'>116</td><td><span class='badge b-good'>达标</span></td><td>CLEAN 自比自：阈值来自 CLEAN 自身，任何 detected 都是误报（29 轮的 detection.json 带 fp_selfcheck 字段）</td></tr><tr><td><code>ece_diff</code></td><td>&lt;=0.05</td><td class='n'>—</td><td class='n'>0</td><td><span class='badge b-dim'>未计算</span></td><td>需两侧各自的置信度×结局分箱；outcome 总数 2 条，单侧 n&lt;5 无法分箱（§7.3 小样本禁算）</td></tr><tr><td><code>n_eff_ratio</code></td><td>&gt;=0.5</td><td class='n'>0.500</td><td class='n'>2</td><td><span class='badge b-good'>达标</span></td><td>n_effective=1（独立夹具×档位上下文）/ n_trials=2；同一上下文重复运行按 §8.2 只计 1 次</td></tr><tr><td><code>sig_transferability</code></td><td>&gt;=0.8</td><td class='n'>—</td><td class='n'>0</td><td><span class='badge b-dim'>未计算</span></td><td>签名可迁移性需为同机制造变体夹具并做命中测试（§8.3），当前每机制仅 1 个缺陷夹具，无变体可比</td></tr><tr><td><code>cross_run_verdict_consistency</code></td><td>&gt;=0.9</td><td class='n'>—</td><td class='n'>2</td><td><span class='badge b-dim'>未计算</span></td><td>有判定的轮次 2 条，但没有一条带 protocol_fingerprint（巡检链路不产 detection.json）⇒ 按 G7 无法确认同协议可比，不拿&#x27;夹具同名&#x27;冒充可比。解锁路径：巡检把协议指纹写进 runreport</td></tr>
+</table>
+<div class="note"><b>整体结论：incomplete</b>
+（六项中 达标 3 项、
+不达标 0 项、未计算 3 项）。
+按 G14「缺任一项或任一项不达标 → 该阈值/权重/pattern 变更 blocked」，
+<b>当前任何升维提案都必须保持 blocked</b>。
+这不是流程失败——DESIGN §11 已预判第一轮必然如此，门禁在按设计工作。
+达标前提：n_effective ≥ 10 且六项全部可计算。</div>
+
+<footer>
+<b>达标门槛（让读者知道什么时候才有资格谈泛化，§8.8）</b>：
+本阶段 n_effective=1，
+升维与阈值变更需 n_effective ≥ 10（§3 维度三）且 §8.7 六项全部可计算并达标；
+趋势折线需可比轮次 ≥ 30（§7.3）。
+当前全部不满足 ⇒ 本报告一切结论等级为<b>方法学示范</b>。<br><br>
+<b>本报告有效性自检</b>：trace 纳入 38 / untraced 剔除
+0（G13）；不可检出清单 4 项且与检出率同屏
+（G20）；体检表六项齐（3 项未计算已注明原因）；
+成本与质量同轴（G15）；证据链索引每格可回溯（视图 6）。
+<br><br>
+数据截至本轮聚合；重新生成：<code>python -m upi report</code>。
+本报告只读，不提供任何改阈值或改权限的入口（§7.3 末条、AGENTS I3）。
+</footer></div></body></html>
