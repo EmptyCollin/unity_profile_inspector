@@ -1,9 +1,12 @@
 """`python -m upi <command>` —— 管线统一入口（独立进程，与 AI 助手无关）。
 
-  status        环境自检：Unity CLI / Editor 可达 / 标定链 / 探针 / 密钥存在性 / 巡检配置
+  status        环境自检：CLI / Editor / 标定链 / 探针 / 密钥 / 巡检配置 / 守护存活
   detect        水位检测一轮（等价 scripts/m1_detect.py）
-  patrol-once   巡检单轮：发作(只读) + 水位(重采)；检出按配置唤起状态机
-  monitor       前台周期巡检（Ctrl+C 停止；外部调度器用 patrol-once 拉起）
+  patrol-once   巡检单轮（前台阻塞）：发作(只读) + 水位(重采)，检出即出工单
+  start         后台启动常驻守护（不占终端；进度落 runs/daemon_* 供 UI 读）
+  ui            控制台界面：实时进度 + 单键开关采样/暂停/立即巡检/取消
+  stop          停止后台守护
+  monitor       前台跑常驻守护（想后台用 start；外部调度器用 patrol-once）
   resume        工单批准后续跑（--run <run_id>：从 fix 断点，不重烧采样/归因）
   drill ...     演练两阶段（透传 scripts/m4_drill.py 参数）
 
@@ -78,6 +81,28 @@ def cmd_status(_args=None) -> int:
         print(f"  配置加载        : 失败 {type(e).__name__}: {str(e)[:150]}")
         ok = False
 
+    # 守护是否在跑 + 有无待批工单：这两项是"能不能交给它自己跑"的关键，
+    # 只报配置不报存活等于没体检（实测中 UI/CLI 都要靠这两个数判断）
+    try:
+        from upi.core import events as E
+        running, dst = E.daemon_running()
+        if running:
+            print(f"  守护进程        : 运行中 pid={dst.get('pid')} "
+                  f"采样={'开' if dst.get('sampling_enabled') else '关'} "
+                  f"阶段={dst.get('phase')} 下次轮次={dst.get('next_round_at')}")
+        elif dst:
+            print(f"  守护进程        : 已停止（最后心跳 {dst.get('updated_at')}）")
+        else:
+            print("  守护进程        : 从未启动（python -m upi start 后台起）")
+        ot = (dst or {}).get("open_tickets") or []
+        if ot:
+            print(f"  待批工单        : {len(ot)} 张"
+                  f"（守护在等，未批不采基线）")
+            for p in ot[:2]:
+                print(f"                    {p}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  守护进程        : 探测失败 {type(e).__name__}: {str(e)[:120]}")
+
     print(f"自检结论: {'就绪' if ok else '有缺失项（↑）'}")
     return 0 if ok else 1
 
@@ -107,8 +132,51 @@ def cmd_patrol_once(_args=None) -> int:
 
 
 def cmd_monitor(_args=None) -> int:
-    from upi.agents.patrol import monitor_loop
-    return monitor_loop()
+    """前台常驻守护（占住当前终端，Ctrl+C 停）。想后台跑用 upi start。"""
+    from upi.agents.daemon import main as daemon_main
+    return daemon_main([])
+
+
+def cmd_start(_args=None) -> int:
+    """后台分离启动守护：不占终端，之后用 upi ui 附着观察与控制。
+
+    两道防呆：① 已有守护在跑就拒绝（双判据防僵尸）；② 启动后必须真的看到
+    心跳才报成功——否则会把"还在起进程"报成"启动成功"（假安心）。"""
+    import os
+    import subprocess
+    from upi.core import events as E
+    if E.daemon_running()[0]:
+        print("!! 守护已在运行（pid 存活且心跳新鲜）。要重启先 python -m upi stop")
+        return 1
+    flags = 0
+    if os.name == "nt":
+        flags = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    log = open(ROOT / "runs" / "daemon_stdout.log", "ab", buffering=0)
+    subprocess.Popen([sys.executable, "-m", "upi", "monitor"],
+                     cwd=str(ROOT), stdout=log, stderr=log,
+                     stdin=subprocess.DEVNULL, creationflags=flags)
+    for _ in range(12):
+        time.sleep(1)
+        running, st = E.daemon_running()
+        if running:
+            print(f"守护已后台启动 pid={st.get('pid')}，"
+                  f"界面：python -m upi ui ｜ 停止：python -m upi stop")
+            return 0
+    print("!! 12 秒内没看到守护心跳，启动可能失败。"
+          "查 runs/daemon_stdout.log 与 runs/daemon_events.jsonl")
+    return 1
+
+
+def cmd_stop(_args=None) -> int:
+    from upi.agents.daemon import main as daemon_main
+    return daemon_main(["stop"])
+
+
+def cmd_ui(_args=None) -> int:
+    """控制台界面：实时进度 + 单键控制（s 开关采样 / p 暂停 / r 立即巡检 /
+    c 取消本轮 / a 看工单 / q 退出）。非终端环境自动退化成一次性快照。"""
+    from upi.agents.ui import run_loop
+    return run_loop()
 
 
 def cmd_resume(args) -> int:
@@ -182,7 +250,9 @@ def cmd_drill(args) -> int:
 
 
 _CMDS = {"status": cmd_status, "detect": cmd_detect,
-         "patrol-once": cmd_patrol_once, "monitor": cmd_monitor,
+         "patrol-once": cmd_patrol_once,
+         "start": cmd_start, "stop": cmd_stop,
+         "monitor": cmd_monitor, "ui": cmd_ui,
          "resume": cmd_resume, "drill": cmd_drill}
 
 

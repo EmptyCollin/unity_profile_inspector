@@ -77,6 +77,14 @@ runs/a4_altertest_*/blocks/*/multiwin_full.json
 # 巡检可变运行态（样本消费偏移/冷却时间戳，进程本地状态非结论）
 runs/patrol_state.json
 
+# ── 守护/控制台运行态（进程本地状态非结论；事件与状态留档另见下）──
+runs/daemon.pid
+runs/daemon_status.json
+runs/daemon_progress.json
+runs/daemon_cmd.json
+runs/daemon_stdout.log
+# 运行时配置覆盖（UI 按 s 键写入）不入库：换机器默认应回落到 llm_config
+runs/daemon_conf.json
 # dry-run 工单渲染样例（可重生成的展示产物）
 runs/_dryrun_approval.md
 # 巡检单轮的工作束（multiwin_full.json 单文件 ~11MB，可重采再生）。
