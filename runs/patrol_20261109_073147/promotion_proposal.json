@@ -1,0 +1,18 @@
+{
+  "pattern_id": "pat-355fd665d2",
+  "n_effective": 1,
+  "n_trials": 1,
+  "success_rate_wilson_lower_bound": 0.20654329147389294,
+  "requested_tier": "auto",
+  "overfit_checklist": {},
+  "current_tier": "semi",
+  "status": "blocked",
+  "blocked_reasons": [
+    "缺 §8.7 过拟合体检表（G14：缺项即 blocked）",
+    "n_effective=1 < n_min=10（口径 §8.2）",
+    "Wilson 下界 0.207 < 0.9",
+    "平均 realized_over_expected=None < 0.8"
+  ],
+  "checklist_ok": {},
+  "note": "提案只提交人工批准，本模块不执行任何权限变更（AGENTS §1.7）"
+}

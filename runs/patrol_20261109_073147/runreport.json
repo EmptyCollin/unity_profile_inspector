@@ -1,0 +1,12 @@
+{
+  "run_id": "patrol_20261109_073147",
+  "fixture": "F-CPU-01",
+  "route": "proceed",
+  "error": "等待人工批准：D:\\unity_profile_inspector\\runs\\patrol_20261109_073147\\approvals\\APR-eaab522a2f\\request.md",
+  "attempts": 1,
+  "spent": {
+    "wallclock_s": 409.8,
+    "tokens": 0
+  },
+  "verdict_status": "resolved"
+}

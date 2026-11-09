@@ -1,0 +1,619 @@
+{
+  "run_id": "patrol_20261109_073147",
+  "fixture": "F-CPU-01",
+  "quality_tier": "urp-balanced",
+  "budget": {
+    "max_issues": 1,
+    "max_review_rounds": 1,
+    "max_attempts_per_issue": 1,
+    "wallclock_s": 3600,
+    "max_tokens": 60000
+  },
+  "spent": {
+    "wallclock_s": 409.8,
+    "tokens": 0
+  },
+  "findings": [
+    {
+      "kind": "issue",
+      "fixture": "F-CPU-01",
+      "metric": "gc_alloc_per_frame",
+      "magnitude": 68576.0,
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-GPU-01",
+      "metric": "drawCalls",
+      "magnitude": 80.0,
+      "detector": "DET-GPU-BATCHBREAK",
+      "signature": {
+        "dim": "drawCalls",
+        "metric": "drawCalls",
+        "mechanism": "per_renderer_material_instantiation",
+        "threshold": 10.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-ANIM-01",
+      "metric": "animator_process_animations_ns",
+      "magnitude": 361950.0,
+      "detector": "DET-ANIM-PARAMRTT",
+      "signature": {
+        "dim": "animator_process_animations_ns",
+        "metric": "animator_process_animations_ns",
+        "mechanism": "cross_layer_state_query_per_frame",
+        "threshold": 50000.0,
+        "threshold_source": "noise_calibration"
+      }
+    },
+    {
+      "kind": "issue",
+      "fixture": "F-LOAD-01",
+      "metric": "totalAllocatedBytes",
+      "magnitude": 28620830.5,
+      "detector": "DET-LOAD-SYNCPEAK",
+      "signature": {
+        "dim": "totalAllocatedBytes",
+        "metric": "totalAllocatedBytes",
+        "mechanism": "sync_resources_load_in_start",
+        "threshold": 2000000.0,
+        "threshold_source": "noise_calibration"
+      }
+    }
+  ],
+  "issue": {
+    "id": "ISS-F-CPU-01",
+    "fixture": "F-CPU-01",
+    "detector": "DET-CPU-GC-FRAMEALLOC",
+    "metric": "gc_alloc_per_frame",
+    "magnitude": 68576.0,
+    "evidence": {
+      "metric": "gc_alloc_per_frame",
+      "fixture": 76947.0,
+      "clean": 8371.0,
+      "reason": "degenerate_distribution ⇒ 仅绝对门限",
+      "stat_ok": null,
+      "biz_ok": true,
+      "delta": 68576.0,
+      "deviation_ratio": 9.192,
+      "verdict": "detected",
+      "detector": "DET-CPU-GC-FRAMEALLOC",
+      "detector_version": "v1",
+      "window_n": 4,
+      "issue_signature": {
+        "dim": "gc_alloc_per_frame",
+        "metric": "gc_alloc_per_frame",
+        "mechanism": "per_frame_heap_alloc_in_hot_path",
+        "threshold": 20000.0,
+        "threshold_source": "noise_calibration"
+      },
+      "magnitude": 68576.0
+    },
+    "state": "confirmed",
+    "anchor": "per_frame_heap_alloc_in_hot_path"
+  },
+  "hypotheses": [
+    {
+      "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {
+        "metric": "gc_alloc_per_frame",
+        "direction": "down",
+        "min_delta": 20000.0,
+        "source": "calibration:thresholds_2ba2656b6f17.json",
+        "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+      },
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "热路径每帧新建 Dictionary（可复用+Clear）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:50",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:55"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {
+        "metric": "gc_alloc_per_frame",
+        "direction": "down",
+        "min_delta": 20000.0,
+        "source": "calibration:thresholds_2ba2656b6f17.json",
+        "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+      },
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "每帧 LINQ 链（枚举器+闭包分配）（机制 anchor: linq_enumerator_closure_per_frame）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:39"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {
+        "metric": "gc_alloc_per_frame",
+        "direction": "down",
+        "min_delta": 20000.0,
+        "source": "calibration:thresholds_2ba2656b6f17.json",
+        "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+      },
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "每帧 GetComponent 重复查找（可 Awake 缓存）（机制 anchor: repeated_getcomponent_in_update）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {
+        "metric": "gc_alloc_per_frame",
+        "direction": "down",
+        "min_delta": 20000.0,
+        "source": "calibration:thresholds_2ba2656b6f17.json",
+        "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+      },
+      "veto_reasons": []
+    },
+    {
+      "root_cause": "枚举 ToString+字符串拼接每帧执行（可预生成表）（机制 anchor: enum_tostring_concat_per_frame）",
+      "code_anchors": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:48"
+      ],
+      "attribution_factors": {
+        "proximity": 0.7,
+        "explains_share": 0.6,
+        "competitiveness": 0.5,
+        "prior_hit": 0.5,
+        "counterfactual": 0.5,
+        "mechanism": 0.8
+      },
+      "confidence": 0.9421,
+      "weights_version": "hand-set-prior-v1",
+      "expected_effect": {
+        "metric": "gc_alloc_per_frame",
+        "direction": "down",
+        "min_delta": 20000.0,
+        "source": "calibration:thresholds_2ba2656b6f17.json",
+        "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"
+      },
+      "veto_reasons": []
+    }
+  ],
+  "edit_plan": {
+    "playbook_id": "PB-FULL-REUSE",
+    "diffs": [
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n        }",
+        "replace": "        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();\n\n        // 修复（PB-FULL-REUSE）：缓存 + 预生成。语义等价前提——state/level\n        // 在 Awake 后不再被改写（Update 全文无赋值点，已核对），故 ready 筛选、\n        // 排序结果、key 字符串均为常量，可一次预生成。\n        private Rigidbody _body;\n        private CapsuleCollider _col;\n        private List<SkillRuntime> _readyRanked;\n        private string[] _keyByIndex;\n        private readonly Dictionary<int, float> _reusedCooldown = new Dictionary<int, float>();\n\n        private void Awake()\n        {\n            for (int i = 0; i < skillCount; i++)\n                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });\n\n            _body = GetComponent<Rigidbody>();\n            _col = GetComponent<CapsuleCollider>();\n            _readyRanked = _skills.Where(x => x.state == SkillState.Ready)\n                                   .Where(x => x.level > 1)\n                                   .OrderByDescending(x => x.level).ThenBy(x => x.index).ToList();\n            _keyByIndex = new string[skillCount];\n            foreach (var s in _skills)\n                _keyByIndex[s.index] = s.index + \":\" + s.state + \":\"\n                    + (_body != null ? 1 : 0) + (_col != null ? 1 : 0);\n        }",
+        "expect_count": 1,
+        "_why": "缓冲/组件/键 预生成（Awake 扩展）"
+      },
+      {
+        "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+        "find": "            // ①②③④ 全部落在每帧路径上\n            var ready = new List<SkillRuntime>();                 // 每帧分配：List\n            foreach (var s in _skills)\n            {\n                if (s.state == SkillState.Ready) ready.Add(s);\n            }\n\n            var ranked = ready\n                .Where(x => x.level > 1)                          // LINQ 枚举器 + 闭包\n                .OrderByDescending(x => x.level)\n                .ThenBy(x => x.index)\n                .ToList();\n\n            foreach (var s in ranked)\n            {\n                var body = GetComponent<Rigidbody>();             // 每帧 GetComponent\n                var col = GetComponent<CapsuleCollider>();        // 每帧 GetComponent\n                var key = s.index + \":\" + s.state + \":\" + (body != null ? 1 : 0) + (col != null ? 1 : 0); // 枚举 ToString + 字符串拼接\n                s.lastKey = key;\n                var map = new Dictionary<string, int>();          // 每帧分配：Dictionary\n                map[key] = s.level;\n                s.score = map[key];\n            }\n\n            _cooldownMap = new Dictionary<int, float>();          // 每帧分配：Dictionary\n            for (int i = 0; i < _skills.Count; i++)\n                _cooldownMap[i] = Time.time + 0.1f * i;",
+        "replace": "            // 每帧分配清零：\n            foreach (var s in _readyRanked)\n            {\n                var key = _keyByIndex[s.index];\n                s.lastKey = key;\n                s.score = s.level;\n            }\n\n            _reusedCooldown.Clear();\n            for (int i = 0; i < _skills.Count; i++)\n                _reusedCooldown[i] = Time.time + 0.1f * i;\n            _cooldownMap = _reusedCooldown;",
+        "expect_count": 1,
+        "_why": "Update 热路径分配清零"
+      }
+    ],
+    "invariants_assert": [
+      "state/level 仅 Awake 赋值（静态核对）",
+      "map[key]=level;score=map[key] ⇒ score=level 恒等",
+      "_cooldownMap 声明保留（对外语义不破坏），改指向复用缓冲",
+      "P2 语义断言基建 pending（M7）——本条如实标注"
+    ],
+    "side_effect": "none",
+    "touched_assets": [
+      "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs"
+    ],
+    "permission_tier": "blocked"
+  },
+  "snapshot": {
+    "attempt_id": "m4-073416",
+    "git_ref": "upi/attempt-m4-073416",
+    "head_before": "e7e71c11db19ba28cf6d01fd7da3303276c9a163",
+    "asset_manifest_hash": "8907f81a458d0419",
+    "scene_guid": "filehash:7be81facbec7c6ac",
+    "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+    "created_at": "2026-11-09T07:34:16",
+    "root": "D:\\unity_profile_inspector",
+    "metadata": {}
+  },
+  "pre_attempt": {
+    "stamp": "073416",
+    "before_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_073147\\pre_attempt_073416\\multiwin_full.json",
+    "floor_before": {
+      "monoHeapBytes": {
+        "pre_gc": 26086522880.0,
+        "post_gc": 26086522880.0
+      },
+      "monoUsedBytes": {
+        "pre_gc": 2386878464.0,
+        "post_gc": 2377428992.0
+      },
+      "totalAllocatedBytes": {
+        "pre_gc": 7067160475.0,
+        "post_gc": 7102093895.0
+      },
+      "totalReservedBytes": {
+        "pre_gc": 12077703168.0,
+        "post_gc": 12077703168.0
+      }
+    },
+    "floor_before_err": null
+  },
+  "approval_request": {
+    "request_id": "APR-eaab522a2f",
+    "md": "D:\\unity_profile_inspector\\runs\\patrol_20261109_073147\\approvals\\APR-eaab522a2f\\request.md",
+    "decision_path": "D:\\unity_profile_inspector\\runs\\patrol_20261109_073147\\approvals\\APR-eaab522a2f\\decision.json"
+  },
+  "verdict": {
+    "target": {
+      "metric": "gc_alloc_per_frame",
+      "before": 77977.0,
+      "after": 9401.0,
+      "delta": 68576.0,
+      "sigma": 0.0,
+      "significant": true,
+      "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+      "degenerate": true
+    },
+    "guards": [
+      {
+        "metric": "animator_process_animations_ns",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "animator_process_graph_ns",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "batches",
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "cpuFrameTimeMs",
+        "before": 1.915,
+        "after": 1.75,
+        "delta": -0.165,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "cpuMainThreadFrameTimeMs",
+        "before": 0.848,
+        "after": 0.648,
+        "delta": -0.2,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "drawCalls",
+        "before": 47.0,
+        "after": 47.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "gpuFrameTimeMs",
+        "before": 1.652,
+        "after": 1.553,
+        "delta": -0.099,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "monoHeapBytes",
+        "before": 26086522880.0,
+        "after": 26086522880.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": {
+          "before_side": {
+            "pre_gc": 26086522880.0,
+            "post_gc": 26086522880.0
+          },
+          "after_side": {
+            "pre_gc": 26086522880.0,
+            "post_gc": 26086522880.0
+          },
+          "window_delta_archive": 0.0
+        },
+        "cleared_by_floor": false,
+        "value_source": "fresh_post_gc",
+        "basis": "post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.0% after=0.0%"
+      },
+      {
+        "metric": "monoUsedBytes",
+        "before": 2377428992.0,
+        "after": 115036160.0,
+        "delta": -2262392832.0,
+        "regressed": false,
+        "gc_floor_check": {
+          "before_side": {
+            "pre_gc": 2386878464.0,
+            "post_gc": 2377428992.0
+          },
+          "after_side": {
+            "pre_gc": 118413312.0,
+            "post_gc": 115036160.0
+          },
+          "window_delta_archive": -2268326912.0
+        },
+        "cleared_by_floor": false,
+        "value_source": "fresh_post_gc",
+        "basis": "post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.2% after=4.1%"
+      },
+      {
+        "metric": "setPassCalls",
+        "before": 9.0,
+        "after": 9.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "totalAllocatedBytes",
+        "before": 7102093895.0,
+        "after": 6427836365.0,
+        "delta": -674257530.0,
+        "regressed": false,
+        "gc_floor_check": {
+          "before_side": {
+            "pre_gc": 7067160475.0,
+            "post_gc": 7102093895.0
+          },
+          "after_side": {
+            "pre_gc": 6370582417.5,
+            "post_gc": 6427836365.0
+          },
+          "window_delta_archive": -711620478.25
+        },
+        "cleared_by_floor": false,
+        "value_source": "fresh_post_gc",
+        "basis": "post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=1.6% after=1.6%"
+      },
+      {
+        "metric": "totalReservedBytes",
+        "before": 12077703168.0,
+        "after": 12077703168.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": {
+          "before_side": {
+            "pre_gc": 12077703168.0,
+            "post_gc": 12077703168.0
+          },
+          "after_side": {
+            "pre_gc": 12077703168.0,
+            "post_gc": 12077703168.0
+          },
+          "window_delta_archive": 0.0
+        },
+        "cleared_by_floor": false,
+        "value_source": "fresh_post_gc",
+        "basis": "post_gc 口径（净常驻代理），容差 2%；pre_gc 防抖偏差 before=0.0% after=0.0%"
+      },
+      {
+        "metric": "total_used_per_frame",
+        "before": 10261026926.5,
+        "after": 7282605075.5,
+        "delta": -2978421851.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "triangles",
+        "before": 2166.0,
+        "after": 2166.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      },
+      {
+        "metric": "vertices",
+        "before": 6018.0,
+        "after": 6018.0,
+        "delta": 0.0,
+        "regressed": false,
+        "gc_floor_check": null,
+        "cleared_by_floor": false,
+        "value_source": "window",
+        "basis": ""
+      }
+    ],
+    "perception": {
+      "render_diff_score": null,
+      "anim_event_diff": null,
+      "replay_divergence": null,
+      "passed": false
+    },
+    "conflicts": [],
+    "compile_ok": true,
+    "realized_over_expected": 3.429,
+    "status": "resolved"
+  },
+  "review_decision": null,
+  "review_reason": null,
+  "attempts": 1,
+  "route": "proceed",
+  "records": [
+    {
+      "kind": "fix",
+      "ts": "073150",
+      "git_ref": "upi/attempt-m4-073150",
+      "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "snapshot": {
+        "attempt_id": "m4-073150",
+        "git_ref": "upi/attempt-m4-073150",
+        "head_before": "13ec75cde5d7d2191a69d184856d7a548e3cdf8e",
+        "asset_manifest_hash": "8907f81a458d0419",
+        "scene_guid": "filehash:7be81facbec7c6ac",
+        "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+        "created_at": "2026-11-09T07:31:54",
+        "root": "D:\\unity_profile_inspector",
+        "metadata": {}
+      },
+      "execute": {
+        "status": "awaiting_approval",
+        "request_id": "APR-eaab522a2f"
+      }
+    },
+    {
+      "kind": "fix",
+      "ts": "073416",
+      "git_ref": "upi/attempt-m4-073416",
+      "root_cause": "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）",
+      "snapshot": {
+        "attempt_id": "m4-073416",
+        "git_ref": "upi/attempt-m4-073416",
+        "head_before": "e7e71c11db19ba28cf6d01fd7da3303276c9a163",
+        "asset_manifest_hash": "8907f81a458d0419",
+        "scene_guid": "filehash:7be81facbec7c6ac",
+        "protocol_fingerprint": "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0",
+        "created_at": "2026-11-09T07:34:16",
+        "root": "D:\\unity_profile_inspector",
+        "metadata": {}
+      },
+      "execute": {
+        "playbook_id": "PB-FULL-REUSE",
+        "tier": "blocked",
+        "status": "applied",
+        "applied": [
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          },
+          {
+            "file": "fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
+            "replaced": 1
+          }
+        ],
+        "compile": {
+          "ok": true,
+          "errors": []
+        },
+        "approval_note": "用户 于 2026-11-09T07:34:16 批准工单 APR-eaab522a2f：2026-11-09 对话直接批准（测批准后链路）：同意 PB-FULL-REUSE 对 CombatSkillManager.cs 的 2 条语义保持改动（Awake 预生成缓存 + Update 热路径分配清零）；预期改善 >=20000 B/frame（G1 判据重述）；改坏按快照 tag 回滚"
+      }
+    },
+    {
+      "kind": "verify",
+      "status": "resolved",
+      "target": {
+        "metric": "gc_alloc_per_frame",
+        "before": 77977.0,
+        "after": 9401.0,
+        "delta": 68576.0,
+        "sigma": 0.0,
+        "significant": true,
+        "significance_basis": "degenerate ⇒ 绝对门限 min_magnitude=20000.0",
+        "degenerate": true
+      },
+      "unevaluated": [],
+      "floor_before_err": null
+    },
+    {
+      "kind": "record",
+      "pattern_id": "pat-355fd665d2",
+      "proposal_status": "blocked",
+      "blocked_reasons": [
+        "缺 §8.7 过拟合体检表（G14：缺项即 blocked）",
+        "n_effective=1 < n_min=10（口径 §8.2）",
+        "Wilson 下界 0.207 < 0.9",
+        "平均 realized_over_expected=None < 0.8"
+      ]
+    }
+  ],
+  "error": "等待人工批准：D:\\unity_profile_inspector\\runs\\patrol_20261109_073147\\approvals\\APR-eaab522a2f\\request.md"
+}
