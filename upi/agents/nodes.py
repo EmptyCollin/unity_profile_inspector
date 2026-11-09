@@ -296,8 +296,12 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     "records": st.get("records", []) + [rec]}
         pre = {"stamp": stamp, "before_path": before["_path"],
                "floor_before": floor_before, "floor_before_err": fb_err}
+        # attempts 不在这里 +1（真机实测撞出的语义错）：配额计的是
+        # "评估过一次的完整尝试"。verify 崩溃（仪器漂移/编辑器消失）会
+        # 回滚且不出 verdict——那是一次作废，不该吃掉 G11 的唯一配额，
+        # 否则环境抖一下就把重试机会烧光（死锁实测：resume 被
+        # budget_exceeded(attempts) 永远拦死）。计数移到 verify 出判定处。
         return {"snapshot": snap.to_dict(), "pre_attempt": pre,
-                "attempts": st.get("attempts", 0) + 1,
                 "records": st.get("records", []) + [rec], "route": "proceed"}
 
     def verify(st: dict) -> dict:
@@ -318,7 +322,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         rec = {"kind": "verify", "status": v.status,
                "target": v.target, "unevaluated": detail.get("memory_guards_unevaluated", []),
                "floor_before_err": pre["floor_before_err"]}
+        # 判定产出才计 attempt（与 fix 侧注释配对）：走到这里说明这次
+        # 写入已被同一协议双侧采样评估过，无论 resolved/regressed 都算
+        # 消耗了一次完整尝试；反之 fix 落地后 verify 崩溃不计数。
         return {"verdict": v.model_dump(),
+                "attempts": st.get("attempts", 0) + 1,
                 "records": st.get("records", []) + [rec], "route": "proceed"}
 
     def review(st: dict) -> dict:
