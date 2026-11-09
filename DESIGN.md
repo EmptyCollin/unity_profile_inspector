@@ -255,7 +255,7 @@ Detector = {
 
 | 面 | 落点 | 关键约束 |
 |---|---|---|
-| 常驻 | `upi/agents/daemon.py`：轮次跑工作线程，主线程只做命令消费、心跳刷新、进度转发 | 采样的 25 分钟阻塞不能卡主循环，否则心跳停更、命令失联，活守护会被界面看成死的 |
+| 常驻 | `upi/agents/daemon.py`：轮次跑工作线程，主线程只做命令消费、心跳刷新、进度转发 | 采样的十几分钟阻塞不能卡主循环，否则心跳停更、命令失联，活守护会被界面看成死的 |
 | 可观测 | `runs/daemon_events.jsonl`（事件流）+ `daemon_status.json`（快照）+ `m1_multiwin.report()` 逐阶段进度 | 静默轮、被忽略的命令、被取消的轮都留痕；被 cancel 的半轮记 cancelled，**不得冒充静默**（B7：采集失败≠未检出） |
 | 手动开关 | UI 键 `s` / 命令 `enable`/`disable`，覆盖写 `daemon_conf.json`（活过重启，优先于本段配置） | 存盘必须读文件再合并——整文件覆盖会抹掉 `auto_fix` 等其他键（实测撞出） |
 | 优雅停止 | `upi stop` 发 quit 命令 → 守护自己收采样子进程 + 清 pid + 留停止事件；20s 未被消费才硬杀兜底 | Windows 上 `os.kill(pid,15)` 是 TerminateProcess，守护不执行 finally ⇒ pid 残留、采样子进程变孤儿继续占编辑器；探活 `os.kill(pid,0)` 在 Windows 同样会杀进程，必须走 OpenProcess |

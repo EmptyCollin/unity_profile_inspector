@@ -16,7 +16,7 @@
 
 --dry-run：只验 diff 命中与工单可渲染，不跑真模型不写入（先烧这个，别先烧大的）。
 成本预期：阶段一 ≈ detect 1 分钟 + diagnose 5 个小请求（积分）；
-          阶段二 ≈ 双侧采样+修复+验证+回滚 约 25 分钟墙钟，LLM 零消耗。
+          阶段二 ≈ 一次干净 attempt 约 7 分钟（before+after 各 2.4min 重采 + 编译 + 判定，实测值），LLM 零消耗。重试会成倍增加。
 """
 import argparse
 import json
