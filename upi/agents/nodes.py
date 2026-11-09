@@ -242,7 +242,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
         # ── 先报后批（M4 / I3：修改权限只来自权限矩阵，不来自模型自评）──
         # 顺序讲究：快照先建（秒级、无副作用，且工单第 4 件套要写真实 tag），
-        # 工单递交并等人决定；**未获批准就不采基线**——一轮采样 25 分钟，
+        # 工单递交并等人决定；**未获批准就不采基线**——单夹具重采一轮约 2.4 分钟，
         # 被拒时那笔成本是白烧的。批准文本只在这里读入，fixer 的闸照旧独立生效。
         if ep.permission_tier != "auto" and not note.strip():
             store = ApprovalStore(run_dir)

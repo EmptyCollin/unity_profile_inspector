@@ -8,7 +8,7 @@
   ③ 进度事件流：轮次、夹具×窗口、检出、工单、决定、被忽略的命令，
      全部落 daemon_events.jsonl——"执行到哪"必须是可读出来的事实。
 
-线程纪律：patrol_once 阻塞约 25 分钟，期间主循环不能停（命令要响应、
+线程纪律：patrol_once 阻塞约 12 分钟（实测），期间主循环不能停（命令要响应、
 心跳要刷新）。故轮次跑在工作线程，主线程只做三件事：消费命令、刷心跳、
 轮询子进程进度文件并转发成事件。共享状态只读文件，不共享内存（I9）。
 
@@ -300,8 +300,9 @@ class Daemon:
         return open_t, go
 
     def _start_resume(self, run_id: str, ticket: Path):
-        """续跑异步化：_resume_ticket 阻塞约 40 分钟，放主循环里跑
-        会让心跳停更、命令通道失去响应——UI 会把活守护看成死了。"""
+        """续跑异步化：_resume_ticket 阻塞约 7 分钟（一次干净 attempt 实测：
+        before+after 各 2.4min 重采 + 编译 + 判定），放主循环里跑会让心跳停更、
+        命令通道失去响应——UI 会把活守护看成死了。"""
         with self._lock:
             if self.busy:
                 return

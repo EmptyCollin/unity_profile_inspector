@@ -304,7 +304,7 @@ def main():
 
     print(f"\n==== 巡检离线测试: {len(PASS)} 通过, {len(FAIL)} 失败"
           + (f" {FAIL}" if FAIL else ""))
-    print("边界声明：唤起状态机用替身（真唤起=真采样 25 分钟）；水通路判据是"
+    print("边界声明：唤起状态机用替身（真唤起=单夹具重采约 2.4 分钟）；水通路判据是"
           "真 compare+真标定文件，只是束数据为合成。patrol 的真实端到端"
           "并入实测轮。")
     shutil.rmtree(TMP, ignore_errors=True)
