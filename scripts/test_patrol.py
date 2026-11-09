@@ -29,9 +29,10 @@ TMP = ROOT / "runs" / "_patrol_test"
 PASS, FAIL = [], []
 
 
-def check(name, cond):
+def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
-    print(f"   [{'ok' if cond else 'FAIL'}] {name}")
+    print(f"   [{'ok' if cond else 'FAIL'}] {name}"
+          + ("" if cond else f"  ← {str(detail)[:130]}"))
 
 
 def win_metrics(vals):
@@ -137,72 +138,122 @@ def main():
           "CLEAN" in (P.patrol_waterline({"fixtures": ["F-CPU-01"]},
                                          TMP / "w1")["blindspot"] or ""))
 
-    # 重采失败：mock subprocess 造个 rc≠0 且无输出
-    import subprocess as sp
-    real_run = sp.run
+    # ── 重采子进程替身 ──
+    # ⚠️ 桩必须挂在 P.spawn_resample（我方定义的入口），不要挂 subprocess.run/Popen：
+    #   实现从 run 换成 Popen 时，挂在 run 上的桩会**静默失效**——不报错，
+    #   只是再也不被调用，于是判据链断言集体变红，看着像产品坏了（本轮实测踩过）。
+    from upi.core import events as E
+    E.isolate(TMP)                 # 取消标志/子进程登记都不落真实 runs/
+    _real_spawn = P.spawn_resample
 
-    class FakeP:
-        returncode = 3
-        stdout = "boom"
-        stderr = ""
-    sp.run = lambda *a, **k: FakeP()
+
+    class FakeProc:
+        """最小进程替身。
+
+        alive=True 时 poll() 一直返回 None：用来覆盖"父进程先看到取消标志、
+        子进程还在跑"这条分支（此时实现必须先请求收尾，而不是丢下孤儿往下走）。
+        alive=False 时 poll() 立刻给 rc，覆盖"自己已收尾"的正常路径。
+        """
+
+        def __init__(self, rc=0, bundle=None, bdir=None, log="", alive=False):
+            self.pid = 424242
+            self._rc = rc
+            self.returncode = rc
+            self.bundle = bundle
+            self.bdir = bdir
+            self.alive = alive
+            self.killed = False
+            self.cancel_seen = False
+            if log and bdir is not None:
+                bdir.mkdir(parents=True, exist_ok=True)
+                (bdir / "resample.log").write_text(log, encoding="utf-8")
+
+        def poll(self):
+            if self.alive:
+                return None
+            if self.bundle is not None and self.bdir is not None:
+                self.bdir.mkdir(parents=True, exist_ok=True)
+                (self.bdir / "multiwin_full.json").write_text(
+                    json.dumps(self.bundle), encoding="utf-8")
+                self.bundle = None
+            return self._rc
+
+        def kill(self):
+            self.killed = True
+            # 真实语义：被 kill 就是 TerminateProcess，退出码是硬杀码。
+            # 不这么写的话 kill 分支会返回 rc=3，"现场干净"的判定就成了假象。
+            self._rc = self.returncode = E.RC_HARD_KILL
+
+        def wait(self, timeout=None):
+            return self._rc
+
+    _last_proc: list = []    # 捕获替身实例：要断言"是否真强杀、标志是否清干净"
+
+    def use_spawn(rc=0, bundle=None, bdir=None, log="", alive=False):
+        def _mk(cmd, log_file):
+            fp = FakeProc(rc=rc, bundle=bundle, bdir=bdir, log=log, alive=alive)
+            _last_proc.clear()
+            _last_proc.append(fp)
+            return fp
+        P.spawn_resample = _mk
+
+    def restore_spawn():
+        P.spawn_resample = _real_spawn
+
+    # 重采失败（rc≠0 且无束文件）
+    (TMP / "w2").mkdir(parents=True, exist_ok=True)
+    use_spawn(rc=3, log="boom")
     try:
         r = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
                                 "windows": 4, "waterline_timeout_s": 5},
                                TMP / "w2")
     finally:
-        sp.run = real_run
+        restore_spawn()
     check("重采失败 ⇒ 盲区（rc 可见）",
           r["blindspot"] and "rc=3" in r["blindspot"])
 
-    # 合成超阈束：把 bundle 落盘后跳过重采（mock sp.run 写文件）
-    def make_fake_run(defect):
-        def _f(*a, **k):
-            (TMP / "w3" / "multiwin_full.json").write_text(
-                json.dumps(synth_bundle(cpu_defect=defect)), encoding="utf-8")
-            return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})
-        return _f
+    # 合成超阈束：让替身把 bundle 落盘，判据链照常跑
+    def synth_to(bdir, bundle_obj):
+        bdir.mkdir(parents=True, exist_ok=True)
+        use_spawn(rc=0, bundle=bundle_obj, bdir=bdir)
+
     (TMP / "w3").mkdir(parents=True)
-    sp.run = make_fake_run(True)
+    synth_to(TMP / "w3", synth_bundle(cpu_defect=True))
     try:
         r = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
                                 "windows": 4, "waterline_timeout_s": 5},
                                TMP / "w3")
     finally:
-        sp.run = real_run
+        restore_spawn()
     f = r["findings"][0] if r["findings"] else {}
     check("超阈缺陷束 ⇒ 检出且 magnitude 非空（键名回归）",
           f.get("detector") == "DET-CPU-GC-FRAMEALLOC"
           and f.get("magnitude") not in (None, 0))
-    sp.run = make_fake_run(False)
+    synth_to(TMP / "w3", synth_bundle(cpu_defect=False))
     try:
         r = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
                                 "windows": 4, "waterline_timeout_s": 5},
                                TMP / "w3")
     finally:
-        sp.run = real_run
+        restore_spawn()
     check("正常束 ⇒ 零检出", not r["findings"] and not r["blindspot"])
 
     # 零基线无穷比值清洗（实测轮撞出：F-ANIM-01 ratio=Infinity 写进 JSONL）
-    def make_fake_run_anim(*a, **k):
+    def anim_bundle():
         doc = synth_bundle()
         clean_wins = doc["fixtures"]["CLEAN"]["windows"]
         # F-ANIM-01 = CLEAN 的全部窗口，只把 a2 动画序列中位推到缺陷量级
         doc["fixtures"]["F-ANIM-01"] = {
             "windows": [dict(w, a2=dict(w["a2"], anim_median=344300.0))
                         for w in clean_wins]}
-        (TMP / "w5").mkdir(parents=True, exist_ok=True)
-        (TMP / "w5" / "multiwin_full.json").write_text(
-            json.dumps(doc), encoding="utf-8")
-        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})
-    _saved = sp.run
-    sp.run = lambda *a, **k: make_fake_run_anim()
+        return doc
+    synth_to(TMP / "w5", anim_bundle())
     try:
         r5 = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01", "F-ANIM-01"],
                                  "windows": 4, "waterline_timeout_s": 5},
                                 TMP / "w5")
     finally:
-        sp.run = _saved
+        restore_spawn()
     anim_f = [f for f in r5["findings"] if f["fixture"] == "F-ANIM-01"]
     check("零基线 F-ANIM-01 仍检出（绝对门限成立），但 ratio 清洗为 None+标注",
           len(anim_f) == 1 and anim_f[0]["deviation_ratio"] is None
@@ -215,23 +266,88 @@ def main():
     check("findings strict-JSON 可解析（Infinity 扩展不再出现）", strict_ok)
 
     # 静默假象闸：缺陷夹具窗口为空（采集失败的束形状）⇒ 盲区，不冒充零检出
-    def make_fake_run_broken(*a, **k):
+    def broken_bundle():
         doc = synth_bundle()
         doc["fixtures"]["F-CPU-01"] = {"windows": [], "error": "编辑器未就绪"}
-        (TMP / "w4").mkdir(parents=True, exist_ok=True)
-        (TMP / "w4" / "multiwin_full.json").write_text(
-            json.dumps(doc), encoding="utf-8")
-        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})
-    _saved = sp.run
-    sp.run = lambda *a, **k: make_fake_run_broken()
+        return doc
+    synth_to(TMP / "w4", broken_bundle())
     try:
         rb = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
                                  "windows": 4, "waterline_timeout_s": 5},
                                 TMP / "w4")
     finally:
-        sp.run = _saved
+        restore_spawn()
     check("夹具 0 窗口的束 ⇒ 盲区（采集失败≠未检出，禁产静默轮）",
           rb["blindspot"] and "有效前提" in rb["blindspot"] and not rb["findings"])
+
+    # ── 取消通路的三种留痕（阶段 3 新增；B7 要求取消≠失败≠静默）──
+    print("== ②b 取消与超时的留痕区分 ==")
+    # ── 取消 / 硬杀 / 超时三条留痕必须能分开（B7：取消≠失败≠静默）──
+    # 三种情况要用**不同的替身行为**才走得进去：
+    #   (b) 子进程自己收尾 → 立刻给 rc=3
+    #   外力硬杀        → 立刻给 rc=15，且没人请求过取消
+    #   超时            → 一直不退出（alive=True）+ timeout_s≈0 + 宽限期调零
+    # 三条都跑同一个"立刻退出"的替身的话，超时分支根本进不去，
+    # 测试看着绿其实只测了 (b)——这是本轮实测撞出来的用例设计错。
+    (TMP / "wc").mkdir(parents=True, exist_ok=True)
+    _grace_bak = P.GRACE_S
+    P.GRACE_S = 0                        # 宽限期调零：不等真 150 秒
+
+    # (b) 自行收尾：现场干净，不计入连续故障
+    use_spawn(rc=3, bundle=synth_bundle(), bdir=TMP / "wc")
+    try:
+        rc_cancel = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
+                                         "windows": 4, "waterline_timeout_s": 5},
+                                        TMP / "wc")
+    finally:
+        restore_spawn()
+    check("取消轮 ⇒ cancelled=True 且标 clean",
+          rc_cancel.get("cancelled") is True
+          and rc_cancel.get("cancelled_clean") is True, str(rc_cancel)[:110])
+    check("取消轮束不送判据链（残缺束禁判定，B7）", not rc_cancel["findings"])
+
+    # 外力硬杀：本方没请求过取消，现场状态未知，必须提示人工确认
+    use_spawn(rc=15, bdir=TMP / "wc")
+    try:
+        rc_kill = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
+                                      "windows": 4, "waterline_timeout_s": 5},
+                                     TMP / "wc")
+    finally:
+        restore_spawn()
+    check("硬杀现场 ⇒ 标 killed 并提示确认 Play 态",
+          rc_kill.get("killed") is True and "Play" in (rc_kill["blindspot"] or ""),
+          str(rc_kill["blindspot"])[:120])
+    # 注意 quiet 是 patrol_once 才组装的字段，本层返回值里没有——
+    # 断言只能针对被调用方的实际返回结构写，越界引用会直接 KeyError。
+    check("硬杀轮不冒充取消、也不产判定",
+          rc_kill.get("cancelled") is not True and not rc_kill["findings"],
+          str(rc_kill)[:110])
+
+    # 超时：进程不退出 → 父进程判超时 → 请求收尾 → 宽限期到 → kill
+    (TMP / "wt").mkdir(parents=True, exist_ok=True)
+    use_spawn(rc=0, bdir=TMP / "wt", log="窗口 1/4 …", alive=True)
+    try:
+        rt = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
+                                 "windows": 4, "waterline_timeout_s": 1},
+                                TMP / "wt")
+    finally:
+        restore_spawn()
+        P.GRACE_S = _grace_bak
+    check("超时轮 ⇒ 标 timed_out 且束不判定",
+          rt.get("timed_out") is True and not rt["findings"], str(rt)[:120])
+    # ⚠️ 原来这条写成 "(束文件存在) or (not findings)"——后半段与上一条断言
+    #   完全重复，恒为真，测不出任何东西。超时分支真正要保证的是三件事：
+    #   ① 走了取消通道（不是丢下孤儿就跑）② 宽限期用尽后真的强杀了
+    #   ③ 归因仍是"超时"而不是"用户取消"（实现曾只看退出码，会把
+    #      照办收尾的超时轮改写成人为停止，处置方向就错了）。
+    # 需要拿到替身实例本身，故让 use_spawn 把最后一次造出来的对象留住。
+    check("超时轮 ⇒ 走了取消通道且强杀兜底（不留孤儿）",
+          _last_proc[0] is not None and _last_proc[0].killed is True,
+          str(_last_proc[0].__dict__)[:120] if _last_proc[0] else "无替身实例")
+    check("超时轮 ⇒ 取消标志已被清理（不遗留给下一轮）",
+          not E.cancel_requested(_last_proc[0].pid), "标志仍在")
+    check("超时轮不得被误标成用户取消（归因缺陷回归）",
+          rt.get("cancelled") is not True, str(rt)[:110])
 
     print("== ③ patrol_once：留痕 / 唤起 / 冷却 / 排队 ==")
     woken = []
@@ -312,4 +428,6 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.exit(main())
+
     sys.exit(main())

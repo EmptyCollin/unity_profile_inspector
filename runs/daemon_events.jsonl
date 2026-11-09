@@ -18,3 +18,24 @@
 {"ts": "2026-11-09T16:51:38", "kind": "daemon_quit_cmd"}
 {"ts": "2026-11-09T16:51:38", "kind": "round_finished", "seconds": 14.1, "findings": 0, "quiet": false, "blindspots": ["重采失败（rc=15）：stdout尾= stderr尾="], "wakes": [], "cancelled": true}
 {"ts": "2026-11-09T16:51:40", "kind": "daemon_stopped", "pid": 28048}
+{"ts": "2026-11-09T22:28:27", "kind": "cancel_requested", "target_pid": 37044, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:28:29", "kind": "child_graceful_exit", "pid": 37044, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:28:35", "kind": "cancel_requested", "target_pid": 26148, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:28:37", "kind": "child_graceful_exit", "pid": 26148, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:28:43", "kind": "cancel_requested", "target_pid": 31576, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:28:45", "kind": "child_graceful_exit", "pid": 31576, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:28:51", "kind": "cancel_requested", "target_pid": 18028, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:28:53", "kind": "child_graceful_exit", "pid": 18028, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:28:59", "kind": "cancel_requested", "target_pid": 14672, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:01", "kind": "child_graceful_exit", "pid": 14672, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:29:14", "kind": "cancel_requested", "target_pid": 31596, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:16", "kind": "child_graceful_exit", "pid": 31596, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:29:22", "kind": "cancel_requested", "target_pid": 37840, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:24", "kind": "child_graceful_exit", "pid": 37840, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:29:30", "kind": "cancel_requested", "target_pid": 37500, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:32", "kind": "child_graceful_exit", "pid": 37500, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:29:38", "kind": "cancel_requested", "target_pid": 22272, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:40", "kind": "child_graceful_exit", "pid": 22272, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:29:46", "kind": "cancel_requested", "target_pid": 36980, "reason": "waterline_timeout"}
+{"ts": "2026-11-09T22:29:48", "kind": "child_graceful_exit", "pid": 36980, "reason": "waterline_timeout", "rc": 3}
+{"ts": "2026-11-09T22:49:50", "kind": "cancel_flags_swept", "n": 10}

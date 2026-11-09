@@ -29,6 +29,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from upi.core import events as EV        # noqa: E402  取消通道（父进程立标志）
+
+# 被取消时用的退出码。为什么不用 15：硬杀（TerminateProcess）的退出码就是 15，
+# 两者混用会让"自己收尾"与"被强杀"在留痕上看不出区别——而这两种情况的现场
+# 完全不同（前者已退 Play、卸了回调；后者编辑器还停在 Play 态）。
+RC_CANCELLED = 3
+
 PROJECT = ROOT / "fixtures" / "upi-fixture"
 SCENES_DIR = PROJECT / "Assets/UpiFixtures/Scenes"
 PROBE = ROOT / "runs/_probe"
@@ -228,7 +236,46 @@ def sample_scene(fixture: str, windows: int) -> dict:
     print("  进 Play:", (cmd("editor.playmode start").get("data") or {}).get("result", "失败"))
     report("play_enter", fixture)
     time.sleep(6)
+    def frames_now() -> int | None:
+        """读一次 Time.frameCount；读不到返回 None（不猜 0）。"""
+        o = ev("return UnityEngine.Time.frameCount;")
+        try:
+            return int(str(o).strip().strip('"'))
+        except (TypeError, ValueError):
+            return None
+
+    def frames_advancing(wait_s: float = 3.0) -> tuple[bool, str]:
+        """失焦停帧守卫（DESIGN §12 实测：失焦即停出帧）。
+
+        为什么必须实测而不是只设 runInBackground=true：那个开关只保证
+        "后台时出帧"，窗口被最小化/全屏应用抢占等情况下实测照样会停帧。
+        停帧时 get_performance 读的是**上一帧快照**（§12 另一条实测），
+        于是数值恒定不变、MAD=0，判据链会把一个"根本没在跑"的现场
+        读成"极稳定的正常水位"——这是最危险的失效形态：既非报错也非检出，
+        而是把停摆冒充成健康。宁可这一轮不采（专用退出码，父进程记盲区）。
+        """
+        a = frames_now()
+        time.sleep(wait_s)
+        b = frames_now()
+        if a is None or b is None:
+            return False, f"帧号读取失败（a={a} b={b}）"
+        if b <= a:
+            return False, f"{wait_s:.0f}s 内帧号未推进（{a}→{b}），疑失焦/最小化停帧"
+        return True, f"帧号 {a}→{b}（+{b - a}）"
+
     ev('UnityEngine.Application.targetFrameRate = -1; UnityEngine.Application.runInBackground = true; return "uncapped";')
+
+    # 失焦守卫：进 Play 后先确认"真的在出帧"再采。
+    ok_f, msg_f = frames_advancing()
+    if not ok_f:
+        print("  !! 采前体检未过:", msg_f)
+        # 必须先退 Play 再返回：不停 Play 就退出，会把编辑器留在播放态，
+        # 下一个进程进来读到的是脏现场（这正是要防的事，不能自己制造）
+        cmd("editor.playmode stop")
+        time.sleep(4)
+        report("precondition_failed", fixture, note=msg_f[:100])
+        return {"error": f"采前体检未过：{msg_f}"}
+    print("  采前体检:", msg_f)
 
     if FULL_SESSION:
         out = ev(SAMPLER_SRC, timeout=260)
@@ -240,6 +287,19 @@ def sample_scene(fixture: str, windows: int) -> dict:
 
     wins = []
     for i in range(windows):
+        # ── 取消检查点（窗口边界）──
+        # 为什么放这里：一个窗口约 20~30 秒（预热 + 20 次轮询 + A2 录制），
+        # 是最细又不打断单次采集的粒度。再往下放（poll 之间）会把一个窗口
+        # 采成半截，那个窗口的中位数就不可用了——宁可少一个完整窗口，
+        # 也不要一个残缺窗口进统计（I1）。
+        if EV.cancelled_for_me():
+            print(f"    取消：在第 {i + 1}/{windows} 个窗口边界收尾")
+            # 收尾必须做，这正是优雅取消比硬杀值钱的地方：
+            # 不退 Play 会把编辑器留在播放态，下一个进程进来就是脏现场
+            cmd("editor.playmode stop")
+            time.sleep(4)
+            return {"fixture": fixture, "scene": scene.name,
+                    "windows": wins, "cancelled": True}
         nonce = f"{fixture}-{i}-{int(time.time())}"
         print(f"    窗口 {i + 1}/{windows} …")
         report("window", fixture, window=i + 1, windows_total=windows)
@@ -318,18 +378,37 @@ def main() -> int:
                     print("保留已采场景:", list(doc["fixtures"]))
         except (json.JSONDecodeError, OSError):
             pass
+    cancelled = False
     for fx in fixtures:
+        # 夹具边界也是取消点：一个夹具要 2~3 分钟，只在窗口边界检查的话，
+        # 用户取消后还得跑完当前夹具的全部窗口才开始下一个的收尾判断。
+        if EV.cancelled_for_me():
+            print(f"取消：在夹具边界收尾，已完成 {len(doc['fixtures'])}/{len(fixtures)}")
+            cancelled = True
+            break
         print(f"[{fx}]")
-        doc["fixtures"][fx] = sample_scene(fx, args.windows)
+        res = sample_scene(fx, args.windows)
+        doc["fixtures"][fx] = res
+        if res.get("cancelled"):
+            cancelled = True
         fp = CALDIR / f"multiwin_{args.session}.json"
         fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
         done_n = sum(1 for v in doc["fixtures"].values() if "windows" in v)
         report("fixture_done", fx, window=done_n, windows_total=len(fixtures),
                note=f"已采 {done_n}/{len(fixtures)} 个夹具")
+        if cancelled:
+            break
         if not args.no_summary:
             (CALDIR / f"multiwin_{args.session}_summary.json").write_text(
                 json.dumps(summarize_bundle(doc), ensure_ascii=False, indent=2),
                 encoding="utf-8")
+    if cancelled:
+        # 半途束照样落盘（上面每个夹具都写了一次）但**不写摘要**：
+        # 摘要会被判据链当完整束消费。以 RC_CANCELLED 退出，父进程据此
+        # 记"本轮被取消"而不是"重采失败"——B7 要求两者留痕分开。
+        print(f"本轮已取消（退出码 {RC_CANCELLED}）；已采夹具保留在束文件中")
+        report_done()
+        return RC_CANCELLED
     print("写入", CALDIR / f"multiwin_{args.session}.json")
     report("write_bundle", note=str(CALDIR / f"multiwin_{args.session}.json"))
     report_done()
