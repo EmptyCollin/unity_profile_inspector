@@ -58,6 +58,21 @@ GROSS_STALENESS_TOLERANCE = 0.25
 # 与 11-08 probe/gc_floor.cs 的编辑态实测（三类 delta=0）完全一致——当时已记下
 # 该事实，却仍把这四类一起放进取值集合，丢了区分（本轮 43% 假劣化的根因）。
 GC_UNRESPONSIVE_REL = 0.002
+# 已由实测确认不响应强制 GC 的指标：直接判不可比，不必每轮再探一次。
+# 关键——同一物理量有两条采样路径，必须一起登记（真机第二轮撞出的漏网）：
+#   A 档 diagnostics.memory.totalAllocatedBytes  Δ(post-pre)=+0.005%  不响应
+#   A2 逐帧计数器 "Total Used Memory" → total_used_per_frame
+#     官方定义同源（Unity "Used Total" = 内部分配器当前占用绝对水平，含原生堆
+#     与已加载资产），本轮 12 个缺陷态会话实测其自然极差 192%（1.19GB~10.26GB）
+#     —— 本轮观察到的 +2.2% 完全落在噪声本底之内。
+# 只封 A 档字段而漏 A2 别名 = 同名换皮指标继续用窗口差值判劣化（假劣化二次发生）。
+GC_UNRESPONSIVE_KNOWN: dict[str, str] = {
+    "totalAllocatedBytes": "A 档字段，实测强制 GC 后 Δ=+0.005%（不响应）",
+    "totalReservedBytes": "A 档字段，实测 Δ=0（原生堆预留，不响应）",
+    "monoHeapBytes": "Mono 堆预留量，实测 Δ=0（只增不减，不响应）",
+    "total_used_per_frame": "A2 计数器 Total Used Memory，与 totalAllocatedBytes"
+                            " 同一物理量；缺陷态跨会话自然极差 192%"
+}
 
 
 def _rel_delta(a: float, b: float) -> float:
@@ -79,6 +94,15 @@ def memory_guard_entry(metric: str, bstat: dict, astat: dict,
     fa = (fresh_after or {}).get(metric)
     entry = {"bundle_before": b_win, "bundle_after": a_win,
              "bundle_delta": a_win - b_win}          # 仅留档，不参与判定
+    # 已知不响应 GC 者（含双路径别名）直接进盲区：窗口差值判它 = 拿会话噪声
+    # 当修复效应（真机两轮连续假劣化的共同根因）。
+    if metric in GC_UNRESPONSIVE_KNOWN:
+        entry.update(value_before=None, value_after=None, delta=None,
+                     value_source="gc_unresponsive", cross_check_ok=None,
+                     basis=f"{GC_UNRESPONSIVE_KNOWN[metric]}——不受强制 GC 影响，"
+                           f"跨会话不可比 ⇒ 记忆体守护未评估（盲区，进报告单列）；"
+                           f"窗口 Δ{(a_win - b_win) / max(abs(b_win), 1):+.2%} 仅留档")
+        return entry
     if not fb or not fa or fb.get("post_gc") is None or fa.get("post_gc") is None:
         entry.update(value_before=None, value_after=None, delta=None,
                      value_source="fresh_missing", cross_check_ok=None,

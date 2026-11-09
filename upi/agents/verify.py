@@ -47,8 +47,8 @@ NOT_GUARDED = {"available", "scale_factor"}
 # bundle 窗口值量的是"此刻未回收多少"，回收时点一变就失真（实测 7.8MB 假象
 # 里净代价只有 1.9MB）。⇒ 这类指标两侧各自采 fresh（Play→采一段→强制GC→再采一段），
 # 只用 post_gc 对比；窗口值仅留档。数据缺失 = 未评估（盲区），不退回污染口径。
-from upi.core.memory_guard import (FRESH_POST_GC_METRICS, is_regressed,  # noqa: E402
-                                   memory_guard_entry)
+from upi.core.memory_guard import (FRESH_POST_GC_METRICS, GC_UNRESPONSIVE_KNOWN,  # noqa: E402
+                                   is_regressed, memory_guard_entry)
 
 
 def instrument_state() -> dict:
@@ -303,7 +303,11 @@ def verdict_from_bundles(det_id: str, fixture: str,
         # ── 分支一：记忆体类指标 ⇒ fresh post-GC 口径（两侧都要有）
         # 窗口值受回收时点污染（a4_altertest 实测 7.8MB 假象/1.9MB 净代价），
         # 拿它判劣化 = 拿已知失真数据下结论；判不了就如实登记盲区，不冒充评估过。
-        if key in FRESH_POST_GC_METRICS:
+        # 分支条件必须并上 GC_UNRESPONSIVE_KNOWN（真机第二轮撞出的路由漏洞）：
+        # total_used_per_frame 与 totalAllocatedBytes 是同一个 Unity 计数器走
+        # 两条采样路径，只把 A 档字段登记进集合 ⇒ A2 别名绕过 fresh 口径、
+        # 用窗口 Δ2.2% 判成劣化，而它跨会话自然极差实测 192%。
+        if key in FRESH_POST_GC_METRICS or key in GC_UNRESPONSIVE_KNOWN:
             entry = memory_guard_entry(key, bv, av, floor_before, floor)
             if entry["value_source"] == "fresh_post_gc" and entry["cross_check_ok"]:
                 reg = is_regressed(entry)

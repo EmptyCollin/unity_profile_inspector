@@ -119,6 +119,24 @@ e = memory_guard_entry("monoUsedBytes", stat(103469056.0), stat(101.7e6),
                        {"monoUsedBytes": {"pre_gc": 101.7e6, "post_gc": 100.2e6}})
 check("响应性指标不被误降级（真机 monoUsedBytes 走 post_gc 口径）",
       e["value_source"] == "fresh_post_gc" and not is_regressed(e))
+# ── 7. 双路径别名必须一起进盲区（真机第二轮假劣化的路由根因）──────
+# total_used_per_frame = A2 录的 "Total Used Memory" 计数器，与 A 档字段
+# totalAllocatedBytes 同一物理量。只登记 A 档 ⇒ A2 别名绕过 fresh 口径、
+# 被窗口 Δ2.25% 判成劣化；而它跨会话自然极差实测 192%（12 个缺陷态会话）。
+e = memory_guard_entry("total_used_per_frame", stat(1.343e9), stat(1.373e9),
+                       {"monoUsedBytes": {}}, {"monoUsedBytes": {}})
+check("A2 别名同判 gc_unresponsive（不再走窗口判定）",
+      e["value_source"] == "gc_unresponsive")
+check("依据里写明与 A 档同物理量 + 自然极差（可回溯）",
+      "同一物理量" in e["basis"] and "192%" in e["basis"])
+check("窗口 Δ+2.25% 只留档不判劣化", not is_regressed(e))
+
+# 响应性指标仍不受影响（monoUsedBytes 真机两侧 Δ≈-1.7% 响应）
+e = memory_guard_entry("monoUsedBytes", stat(1.0e8), stat(1.0e8),
+                       {"monoUsedBytes": {"pre_gc": 103469056.0,
+                                           "post_gc": 101728256.0}},
+                       {"monoUsedBytes": {"pre_gc": 102.0e6, "post_gc": 100.3e6}})
+check("响应性指标未被别名规则误伤", e["value_source"] == "fresh_post_gc")
 print(f"\n==== memory_guard 单测: {PASS} 通过, {len(FAIL)} 失败"
       + (f" {FAIL}" if FAIL else ""))
 sys.exit(1 if FAIL else 0)
