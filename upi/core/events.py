@@ -43,6 +43,10 @@ CONF = RUNS / "daemon_conf.json"
 PID = RUNS / "daemon.pid"
 CANCEL_SUBDIR = "_cancel"
 DECIDE_NAME = "daemon_decide.json"
+# 守护命令 span 的落点目录名。**放在总线层而不是 daemon 层**：它是
+# "文件布局契约"，写入方（daemon）与读取方（统计聚合）都必须用同一个值，
+# 两处各写一份字面量迟早漂移——漂移的后果是命令历史静默不进统计（G13）。
+CMD_TRACE_DIR = "daemon_cmdtrace"
 PROJECTS = ROOT / "projects"
 
 
@@ -101,6 +105,10 @@ def decide_path() -> Path:
     return RUNS / DECIDE_NAME
 
 LEASE_NAME = "resume_lease.json"
+# .tmp 残骸的回收阈值。正常原子写里 tmp 的寿命是毫秒级（写→replace 之间），
+# 5 分钟还留在盘上的只可能是崩在 replace 之前的残骸；阈值放宽是为了
+# 绝不误伤仍在进行的写（误伤会把一次正常写变成 FileNotFoundError）。
+TMP_STALE_S = 300
 # 租约有效期：一次干净 attempt 实测约 7~31 分钟，取 45 分钟。
 # 必须显著大于单轮耗时，否则守护还在正常续跑就会被别人当"崩了"抢租约；
 # 又必须有限，否则"unlink 之前崩"会让工单永久卡死（实测缺口之一）。
@@ -427,10 +435,83 @@ def take_decide() -> dict | None:
     return data
 
 
+# ───────────────────────── 当前采样子进程登记 ─────────────────────────
+
+CHILD_NAME = "daemon_child.json"
+
+
+def child_path() -> Path:
+    return RUNS / CHILD_NAME
+
+
+def publish_child(pid: int, **info) -> bool:
+    """巡检在 Popen 成功后**立刻**登记子进程 pid。
+
+    为什么不能让守护从进度文件反查：进度文件要等 m1_multiwin 跑到第一个
+    report() 才出现，而那是"打开场景 + 进 Play + 注入 A2"之后——实测约
+    20~40 秒。这段时间用户按取消，守护的 child_pid 还是 None，命令会被
+    判成 no_round_running 拒掉：**明明有活要停，却说没活可停**。
+    """
+    return write_json(child_path(), {"pid": int(pid), "ts": now(), **info},
+                      what="child_register", strict=False)
+
+
+def read_child() -> dict | None:
+    data, err = load_json(child_path())
+    if err or not data:
+        return None
+    return data
+
+
+def child_alive() -> tuple[bool, int | None]:
+    """(是否还在, pid)。顺带清掉已退出进程的登记，避免守护拿着死 pid 拒绝新轮。"""
+    d = read_child()
+    if not d:
+        return False, None
+    try:
+        pid = int(d.get("pid", -1))
+    except (TypeError, ValueError):
+        clear_child()
+        return False, None
+    if pid > 0 and pid_alive(pid):
+        return True, pid
+    clear_child()
+    return False, pid
+
+
+def clear_child() -> None:
+    try:
+        child_path().unlink()
+    except OSError:
+        pass
+
+
+def cancelled_for_me() -> bool:
+    """子进程侧自查：有没有人给**我这个 pid**立了取消标志。
+
+    必须是自查而不是靠信号：Windows 上没人能给子进程发可捕获的停止信号
+    （os.kill 的两个可用信号都是硬杀）。所以取消的唯一安全形态就是
+    "父进程立标志、子进程在边界自己看到并收尾"。
+    """
+    return cancel_flag(os.getpid()).exists()
+
+
 # ───────────────────────── 取消通道（取代硬杀） ─────────────────────────
 
 def cancel_flag(pid: int) -> Path:
-    return cancel_dir() / str(pid)
+    return cancel_dir() / str(int(pid))
+
+
+# 退出码约定（三处必须一致，否则留痕无法区分现场）：
+#   0  正常完成
+#   1  真失败（判据链异常、无标定等）
+#   2  采前同步闸拒采（编辑器代码态与磁盘不一致）
+#   3  自己收到取消标志并在边界收尾（RC_CANCELLED，finally 已执行）
+#   15 被硬杀（TerminateProcess；finally **没有**执行，编辑器可能停在 Play 态）
+# 为什么非要分开：15 是 os.kill 的副产品，看到 15 就该去检查编辑器现场；
+# 看到 3 则说明一切干净，只是这一轮没采完。
+RC_CANCELLED = 3
+RC_HARD_KILL = 15
 
 
 def request_cancel(pid: int, *, reason: str = "user") -> bool:
@@ -503,6 +584,61 @@ def sweep_cancel_flags() -> int:
     return n
 
 
+def sweep_residuals(runs_root: Optional[Path] = None) -> dict:
+    """启动期清扫原子写的 .tmp 残骸与已退出守护的 pid 文件。
+
+    为什么这两个能安全删：
+      · .tmp —— atomic_write 的语义是"写 tmp 再 replace"。replace 成功则 tmp
+        已消失；一个仍存在的 <name>.tmp 只能是"写完 tmp、还没来得及 replace
+        就崩了"的残骸，它**从不是任何读路径的目标**（读永远读不带 .tmp 的名）。
+        留着只会让 runs/ 越积越脏，删掉不影响任何判定。
+      · pid —— 只删"pid 指向的进程已死、且不是当前进程"的。活着的一律不碰：
+        可能是另一代守护（cmd_start 靠它防双启），误删就变成允许双守护并发
+        抢编辑器，那是比残留严重得多的事故。
+    返回 {tmp_removed, pid_removed}，由调用方 emit。
+    """
+    root = runs_root or RUNS
+    me = os.getpid()
+    now_ts = time.time()
+    out = {"tmp_removed": 0, "tmp_kept": 0, "pid_removed": 0}
+    # .tmp：只删"陈旧"的。
+    # ⚠️ 这条时效判据是防我自己造的事故：atomic_write 的 tmp 在被 replace 前
+    #   只存在几毫秒，若无条件 rglob 删除，就会撞上并发写方（守护重启瞬间
+    #   仍活着的采样子进程正在写 daemon_progress.json.tmp），把它的
+    #   os.replace 变成 FileNotFoundError —— 一次本来正常的写被我杀了。
+    #   正常写的 tmp 寿命是毫秒级，5 分钟阈值不可能误伤，又能回收真残骸。
+    try:
+        for p in sorted(root.rglob("*.tmp")):
+            try:
+                if now_ts - p.stat().st_mtime < TMP_STALE_S:
+                    out["tmp_kept"] += 1      # 可能正被使用：保留并计数
+                    continue
+                p.unlink()
+                out["tmp_removed"] += 1
+            except OSError as e:
+                emit("residual_sweep_failed", path=str(p), error=str(e)[:120])
+    except OSError:
+        pass
+    if out["tmp_kept"]:
+        emit("residual_tmp_held", n=out["tmp_kept"],
+             note="存在 5 分钟内的临时文件，可能有并发写方，未清理")
+    # pid：仅清已死进程留下的
+    pidf = root / "daemon.pid"
+    if pidf.exists():
+        try:
+            pid = int(pidf.read_text(encoding="utf-8").strip())
+            if pid != me and not pid_alive(pid):
+                pidf.unlink()
+                out["pid_removed"] = 1
+        except (OSError, ValueError):
+            try:
+                pidf.unlink()
+                out["pid_removed"] = 1
+            except OSError:
+                pass
+    return out
+
+
 # ───────────────────────── 工单租约（防永久卡单） ─────────────────────────
 
 def acquire_lease(ticket_dir: Path, *, holder: Optional[int] = None,
@@ -557,6 +693,84 @@ def lease_state(ticket_dir: Path, ttl_s: int = LEASE_TTL_S) -> dict:
             "holder": (data or {}).get("pid") if held else None}
 
 
+# ─────────────────── 重启判据（防重启风暴） ───────────────────
+# 判据从 daemon_events.jsonl 推导，**不新建计数文件**：事件流已是唯一真相源，
+# "上次是好好退出还是崩了"在那里本就可区分；再加一份计数器就是第二处会漂移
+# 的状态——两者不一致时没人知道该信谁（本仓反复踩过这类双源坑）。
+RESTART_WINDOW_S = 600      # 统计窗口（10 分钟内数启动次数）
+RESTART_MAX = 3             # 窗口内启动达此值即判为风暴
+_START_KIND = "daemon_started"
+_STOP_KINDS = ("daemon_stopped",      # 优雅停止（quit / stop 走通）
+               "daemon_exit",         # 预算耗尽或连续故障主动退出（非崩溃）
+               "daemon_interrupt",    # Ctrl+C
+               "daemon_signal")       # 信号处理器置标志后收尾
+
+
+def _ev_ts(e: dict) -> float | None:
+    try:
+        return time.mktime(time.strptime(str(e.get("ts")), "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+
+
+def restart_verdict(window_s: int = RESTART_WINDOW_S,
+                    max_restarts: int = RESTART_MAX) -> dict:
+    """该不该由宿主把守护再拉起来。**只给判据，不动手**：真正的重启动作属于
+    宿主（阶段 6 的快捷方式/自启），且写启动项必须经用户确认——管线不自行
+    改系统配置。
+
+    五种结论（各自的处置不同，不能塌成"能/不能"两态）：
+      skip_running  已有守护在跑 ⇒ 重复起就是双守护并发抢编辑器
+      no_restart    上一次**自己留了退出记录**（优雅停/预算退出/Ctrl+C）
+                    ⇒ 那是人的意图或设计行为，自动重启等于跟用户对着干。
+                    这条就是"重启前必须判定不是我自己刚退出的"的字面落实
+      start         最后一条生命周期事件是"启动"却没有"退出" ⇒ 进程没了
+                    但没留下退出记录 = 崩溃，可以拉一次
+      blocked       崩溃属实，但窗口内启动次数已达上限 ⇒ 再拉只会循环烧成本，
+                    停手等人排查
+      unknown       事件流读不出来 ⇒ **fail-closed，不猜"可以重启"**
+    """
+    if daemon_running()[0]:
+        return {"action": "skip_running", "reason": "已有守护在跑",
+                "recent_starts": 0, "last_exit": None}
+    evs = tail_events(2000)
+    if not evs:
+        return {"action": "unknown", "reason": "事件流为空或不可读",
+                "recent_starts": 0, "last_exit": None}
+    life = [e for e in evs if e.get("kind") in _STOP_KINDS
+            or e.get("kind") == _START_KIND]
+    if not life:
+        return {"action": "unknown", "reason": "无任何生命周期事件",
+                "recent_starts": 0, "last_exit": None}
+    last = life[-1]
+    now_ts = time.time()
+    starts_in_window = sum(1 for e in life
+                           if e.get("kind") == _START_KIND
+                           and (_ev_ts(e) or now_ts) >= now_ts - window_s)
+    if last.get("kind") != _START_KIND:
+        return {"action": "no_restart",
+                "reason": f"上次为正常退出（{last.get('kind')}）",
+                "recent_starts": starts_in_window, "last_exit": last.get("kind")}
+    if starts_in_window >= max_restarts:
+        # 判据函数本来不该有副作用，但这条不记下来就查不到"为什么没被拉起来"。
+        # ⚠️ 必须防刷屏：宿主每几十秒轮询一次，无条件 emit 会把事件流刷满，
+        #   真出事的那条反而被噪音盖掉——只在窗口内还没记过时补一条。
+        already = any(e.get("kind") == "restart_blocked"
+                      and (_ev_ts(e) or 0) >= now_ts - window_s for e in evs)
+        if not already:
+            emit("restart_blocked", recent_starts=starts_in_window,
+                 window_s=window_s, max_restarts=max_restarts,
+                 note=f"{window_s}s 内已启动 {starts_in_window} 次，"
+                      "疑似崩溃循环，停止自动拉起等待人工排查")
+        return {"action": "blocked",
+                "reason": f"{window_s}s 内已启动 {starts_in_window} 次"
+                          f"（≥{max_restarts}），判为重启风暴",
+                "recent_starts": starts_in_window, "last_exit": None}
+    return {"action": "start",
+            "reason": "守护消失且无退出记录，判为崩溃",
+            "recent_starts": starts_in_window, "last_exit": None}
+
+
 def pid_alive(pid: int) -> bool:
     """跨平台探活。
 
@@ -597,8 +811,8 @@ def pid_alive(pid: int) -> bool:
 
 
 def daemon_running() -> tuple[bool, dict | None]:
-    """(在不在, 状态快照)。双判据：_p_pid() 存在 + 心跳新鲜（<15s）。
-    只看 _p_pid() 会把僵尸/复用 _p_pid() 当活着；只看心跳会把挂掉没删 pid 当死。"""
+    """(在不在, 状态快照)。双判据：pid 文件里的进程存活 + 心跳新鲜（<15s）。
+    只看 pid 会把僵尸/被复用的 pid 当活着；只看心跳会把挂掉没删 pid 当死。"""
     st = read_status()
     pid_ok = False
     try:

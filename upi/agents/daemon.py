@@ -29,25 +29,139 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core import events as E  # noqa: E402
 
-PROGRESS = ROOT / "runs" / "daemon_progress.json"
+# 进度文件路径**每次现算**（与总线其余路径同纪律）：写成模块常量时，
+# 重定向 E.RUNS 的测试与多实例部署都还在读真实仓库的进度文件——
+# 表现为"进度永远不动"的假故障，排查方向整个错位。
+def _progress_path():
+    return E.RUNS / "daemon_progress.json"
+# 命令类 span 的落点目录名：引用总线的单一真相源（E.CMD_TRACE_DIR），
+# 不在这里另写一份字面量——写入方与读取方各存一份迟早漂移，
+# 漂移的后果是命令历史静默不进统计（G13），而这正是最难发现的一类错。
+CMD_TRACE_DIR = E.CMD_TRACE_DIR
+
+
+class _CmdTracer:
+    """命令动作的 trace span（I10/G13：无 trace 不入统计）。
+
+    为什么不塞进轮次 trace：命令（取消/开关/改配置/批准）发生在轮次之外，
+    混进 patrol_* 目录会让统计层分不清"这轮花了多少"与"用户按了几次"。
+    ⚠️ seq 必须从既有文件续号：每次实例化都从 0 起的话，守护重启后的新
+      span 会与旧 span 同号，而聚合层按 (run_id, seq) 去重 ⇒ 新留痕被当
+      重复丢弃，等于命令历史凭空消失。
+    """
+
+    def __init__(self, runs_root: Path):
+        self.dir = runs_root / CMD_TRACE_DIR
+        self.path = self.dir / "trace.jsonl"
+        # run_id 用固定目录名而不是 daemon_<pid>：每次重启换 id 会让
+        # "命令历史"在统计里散成一片，看起来像从没发生过（同一目录的留痕
+        # 本该是同一条时间线）。seq 续号已保证跨重启不撞号。
+        self.run_id = CMD_TRACE_DIR
+        self.seq = 0
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            with self.path.open(encoding="utf-8") as f:
+                self.seq = sum(1 for ln in f if ln.strip())
+        except OSError:
+            pass
+
+    def emit(self, stage: str, ms: float = 0, exit_status: int = 0, **fields):
+        self.seq += 1
+        rec = {"run_id": self.run_id, "stage": stage, "seq": self.seq,
+               "wallclock_ms": int(ms), "exit_status": int(exit_status),
+               "environment_fingerprint": "daemon-local",
+               "emitted_at": E.now(), **fields}
+        try:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        except OSError as e:
+            # span 写不进不能打断命令处理（否则"记不上账"变成"服务不可用"），
+            # 但必须留痕：I10 的"无 trace 不入统计"要靠这条才能被发现
+            E.emit("cmd_trace_write_failed", stage=stage, error=str(e)[:120])
+
+
+def install_signals(owner) -> dict:
+    """装信号处理器：**只置停止标志，绝不在这里做不可逆动作**。
+
+    为什么值得装：无处理器时 Windows 对 CTRL_BREAK、POSIX 对 SIGTERM 都是
+    默认终止——finally 一概不跑，于是 pid 文件残留、采样子进程变孤儿、
+    连停止事件都没有（本轮实测正是这个形态）。
+
+    ⚠️ 能力边界必须如实说，不能"装了信号处理器"就当已经安全：
+      · 以 DETACHED_PROCESS 起的守护**没有控制台**，CTRL_C/CTRL_BREAK
+        送不到它，这两个处理器在那种启动方式下永不被触发；
+      · Windows 上 SIGTERM 根本不可捕获（os.kill 的 SIGTERM 就是硬杀）；
+      · 真正会命中的场景是前台 `monitor` 与 POSIX 部署。
+      所以优雅停止的**主路径仍是命令通道（quit）**，信号只是第二道防线。
+      返回值如实记录装上了哪些，UI/报告据此判断而不是默认相信。
+    """
+    import signal as _sig
+    names = ["SIGINT", "SIGTERM"]
+    if hasattr(_sig, "SIGBREAK"):
+        names.append("SIGBREAK")
+    done = {}
+    for n in names:
+        s = getattr(_sig, n, None)
+        if s is None:
+            done[n] = "absent"
+            continue
+
+        def _handler(signum, _frame, _name=n):
+            # 只做一件事：请求停止。清理交给主循环 finally（它会收子进程、
+            # 清 pid、发停止事件）。在信号处理器里 unlink/kill 都不安全。
+            owner.stop_requested = True
+            try:
+                E.emit("daemon_signal", name=_name, signum=int(signum),
+                       note="仅置停止标志，清理走主循环 finally")
+            except OSError:
+                pass
+        try:
+            _sig.signal(s, _handler)
+            done[n] = "installed"
+        except (OSError, ValueError, RuntimeError) as e:
+            # 非主线程装载会抛 ValueError：不该因此让守护起不来，但要记下来
+            done[n] = f"failed:{type(e).__name__}"
+    return done
 
 
 def load_runtime_conf() -> dict:
     """llm_config 的 pipeline.monitor 打底，daemon_conf.json 覆盖。
-    UI 改的配置活过重启（运行时开关与代码默认分离）。"""
+    UI 改的配置活过重启（运行时开关与代码默认分离）。
+
+    ⚠️ fail-closed（自愈审计第 1 项）：配置读不出来时**默认关采样**，
+      不是"用保守默认继续跑"。旧写法 `except: base = {}` 再
+      `merged.get("enabled", True)`——含义是"配置文件坏了就自动开始采样"，
+      而采样一轮要占编辑器约 25 分钟并花积分。本轮实测真撞过一次：
+      冒烟测试时 daemon_conf.json 被清掉，回落到 llm_config 的 enabled=true，
+      守护一上岗就排了一轮真采样，14 秒后才被我取消，证据至今留在 runs/。
+      坏配置时人需要的是"停下来告诉我"，不是"替我决定继续跑"。
+    """
     from upi.config.settings import load_config
+    degraded = []
     try:
         base = load_config(ROOT / "llm_config.yaml").monitor().model_dump()
-    except Exception:  # noqa: BLE001 — 配置坏掉时守护仍可跑，用保守默认
+    except Exception as e:  # noqa: BLE001
         base = {}
+        degraded.append(f"monitor_conf_unreadable:{type(e).__name__}")
+        E.emit("config_read_failed", source="llm_config.yaml",
+               error=f"{type(e).__name__}: {str(e)[:160]}",
+               action="sampling_disabled_fail_closed")
     ov = E.load_conf()
     merged = {**base, **ov}
     if base.get("auto_fix") or ov.get("auto_fix"):
         merged["auto_fix"] = {**(base.get("auto_fix") or {}),
                               **(ov.get("auto_fix") or {})}
-    merged["enabled"] = bool(merged.get("enabled", True))
+    # 两处都没明确写 enabled 才算"读不出来"：缺键 ⇒ False（fail-closed）
+    has_explicit = ("enabled" in base) or ("enabled" in ov)
+    if not has_explicit:
+        degraded.append("enabled_absent_in_both_sources")
+        E.emit("config_incomplete", reason="enabled 未在任何配置源声明",
+               action="sampling_disabled_fail_closed")
+    merged["enabled"] = bool(merged.get("enabled", False))
     merged.setdefault("fixtures", ["CLEAN", "F-CPU-01", "F-GPU-01",
                                    "F-ANIM-01", "F-LOAD-01"])
+    if degraded:
+        merged.setdefault("degraded", []).extend(degraded)
     return merged
 
 
@@ -62,6 +176,22 @@ class Daemon:
         self._round_err: str | None = None
         self.consecutive_failures = 0
         self.last_progress_sig = None
+        # 命令 span 与信号装载状态。用 __new__ 构造实例的测试走不到这里，
+        # 所以下面用 _span_ctx() 惰性取，不直接引用这两个属性。
+        self.signals: dict = {}
+        self._cmd_tracer = _CmdTracer(E.RUNS)
+
+    def _span_ctx(self):
+        """取命令追踪器（惰性）。
+
+        为什么要惰性：离线测试用 Daemon.__new__ 造实例、绕过 __init__，
+        直接读 self._cmd_tracer 会 AttributeError——那会让"实现没错、
+        测试挂了"的假故障再出现一次（本轮已撞过多起同类）。
+        """
+        t = getattr(self, "_cmd_tracer", None)
+        if t is None:
+            t = self._cmd_tracer = _CmdTracer(E.RUNS)
+        return t
 
     # ───────────────────────── 轮次执行 ─────────────────────────
 
@@ -69,7 +199,7 @@ class Daemon:
         """把子进程写的进度文件转发成事件（每个不同状态只发一次）。"""
         while self.busy and not self.stop_requested:
             try:
-                pg = json.loads(PROGRESS.read_text(encoding="utf-8"))
+                pg = json.loads(_progress_path().read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 time.sleep(2)
                 continue
@@ -102,9 +232,16 @@ class Daemon:
                    consecutive_failures=self.consecutive_failures)
             return
         # 采集失败（有盲区、无检出）算半失败：静默轮≠成功轮，
-        # 连续静默失败要能被 max_consecutive_failures 抓住（B6 交互版）
-        self.consecutive_failures = 0 if not rec.get("blindspots") else \
-            self.consecutive_failures + 1
+        # 连续静默失败要能被 max_consecutive_failures 抓住（B6 交互版）。
+        # ⚠️ 但**取消轮不计**：取消同样带 blindspots（半途束不可判），
+        #   若一并累加，用户连按 3 次取消就会把守护判成"仪器故障"自行退出——
+        #   人的正常操作不该消耗故障预算，也不该在统计里冒充采集失败。
+        was_cancelled = bool(rec.get("cancelled"))
+        if was_cancelled:
+            pass                       # 既不加分也不清零：本轮不由仪器决定
+        else:
+            self.consecutive_failures = 0 if not rec.get("blindspots") else \
+                self.consecutive_failures + 1
         n = len(rec["episode"]["findings"]) + len(rec["waterline"]["findings"])
         blind = rec.get("blindspots") or []
         wakes = []
@@ -114,17 +251,98 @@ class Daemon:
             if w.get("approval"):
                 E.emit("ticket", fixture=fx, run_id=w.get("run_id"),
                        md=w["approval"])
+        # cancel_requested（人叫过停）与 cancelled（采集真的在边界停下来了）
+        # 是两个事实，必须分开记：只记前者的话，"按了取消但子进程没停下来"
+        # 这种最该被发现的情况会被写成"已取消"，等于假安心。
         E.emit("round_finished", seconds=dur, findings=n, quiet=rec["quiet"],
-               blindspots=blind, wakes=wakes, cancelled=self.stop_requested)
+               blindspots=blind, wakes=wakes,
+               cancel_requested=bool(self.stop_requested),
+               cancelled=was_cancelled,
+               cancelled_clean=rec.get("cancelled_clean"))
         E.write_status({
             "last_round": {"ts": rec["ts"], "seconds": dur, "findings": n,
                            "quiet": rec["quiet"], "blindspots": blind,
                            "wakes": wakes, "error": self._round_err,
-                           "cancelled": self.stop_requested}})
+                           "cancel_requested": bool(self.stop_requested),
+                           "cancelled": was_cancelled,
+                           "cancelled_clean": rec.get("cancelled_clean")}})
 
     # ───────────────────────── 命令消费 ─────────────────────────
 
     def _apply_cmd(self, c: dict):
+        """命令执行的**带 span 包装**（I10/G13）。
+
+        为什么单独包一层：命令（开关/取消/改配置/退出）是人机交互的全部
+        动作，过去只发事件不出 span ⇒ 统计层算"成本"时完全看不到它们，
+        而 G13 要求"任何进统计的数字都能定位到产生它的 span"。
+        包一层而不是在每个分支里塞 emit：分支有 8 个，逐个加迟早漏一个，
+        而漏掉的那个恰好是最常按的那个。
+        未知命令也要出 span（exit_status=1）：否则"UI 发了个不存在的命令"
+        这种实现与界面不同步的问题，在统计里表现为完全无痕。
+        """
+        cmd = str(c.get("cmd") or "")
+        known = ("enable", "disable", "pause", "resume", "run_now",
+                 "cancel", "set", "quit")
+        t0 = time.perf_counter()
+        rc = 0 if cmd in known else 1
+        try:
+            self._dispatch_cmd(c)
+        except Exception as e:  # noqa: BLE001 — 命令炸了不能带崩主循环
+            rc = 1
+            E.emit("command_error", cmd=cmd,
+                   error=f"{type(e).__name__}: {str(e)[:160]}")
+            self._span_ctx().emit(stage=f"cmd:{cmd or 'unknown'}",
+                                 ms=(time.perf_counter() - t0) * 1000,
+                                 exit_status=1,
+                                 args_keys=sorted((c.get("args") or {}).keys()))
+            raise
+        self._span_ctx().emit(stage=f"cmd:{cmd or 'unknown'}",
+                              ms=round((time.perf_counter() - t0) * 1000),
+                              exit_status=rc,
+                              args_keys=sorted((c.get("args") or {}).keys()))
+
+
+    def _stop_child(self, reason: str) -> None:
+        """请采样子进程收尾：文件通道优先，硬杀只作最后的止血。
+
+        ⚠️ 为什么必须抽出来共用：cancel 分支早就改走 request_cancel，而 quit
+          分支漏改、仍在 os.kill(child_pid,15)——Windows 上那是 TerminateProcess，
+          子进程 finally 不执行 ⇒ Play 不退、A2 回调残留、编辑器被一个
+          "看起来已经结束"的进程占住。同一意图两处各写一份，就会漏掉一处
+          （本轮实测第 6 次栽在"两处一致"上）。合并成一个入口，
+          取消语义才只有一种实现，也不会有人改一处忘另一处。
+        """
+        pid = self.child_pid
+        if not pid:
+            # child_pid 靠进度文件反查，子进程刚起还没写进度时是 None；
+            # 那时巡检登记在总线里的 pid 才是真值——不能因此拒掉停止请求
+            alive, reg = E.child_alive()
+            if alive:
+                pid = reg
+        if pid is None:
+            if self.busy:
+                # 忙但指名不到进程：只置停止标志，等阶段边界自己结束。
+                # 必须说清楚，绝不假装"已取消"——那会让 UI 与统计读到
+                # 一个实际没发生的干净收尾
+                E.emit("cancel_pending", reason="round_busy_no_child",
+                       source=reason,
+                       note="已置停止标志，将在阶段边界结束；"
+                            "采集子进程未登记，无法指名取消")
+            return
+        if E.request_cancel(pid, reason=reason):
+            E.emit("cancel_sent", child_pid=pid, source=reason,
+                   mode="graceful_file_channel")
+            return
+        # 标志写不下去（磁盘满/权限）才硬杀止血，并如实标注现场可能未收尾
+        E.emit("cancel_flag_write_failed", child_pid=pid, source=reason,
+               note="取消标志落盘失败，改硬杀兜底：子进程 finally 不会执行")
+        try:
+            os.kill(pid, 15)
+            E.emit("child_hard_killed", pid=pid, reason=f"{reason}_fallback")
+        except OSError as e:
+            E.emit("cancel_kill_failed", child_pid=pid, error=str(e)[:120])
+
+    def _dispatch_cmd(self, c: dict):
         cmd, args = c.get("cmd", ""), c.get("args") or {}
         known = ("enable", "disable", "pause", "resume", "run_now",
                  "cancel", "set", "quit")
@@ -151,15 +369,8 @@ class Daemon:
             else:
                 self._start_round("manual")
         elif cmd == "cancel":
-            if not self.busy or not self.child_pid:
-                E.emit("command_ignored", reason="no_round_running", cmd=cmd)
-            else:
-                self.stop_requested = True
-                try:
-                    os.kill(self.child_pid, 15)
-                    E.emit("cancel_sent", child_pid=self.child_pid)
-                except OSError as e:
-                    E.emit("cancel_failed", error=str(e)[:120])
+            self.stop_requested = True
+            self._stop_child("user_cancel")
         elif cmd == "set":
             changed = {}
             for k, v in args.items():
@@ -177,15 +388,9 @@ class Daemon:
                 E.save_conf(self.conf)
                 E.emit("config_changed", **changed)
         elif cmd == "quit":
-            # 优雅停止也要收拾采样子进程：只置标志会让 m1_multiwin 变孤儿
-            # 继续占住编辑器（硬杀 finally 不执行，更不可能清）
-            if self.busy and self.child_pid:
-                try:
-                    os.kill(self.child_pid, 15)
-                    E.emit("cancel_sent", reason="daemon_quit",
-                           child_pid=self.child_pid)
-                except OSError as e:
-                    E.emit("cancel_failed", error=str(e)[:120])
+            # 优雅停止同样走统一收尾：漏改这里就等于给"编辑器被孤儿占住"
+            # 留了一条活路（历史版本此处直接 os.kill，finally 不执行）
+            self._stop_child("daemon_quit")
             self.stop_requested = True
             E.emit("daemon_quit_cmd")
 
@@ -224,8 +429,9 @@ class Daemon:
                    reason="daemon_restart_before_ack")
             E.ack_cmd(seq, dropped="daemon_restart")
         n = E.sweep_cancel_flags()
-        if n:
-            E.emit("startup_sweep", cancel_flags=n)
+        res = E.sweep_residuals()
+        if n or res["tmp_removed"] or res["pid_removed"]:
+            E.emit("startup_sweep", cancel_flags=n, **res)
         return seq
 
     def run_forever(self) -> int:
@@ -238,10 +444,15 @@ class Daemon:
             E.emit("daemon_pid_write_failed", error=str(e)[:160],
                    note="pid 写不进去就不启动，防双守护并发抢编辑器")
             return 3
+        # 信号处理器：只置停止标志，清理仍走主循环 finally。
+        # 结果一并进 daemon_started——DETACHED_PROCESS 起的方式收不到控制台
+        # 信号，这条状态是"第二道防线到底有没有"的唯一凭据，不能事后靠猜。
+        self.signals = install_signals(self)
         E.emit("daemon_started", pid=os.getpid(),
                interval_s=int(self.conf.get("interval_s", 1800)),
                enabled=bool(self.conf.get("enabled")),
-               auto_fix=self.conf.get("auto_fix"))
+               auto_fix=self.conf.get("auto_fix"),
+               signals=self.signals)
         self.next_round_at = time.time()
         self._last_remind_ts = 0.0
         last_seen_seq = self._adopt_cmd_channel()
@@ -314,7 +525,11 @@ class Daemon:
           用户已批准的工单。静默跳过等于把"数据坏了"伪装成"没活儿干"。
         """
         open_t, go = [], []
-        for d in sorted((ROOT / "runs").glob("patrol_*/approvals/*")):
+        # ⚠️ 扫描根必须取 E.RUNS（总线现算路径），不能写死 ROOT/"runs"：
+        #   写死会让"重定向总线"的测试与多实例部署都扫到真实仓库，
+        #   于是隔离测试读不到自己造的工单（表现为"留痕没产生"的假故障，
+        #   实测正是这样误判成实现缺陷的）。
+        for d in sorted(E.RUNS.glob("patrol_*/approvals/*")):
             if not (d / "request.json").exists():
                 continue
             dec = d / "decision.json"
@@ -363,7 +578,7 @@ class Daemon:
         # 工单路径必须真实存在且属于待批队列——不能凭意向文件里的字符串
         # 就往任意目录写 decision.json（那等于绕过审批校验）
         from upi.core.approval import ApprovalDecision, ApprovalStore
-        run_root = ROOT / "runs"
+        run_root = E.RUNS          # 同 _tickets()：只认总线现算的留档根
         cand = [Path(ticket_rel)] if ticket_rel else []
         if cand and not cand[0].is_absolute():
             cand = [run_root / ticket_rel]
@@ -436,7 +651,7 @@ class Daemon:
         from upi.agents.orchestrator import Runner
         # 续跑前先确认状态文件真能读：读不到就是"不知道要续什么"，
         # 绝不能用空态硬跑一遍修复（那会把未知当成"没做过"）
-        st, err = E.load_json(ROOT / "runs" / run_id / "state.json")
+        st, err = E.load_json(E.RUNS / run_id / "state.json")
         if err or not st:
             E.emit("resume_failed", run_id=run_id,
                    error=f"state_unreadable: {err or 'empty'}")

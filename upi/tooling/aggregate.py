@@ -221,7 +221,14 @@ def ingest_run(c: sqlite3.Connection, d: Path) -> str:
     # G13：有产物无 trace = untraced。注意 patrol_* 之外的一轮型 run 也可能
     # 只有 trace 没有 report，那不算 untraced（有 span 就有据可查）。
     traced = 1 if spans else 0
-    kind = ("patrol" if run_id.startswith("patrol") else
+    # 交互留痕（守护的命令 span）**不是判定轮次**：它必须进统计（G13 有 span
+    # 就该可回溯），但把它算进"跑了多少轮"会让轮次数随用户按键次数增长——
+    # 那不是仪器在跑，是人在点。两类分开计，成本轴与质量轴才不会互相污染。
+    # 目录名取总线（写入方也用它），两侧各写一份字面量迟早漂移，
+    # 漂移的表现是命令历史被当普通轮次计入，或反过来静默不进统计。
+    from upi.core.events import CMD_TRACE_DIR
+    kind = ("interaction" if run_id == CMD_TRACE_DIR else
+            "patrol" if run_id.startswith("patrol") else
             "m4_drill" if run_id.startswith("m4_drill") else
             "m3_rehearsal" if run_id.startswith("m3_rehearsal") else
             "a4_altertest" if run_id.startswith("a4_altertest") else
@@ -326,15 +333,25 @@ def ingest_run(c: sqlite3.Connection, d: Path) -> str:
 
 def rebuild_stage_stats(c: sqlite3.Connection) -> int:
     """按 (stage, 环境指纹) 聚合。环境不同的同阶段不合并——
-    跨环境混算正是 G7 在采样层禁的事，统计层同理。"""
+    跨环境混算正是 G7 在采样层禁的事，统计层同理。
+
+    ⚠️ 排除 kind='interaction'（守护命令 span）。判据用**来源**（JOIN runs
+      取 kind），不用 stage 前缀猜 `cmd:%`——前缀是实现细节，改名就漏排除；
+      而且真正的判定链阶段将来也可能带冒号。
+      不排除的后果：视图 3"阶段耗时"里冒出 cmd:enable 这种人机动作，
+      读起来像"某个 Agent 阶段很快"，实际是用户按了几下开关。
+      命令动作改由 meta.cost.command_actions 单列，可回溯性不丢（G13）。
+    """
     c.execute("DELETE FROM stage_stats")
     rows = c.execute("""
-      SELECT stage, environment_fingerprint,
+      SELECT s.stage, s.environment_fingerprint,
              COUNT(*) n,
-             SUM(CASE WHEN exit_status=0 THEN 1 ELSE 0 END) n_ok,
-             GROUP_CONCAT(wallclock_ms) ms,
-             SUM(COALESCE(token_in,0)+COALESCE(token_out,0)) tokens
-      FROM spans GROUP BY stage, environment_fingerprint""").fetchall()
+             SUM(CASE WHEN s.exit_status=0 THEN 1 ELSE 0 END) n_ok,
+             GROUP_CONCAT(s.wallclock_ms) ms,
+             SUM(COALESCE(s.token_in,0)+COALESCE(s.token_out,0)) tokens
+      FROM spans s JOIN runs ru ON ru.run_id = s.run_id
+      WHERE ru.kind <> 'interaction'
+      GROUP BY s.stage, s.environment_fingerprint""").fetchall()
     import statistics as st
     for stage, env, n, n_ok, ms, tokens in rows:
         vals = sorted(float(x) for x in (ms or "").split(",") if x not in ("", "None"))
@@ -375,15 +392,27 @@ def meta_metrics(db: Path | str = DB) -> dict:
     c = connect_ro(db)
     q = lambda sql, *a: c.execute(sql, a).fetchall()
 
-    traced_runs = q("SELECT COUNT(*) FROM runs WHERE traced=1")[0][0]
-    untraced = q("SELECT COUNT(*) FROM runs WHERE traced=0")[0][0]
+    # ⚠️ 轮次计数必须排除 kind='interaction'（守护命令 span 目录）。
+    #   实测：加命令 span 之后 daemon_cmdtrace 因"有 trace.jsonl"被灌成
+    #   一个 traced 轮次，于是报告里的"跑了 N 轮"= 判定轮次 + 用户按键次数。
+    #   人多点几下取消，成本轴与质量轴的分母一起漂——这不是仪器在跑。
+    #   命令留痕本身仍进统计（G13 有 span 就有据），只是单列成动作数。
+    n_rounds = q("SELECT COUNT(*) FROM runs WHERE traced=1 "
+                 "AND kind <> 'interaction'")[0][0]
+    n_untraced = q("SELECT COUNT(*) FROM runs WHERE traced=0 "
+                   "AND kind <> 'interaction'")[0][0]
+    traced_runs, untraced = n_rounds, n_untraced
+    n_cmd_actions = q("SELECT COUNT(*) FROM spans WHERE stage LIKE 'cmd:%'")[0][0]
 
     # 成本轴
     cost = {
         "runs_traced": traced_runs,
         "runs_untraced": untraced,
-        "total_wallclock_s": q("SELECT SUM(wallclock_s) FROM runs WHERE traced=1")[0][0],
-        "total_tokens": q("SELECT SUM(tokens) FROM runs WHERE traced=1")[0][0] or 0,
+        "command_actions": n_cmd_actions,
+        "total_wallclock_s": q("SELECT SUM(wallclock_s) FROM runs WHERE traced=1 "
+                               "AND kind <> 'interaction'")[0][0],
+        "total_tokens": q("SELECT SUM(tokens) FROM runs WHERE traced=1 "
+                          "AND kind <> 'interaction'")[0][0] or 0,
         "stage_p50_ms": {r[0]: r[1] for r in
                          q("SELECT stage, AVG(p50_ms) FROM stage_stats GROUP BY stage")},
         "stage_share": None,        # 需按 pipeline 版本聚合，样本不足 ⇒ 不算
@@ -511,9 +540,12 @@ def _success_rate(kb: Path | str | None = None) -> Optional[dict]:
 def summary(db: Path | str = DB) -> dict:
     """给控制台一帧用的紧凑摘要。"""
     c = connect_ro(db)
+    # recent_runs 与 meta 的轮次轴同口径：都不列 kind='interaction'。
+    # 两处一个排一个不排，控制台会出现"轮次数 5、列表里 6 行"这种自相矛盾。
     rows = c.execute("""SELECT run_id, kind, traced, wallclock_s, tokens,
                         route, verdict, findings, unevaluated_guards
-                        FROM runs ORDER BY run_id DESC LIMIT 60""").fetchall()
+                        FROM runs WHERE kind <> 'interaction'
+                        ORDER BY run_id DESC LIMIT 60""").fetchall()
     stage = c.execute("""SELECT stage, SUM(n), AVG(p50_ms), AVG(p95_ms), SUM(tokens)
                          FROM stage_stats GROUP BY stage""").fetchall()
     c.close()

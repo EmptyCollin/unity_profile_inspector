@@ -140,6 +140,14 @@ def rollback(snap: Snapshot, project_path: Path, scene_path: Path) -> dict:
     """G9：只依赖 git。reset --hard 到快照 tag + 只清夹具路径的未跟踪文件。
     返回回滚校验报告；哈希未复位就如实报 fail（不粉饰）。"""
     root = Path(snap.root)
+    # ⚠️ 回滚目标必须是**管线自己打的 tag**。reset --hard 是不可逆操作：
+    #   若 git_ref 被传成别的引用（分支名、别人的 commit、甚至被污染的字段），
+    #   丢的就是用户自己的未提交工作，而这不是"本轮修复失败"能概括的事故。
+    #   快照 tag 前缀由本模块 snapshot() 单点生成，因此可作为硬判据。
+    if not str(snap.git_ref or "").startswith("upi/attempt-"):
+        raise SnapshotError(
+            f"拒绝回滚到非管线标签 {snap.git_ref!r}：只允许 upi/attempt-* 前缀，"
+            "否则可能丢掉用户未提交的改动（不可逆）")
     _git("reset", "--hard", snap.git_ref, root=root)
     rel = str(Path(project_path).relative_to(root)).replace("\\", "/")
     _git("clean", "-fd", "--", rel, root=root)

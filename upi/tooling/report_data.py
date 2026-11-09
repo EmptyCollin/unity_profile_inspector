@@ -141,11 +141,19 @@ def bars_svg(rows: list[tuple[str, float, Optional[float]]], *, w=760, bh=22,
 
 def gather(db: Path | str | None = None) -> dict:
     c = AG.connect_ro(db or AG.DB)
+    # ⚠️ kind='interaction'（守护命令 span 目录 daemon_cmdtrace）必须从
+    #   报告的一切"轮次/阶段/事故/版本"轴里排除：它是**人机交互留痕**，
+    #   G13 要求它进统计（有 span 就有据），但它不是判定轮次——
+    #   混进来的后果（本轮实测）：视图1 成本散点多一个点、视图6 证据链
+    #   冒出一个没有产物的"轮次"、pipeline 版本轴凭空多一种"pipeline"、
+    #   事故表把 cmd:cancel 的 rc≠0 当成采集事故。交互动作改由
+    #   meta.cost.command_actions 单列。
     runs = c.execute("""SELECT run_id, kind, fixture, started_at, ended_at,
                         wallclock_s, tokens, route, verdict, attempts, traced,
                         findings, unevaluated_guards, protocol_fingerprint,
                         time_source, env_fingerprint
-                        FROM runs ORDER BY ended_at, run_id""").fetchall()
+                        FROM runs WHERE kind <> 'interaction'
+                        ORDER BY ended_at, run_id""").fetchall()
     guards = c.execute("""SELECT g.run_id, ru.fixture, g.metric, g.before, g.after,
                           g.delta, g.regressed, g.value_source, g.basis
                           FROM guards g JOIN runs ru ON ru.run_id=g.run_id
@@ -157,18 +165,25 @@ def gather(db: Path | str | None = None) -> dict:
     stages = c.execute("""SELECT stage, SUM(n), SUM(n_ok), AVG(p50_ms), AVG(p95_ms),
                           MAX(max_ms), SUM(total_ms), SUM(tokens)
                           FROM stage_stats GROUP BY stage ORDER BY SUM(total_ms) DESC""").fetchall()
-    incidents = c.execute("""SELECT run_id, stage, exit_status, COUNT(*)
-                             FROM spans WHERE exit_status<>0
-                             GROUP BY run_id, stage, exit_status""").fetchall()
-    tools = c.execute("""SELECT tool_kind, tool_name, COUNT(*), AVG(tool_ms)
-                         FROM spans WHERE tool_name IS NOT NULL
-                         GROUP BY 1,2 ORDER BY 3 DESC""").fetchall()
+    # 事故与工具调用：同样只取判定轮次的 span。命令 span 的 exit_status≠0
+    # 表示"这条命令被拒/未知"，与"采集出事故"是两回事，混进视图 3 会把
+    # 用户按错键画成仪器故障（判据必须按来源分，不能只看非零码）。
+    incidents = c.execute("""SELECT s.run_id, s.stage, s.exit_status, COUNT(*)
+                             FROM spans s JOIN runs ru ON ru.run_id = s.run_id
+                             WHERE s.exit_status <> 0 AND ru.kind <> 'interaction'
+                             GROUP BY 1, 2, 3""").fetchall()
+    tools = c.execute("""SELECT s.tool_kind, s.tool_name, COUNT(*), AVG(s.tool_ms)
+                         FROM spans s JOIN runs ru ON ru.run_id = s.run_id
+                         WHERE s.tool_name IS NOT NULL AND ru.kind <> 'interaction'
+                         GROUP BY 1, 2 ORDER BY 3 DESC""").fetchall()
     conflicts = c.execute("""SELECT run_id, fixture, conflict_rules FROM detections
                              WHERE conflict_rules NOT IN ('[]','') """).fetchall()
     versions = {"detector": [r[0] for r in c.execute(
         "SELECT DISTINCT detector_version FROM detections WHERE detector_version IS NOT NULL")],
+        # 版本轴同样排除 interaction：否则 pipeline 会凭空多出一种
+        # "版本取值"，而视图头部的"均无跳变"判定就变成假的。
         "pipeline": sorted({r[0].split("_")[0] for r in c.execute(
-            "SELECT DISTINCT kind FROM runs")})}
+            "SELECT DISTINCT kind FROM runs WHERE kind <> 'interaction'")})}
     # weights_version 的真实来源是 state.json 的 hypotheses[]（每项带该字段）。
     # 曾按 diagnose_archive.json 的 "hypotheses" 键取，但归档实况是
     # {根因描述: {六因子判定}} 的字典，无该键 ⇒ 恒取不到值。

@@ -40,12 +40,48 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from upi.config.settings import load_config                      # noqa: E402
+from upi.core import events as E                                  # noqa: E402
 from upi.core.breach_detector import findings_from_samples, load_breach_samples  # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
 
 RUNS = ROOT / "runs"
 PATROL_LOG = RUNS / "patrol_runs.jsonl"
 STATE_FP = RUNS / "patrol_state.json"
+
+# 请求取消/超时后，给采样子进程自己收尾的宽限（退 Play + 卸回调 + 落盘）。
+# 为什么要 150 秒而不是 5 秒：一个完整窗口约 20~30 秒，取消只在窗口边界生效，
+# 宽限短于一个窗口就会在"它正打算收尾"时把它硬杀（finally 不执行，编辑器留 Play 态）。
+# 模块级而非函数内：离线测试要能把它压到 0，验证兜底 kill 分支真会触发。
+GRACE_S = 150
+
+
+class _ResampleResult:
+    """重采子进程的结果包。
+
+    之所以不用 subprocess.CompletedProcess：它的字段名是 returncode，而我这里
+    多带两个布尔（cancelled/timed_out），而这两个恰恰决定"这轮该判失败、
+    判取消、还是判超时"——三种留痕混成一种就会把半途停止的残缺束
+    送进判据链。用 NamedTuple 而不是类，是为了失败留痕的取数写法
+    （p.returncode / p.stdout_tail）与 stdlib 保持一致。
+    """
+
+    __slots__ = ("rc", "stdout", "stderr", "cancelled", "timed_out")
+
+    def __init__(self, rc, stdout, stderr="", cancelled=False, timed_out=False):
+        self.rc = rc
+        self.stdout = stdout or ""
+        self.stderr = stderr or ""
+        self.cancelled = cancelled
+        self.timed_out = timed_out
+
+    @property
+    def returncode(self):
+        return self.rc
+
+    @property
+    def stdout_tail(self) -> str:
+        # 截尾要够长：崩溃 traceback 常是最后十几行，截 200 字符只够看个结尾
+        return (self.stdout or self.stderr)[-900:]
 
 
 def _now() -> str:
@@ -139,6 +175,18 @@ def patrol_episode(cfg_mon: dict) -> dict:
 
 # ────────────────────────── 水通路（T3 复用，重采一轮） ──────────────────────────
 
+def spawn_resample(cmd: list[str], log_file):
+    """起采样子进程。单独成一个函数只有一个理由：**可注入**。
+
+    离线测试要断言水通路的判据链（CLEAN 前置、静默假象闸、零基线清洗），
+    但真起 m1_multiwin 要占编辑器 20+ 分钟。原写法是 mock `subprocess.run`，
+    改成 Popen 之后那批桩全部失效（表现为 5 条断言变红，看着像判据链坏了，
+    实际是桩挂错了对象）。抽一个函数名出来，测试替身就有明确的挂载点，
+    也不会因为实现换了调用形式而静默失效。
+    """
+    return subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT,
+                            cwd=str(ROOT))
+
 def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     """按标定协议重采一轮束并跑 m1_detect 判据链。CLEAN 必须同轮在场。"""
     out = {"channel": "waterline", "findings": [], "blindspot": None}
@@ -150,15 +198,125 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
            "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
            "--caldir", str(workdir), "--no-summary"]
-    p = subprocess.run(cmd, capture_output=True, text=True,
-                       timeout=int(cfg_mon.get("waterline_timeout_s", 900)),
-                       encoding="utf-8", errors="replace")
+    # 用 Popen 而不是 subprocess.run：后者拿不到子进程 pid（只能等它结束），
+    # 而取消通道必须指名道姓地给那个 pid 立标志。
+    # ⚠️ 输出必须**落文件**而不是 PIPE：PIPE 的缓冲只有 64KB 量级，父进程不
+    #   实时读就会把子进程写阻塞——m1_multiwin 每个窗口都打进度，一轮 full
+    #   会话能打出几十 KB，旧 subprocess.run 靠内部并发读才没出事。自己
+    #   Popen 时忘了读就是死锁，直接落文件最稳，且失败留痕照样取得到。
+    timeout_s = int(cfg_mon.get("waterline_timeout_s", 900))
+    log_fp = workdir / "resample.log"
+    try:
+        log_f = log_fp.open("w", encoding="utf-8", errors="replace")
+        proc = spawn_resample(cmd, log_f)
+    except OSError as e:
+        out["blindspot"] = f"重采进程无法启动：{type(e).__name__}: {str(e)[:160]}"
+        return out
+    # 立刻登记 pid：守护的 cancel 命令在子进程写下第一份进度之前也必须能停它
+    E.publish_child(proc.pid, role="resample", workdir=str(workdir))
+    # 采前体检（含失焦守卫）：把结论也登记进 child 文件，UI 与统计能直接读，
+    # 不必再去翻子进程日志。拒采时子进程会自己以 RC_PRECONDITION 退出。
+    rc = None
+    cancelled = False
+    timed_out = False
+    t0 = time.time()
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            break
+        if E.cancel_requested(proc.pid):
+            cancelled = True
+            break
+        if time.time() - t0 > timeout_s:
+            timed_out = True
+            break
+        time.sleep(2)
+    log_f.close()
+    stdout_txt = ""
+    try:
+        stdout_txt = log_fp.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+
+    def _terminate(reason: str) -> None:
+        """先请它自己收尾，宽限期内不动手；超时才 kill（G10 只按这个 pid）。"""
+        E.request_cancel(proc.pid, reason=reason)
+        grace = time.time() + GRACE_S
+        while time.time() < grace and proc.poll() is None:
+            time.sleep(2)
+        if proc.poll() is None:
+            proc.kill()                 # 兜底：已给过自行收尾的机会
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                pass
+            E.emit("child_hard_killed", pid=proc.pid, reason=reason,
+                   note="窗口边界收尾未在宽限期内完成，硬杀会丢 finally 清理")
+        else:
+            E.emit("child_graceful_exit", pid=proc.pid, reason=reason,
+                   rc=proc.returncode)
+
+    # 只要进程还活着，就必须先请它收尾——这一步**不能省**：
+    # 情况 (a)（父进程先看到取消标志）break 时子进程仍在跑，直接往下走
+    # 就等于丢下一个孤儿继续占编辑器；超时同理。
+    if proc.poll() is None:
+        _terminate("user_cancel" if cancelled else "waterline_timeout")
+
+    rc = proc.returncode
+    E.clear_child()
+    # 取消有两种到达方式，都要认，但**只能认这两种**：
+    #   (a) 父进程在轮询里看到取消标志（子进程还活着）→ 上面已置 cancelled
+    #   (b) 子进程自己在窗口边界收尾并以 RC_CANCELLED 退出 → 靠退出码认
+    # 只认 (a) 的后果很具体：半途束文件已存在，于是**残缺束被送去判据链**，
+    # 得出"零检出"——正是 B7 禁止的"没采到冒充没有异常"。
+    # ⚠️ 不能写成 `or E.cancel_requested(pid)`：_terminate() 自己会立标志
+    #   （超时收尾也走它），那样每个超时轮都会被后置判定误认成"用户取消"。
+    # ⚠️ 补判必须让位于超时：超时轮里 _terminate 也会请求取消，子进程若是
+    #   照办并以 rc=3 收尾，"退出码=取消"这条补判会把**归因**从"仪器太慢"
+    #   改写成"人不想要了"——两者的处置动作完全不同，这是本轮实测撞出的缺陷。
+    if rc == E.RC_CANCELLED and not timed_out:
+        cancelled = True
+    E.clear_cancel(proc.pid)          # 谁立的标志都在这里收尾，不留给下一轮
+    p = _ResampleResult(rc=rc, stdout=stdout_txt, stderr="",
+                        cancelled=cancelled, timed_out=timed_out)
     bundle = workdir / "multiwin_full.json"
+    # ⚠️ 取消与超时**必须走在 bundle 检查之前**：半途停下时可能已经写出一个
+    #   窗口数不足的束文件。把它当正常束送去判据链，就是拿残缺数据采集
+    #   下"零检出"的结论——B7 明令禁止的"没采到冒充没有异常"。
+    # 超时先判（理由见上：它会借用取消通道，退出码不可用于归因）。
+    if timed_out:
+        out["blindspot"] = (f"重采超时（>{timeout_s}s，已请求自行收尾）"
+                            f"，束不完整不判定；日志尾={p.stdout_tail}")
+        out["timed_out"] = True
+        return out
+    if cancelled:
+        # rc=3 说明它自己在窗口边界收尾了（退 Play、卸回调都做了）；
+        # rc=15 说明宽限期内没停住被硬杀——**现场状态不同**，留痕必须能分开，
+        # 否则排查方向就错了：看到 15 需要人工确认编辑器是否还停在 Play 态。
+        clean = rc == E.RC_CANCELLED
+        tail = ("子进程已在边界自行收尾，现场干净）" if clean
+                else "子进程未在宽限期内自行收尾，已被硬杀；"
+                     "编辑器现场可能仍处 Play 态，需人工确认）")
+        out["blindspot"] = f"本轮水通路被取消（rc={rc}；{tail}"
+        out["cancelled"] = True
+        out["cancelled_clean"] = clean
+        return out
+    # 拿到硬杀码却没人请求过取消：进程被外力终止（外部 taskkill、上一代遗留、
+    # 崩溃后被清理）。**不能当普通失败记**——普通失败的现场是干净的，
+    # 硬杀的现场可能把编辑器留在 Play 态，下一轮进来就是脏数据。
+    # 这里不猜原因，只说"现场状态未知、需人工确认"（I2 证据不足不下结论）。
+    if rc == E.RC_HARD_KILL:
+        out["blindspot"] = (f"重采进程异常终止（rc={rc}，非本方请求取消）："
+                            "退出码等同硬杀，编辑器现场状态未知，"
+                            f"需人工确认是否仍处 Play 态；日志尾={p.stdout_tail}")
+        out["killed"] = True
+        return out
     if not bundle.exists():
-        # 失败留痕必须带 stderr：实测 rc=1 崩溃的 traceback 全在 stderr，
-        # 只截 stdout 会把真凶记成空串（10:27 轮"重采失败（rc=1）："的成因）
-        out["blindspot"] = (f"重采失败（rc={p.returncode}）：stdout尾={p.stdout[-200:]}"
-                            f" stderr尾={p.stderr[-400:]}")
+        # 失败留痕必须带子进程输出：实测 rc=1 崩溃的 traceback 原本全在 stderr，
+        # 只截 stdout 会把真凶记成空串（10:27 轮"重采失败（rc=1）："的成因）。
+        # 现在输出合并落同一份日志，所以取 stdout_tail 即可，但措辞要如实
+        # 写"日志尾"而不是"stderr尾"——文件里已经不是分流的两个流了。
+        out["blindspot"] = (f"重采失败（rc={rc}）：日志尾={p.stdout_tail}")
         return out
     # 判据链完全复用 m1_detect（含 G7 协议指纹校验与标定注入），不改一行判据
     from scripts.m1_detect import (apply_calibration, compare,
@@ -301,6 +459,7 @@ def patrol_once(cfg_mon: dict) -> dict:
                                       ("findings", "blindspot", "n_samples",
                                        "n_new_samples")},
            "waterline": {"findings": wl["findings"], "blindspot": wl["blindspot"],
+                         "cancelled": bool(wl.get("cancelled")),
                          "bundle": wl.get("bundle")},
            "wake": wake,
            # B7 静默语义收紧：静默=采到了且无异常。任一通路未评估时整轮记
