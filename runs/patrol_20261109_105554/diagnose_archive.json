@@ -1,0 +1,314 @@
+{
+  "热路径每帧新建 List（可复用缓冲）（机制 anchor: per_frame_heap_alloc_in_hot_path）": {
+    "proximity": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32",
+        "e0"
+      ],
+      "reason": "现有证据只给出候选代码位置和分配采样，缺少调用栈或热路径归属证据。"
+    },
+    "explains_share": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据只给出每帧分配总量，未提供该 List 分配的大小与频次，无法判断能否解释主要部分。"
+    },
+    "competitiveness": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据未列出同场景其他可解释机制，无法比较该机制是否占优。"
+    },
+    "prior_hit": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "本提示未附知识库，无法核查是否存在同三重签名历史记录。"
+    },
+    "counterfactual": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32",
+        "e0"
+      ],
+      "reason": "按机制推演，去掉每帧 List 会减少分配，但缺少线内阈值和该来源占比，无法判断是否回落到线内。"
+    },
+    "mechanism": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:32",
+        "e0"
+      ],
+      "reason": "每帧新建 List 导致堆分配并推高每帧分配指标在机制上自洽，证据中无拆台反例，但未展示该行代码内容。"
+    },
+    "_meta": {
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "weights_in_play": "formula(c_attr)",
+      "token_in": 502,
+      "token_out": 2017,
+      "prompt_sha256_8": "77a65b4b"
+    }
+  },
+  "热路径每帧新建 Dictionary（可复用+Clear）（机制 anchor: per_frame_heap_alloc_in_hot_path）": {
+    "proximity": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:50",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:55"
+      ],
+      "reason": "候选分配点位于被指为热路径的 CombatSkillManager 的两个锚点行上，且 e0 是按帧分配的全局指标，任何每帧分配点都处于该指标现场，但未给出代码内容确认其确在逐帧执行路径中。"
+    },
+    "explains_share": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "e0 仅给出 76947B/frame 总量，缺少 Dictionary 条目规模与每帧实例数，无法定量判断单点能否覆盖主要份额。"
+    },
+    "competitiveness": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据中未列出同场景其他可解释机制，无法进行候选间优劣比较。"
+    },
+    "prior_hit": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "本提示未附知识库，无同三重签名历史记录可查。"
+    },
+    "counterfactual": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:50",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:55"
+      ],
+      "reason": "按机制推演，改为复用+Clear 后该点每帧堆分配消失、每帧分配量必然下降，但能否回落到线内取决于其占比，尚未验证。"
+    },
+    "mechanism": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:50",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:55"
+      ],
+      "reason": "每帧 new Dictionary 会在热路径产生托管堆分配并计入按帧分配指标，链条自洽，证据中无拆台反例，但缺代码内容与分配量佐证。"
+    },
+    "_meta": {
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "weights_in_play": "formula(c_attr)",
+      "token_in": 531,
+      "token_out": 1130,
+      "prompt_sha256_8": "6a373bf0"
+    }
+  },
+  "每帧 LINQ 链（枚举器+闭包分配）（机制 anchor: linq_enumerator_closure_per_frame）": {
+    "proximity": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:39",
+        "e0"
+      ],
+      "reason": "候选锚点落在具体游戏代码行，但现有采样证据未直接证明该行处于每帧热路径。"
+    },
+    "explains_share": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "仅有每帧分配总量，缺少按方法或调用栈的分配归因，无法判定 LINQ 分配能否解释主要量级。"
+    },
+    "competitiveness": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据中未列出同场景其他可解释机制及其占比，无法比较该候选是否占优。"
+    },
+    "prior_hit": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "本提示未附知识库，无法确认是否存在同三重签名历史记录。"
+    },
+    "counterfactual": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:39",
+        "e0"
+      ],
+      "reason": "按机制逻辑移除每帧 LINQ 可能降低分配，但缺少该来源占比，无法推演指标是否回落到线内。"
+    },
+    "mechanism": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:39",
+        "e0"
+      ],
+      "reason": "每帧 LINQ 枚举器与闭包分配可自洽地贡献每帧分配指标，但证据未直接展示该调用链或排除反例。"
+    },
+    "_meta": {
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "weights_in_play": "formula(c_attr)",
+      "token_in": 504,
+      "token_out": 1035,
+      "prompt_sha256_8": "08230e32"
+    }
+  },
+  "每帧 GetComponent 重复查找（可 Awake 缓存）（机制 anchor: repeated_getcomponent_in_update）": {
+    "proximity": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "reason": "仅给出代码锚点，未提供调用栈或 Update 热路径证据，无法确认该位置就在越线现场。"
+    },
+    "explains_share": {
+      "verdict": "no",
+      "value": 0.0,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "reason": "Issue 量级为 76947B/frame 的字节/帧指标，而 GetComponent 重复查找本身通常不产生每帧托管分配，不能解释该量级。"
+    },
+    "competitiveness": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据中未列出同场景其他可解释机制，无法比较该候选是否占优。"
+    },
+    "prior_hit": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "本提示未附知识库，无法判断是否存在同三重签名历史记录。"
+    },
+    "counterfactual": {
+      "verdict": "no",
+      "value": 0.0,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "reason": "按机制逻辑，移除每帧 GetComponent 查找不会显著降低 B/frame 分配指标，难以推演其回落到线内。"
+    },
+    "mechanism": {
+      "verdict": "no",
+      "value": 0.0,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:46",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:47"
+      ],
+      "reason": "代码→每帧分配/绘制→B/frame 的链条缺少证据，且 GetComponent 查找与字节/帧分配指标之间不自洽。"
+    },
+    "_meta": {
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "weights_in_play": "formula(c_attr)",
+      "token_in": 529,
+      "token_out": 1171,
+      "prompt_sha256_8": "0c1ce94a"
+    }
+  },
+  "枚举 ToString+字符串拼接每帧执行（可预生成表）（机制 anchor: enum_tostring_concat_per_frame）": {
+    "proximity": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:48",
+        "e0"
+      ],
+      "reason": "虽然给出了代码锚点，但 e0 只有帧级采样汇总，没有调用栈或采样点能证明第 48 行确实位于被采样热路径上，因此无法判断。"
+    },
+    "explains_share": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "e0 只给出 76947B/frame 的总量，缺少该枚举 ToString+字符串拼接的每帧调用次数与单次分配量，因此无法把该机制产生的分配量与总量逐项对上。"
+    },
+    "competitiveness": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "证据中没有给出任何可对比的其他候选机制或其占比，因此无法判断本机制相比其他机制是否占优。"
+    },
+    "prior_hit": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0"
+      ],
+      "reason": "本次提示未附知识库，因此无法核对同三重签名（枚举 ToString+拼接/CPU/分配）的历史记录。"
+    },
+    "counterfactual": {
+      "verdict": "unclear",
+      "value": 0.4,
+      "refs": [
+        "e0",
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:48"
+      ],
+      "reason": "即使按机制逻辑推演，去掉该拼接会消除这部分字符串分配，但由于量化占比未知，无法判断指标是否会回落到线内。"
+    },
+    "mechanism": {
+      "verdict": "likely",
+      "value": 0.7,
+      "refs": [
+        "anchor:fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs:48",
+        "e0"
+      ],
+      "reason": "枚举 ToString 每帧都会产生字符串分配，字符串拼接再产生临时字符串，共同造成 GC 分配压力，这条链条本身自洽，且证据中未见能推翻它的反例；但缺少分配调用栈来直接印证。"
+    },
+    "_meta": {
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "weights_in_play": "formula(c_attr)",
+      "token_in": 505,
+      "token_out": 943,
+      "prompt_sha256_8": "89a6799b"
+    }
+  }
+}

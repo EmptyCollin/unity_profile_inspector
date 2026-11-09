@@ -1,0 +1,7 @@
+{
+ "request_id": "APR-eaab522a2f",
+ "decision": "approve",
+ "approver": "用户",
+ "note": "2026-11-09 对话直接指令授权：真实模型归因轮走保留通路，同意 PB-FULL-REUSE 对 CombatSkillManager.cs 的 2 条语义保持改动",
+ "decided_at": "2026-11-09T11:05:00"
+}
