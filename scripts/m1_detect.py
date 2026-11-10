@@ -57,6 +57,58 @@ def latest_baseline() -> Path:
     return max(BASELINES.glob("baseline_*.json"), key=lambda p: p.stat().st_mtime)
 
 
+def waterline_matrix(eval_subjects: list[str], fixs: dict, clean_stats: dict,
+                     wln: list) -> tuple[dict, dict]:
+    """选法 1 的面板：每个水位检测器的指标跑在**每个被测机制**上。
+
+    为什么存在：注册表检测器硬绑夹具机制（subject="F-CPU-01"…），真工程的
+    机制名不在其中 ⇒ 相对检出永远为空——"跨机制相对检出只服务夹具"正是
+    这条耦合的产物。而判据本身（中位 vs 噪声基准 k·σ + 绝对阈 + 偏离倍数）
+    是**指标级**的：gc_alloc_per_frame 的标定阈值评任何机制的 GC 都成立。
+    所以面板 = 机制 × 指标，home（检测器原绑机制）与非 home 用同一 compare，
+    不做特例开关（特例开关会随工程数增殖）。
+
+    键形与分区（G18 等级归属的同型问题，实测后定）：
+      · results 只放 **home 行**、按机制名键控——与历史 detection.json
+        **逐字节兼容**（统计层 detections 表、状态机 find 循环都不动）；
+      · panel_results 放**跨检行**、按 "机制::指标" 键控——筛查事实，
+        不进 detector 检出率分母（混进去会把"检测器声称的能力"和
+        "指标面板的顺带覆盖"算成一个数，正是 G18 拦的那种失真），
+        也不进自动修复唤起（anchor_patterns 是 home 机制的代码模式，
+        拿它归因别的机制会误导）。
+    实测背书：夹具上开面板后 F-ANIM-01×totalAllocatedBytes 被跨检抓到
+    （Δ3.76MB 过 2MB 标定地板）——这是面板的**价值**（瓶颈自然暴露），
+    但它属筛查不属 DET-LOAD-SYNCPEAK 的战绩，分区后两不失真。
+    """
+    home_results: dict[str, dict] = {}
+    panel: dict[str, dict] = {}
+    for det in wln:
+        for fid in eval_subjects:
+            home = (fid == det.subject)
+            st = fixs.get(fid)
+            if st is None:
+                row = {"subject": fid, "metric": det.metric, "detector": det.id,
+                       "detector_version": det.version, "home": home,
+                       "verdict": "insufficient_evidence",
+                       "why": "本轮未采到该机制（缺窗口数据）"}
+            else:
+                issue, detail = compare(det, st, clean_stats)
+                detail["detector"] = det.id
+                detail["detector_version"] = det.version
+                detail["subject"] = fid
+                detail["home"] = home
+                detail["window_n"] = (clean_stats.get(det.metric) or {}).get("n")
+                if issue:
+                    detail["issue_signature"] = issue.signature.model_dump()
+                    detail["magnitude"] = issue.magnitude
+                row = detail
+            if home:
+                home_results[fid] = row        # 历史契约：机制名键
+            else:
+                panel[f"{fid}::{det.metric}"] = row
+    return home_results, panel
+
+
 def compare(det, fix_stats: dict, clean_stats: dict) -> tuple[Issue | None, dict]:
     """返回 (Issue|None, 判定详情)。指标缺失 ⇒ insufficient_evidence（I2）。"""
     m = det.metric
@@ -123,13 +175,28 @@ def apply_calibration(dets: list, cal: dict) -> int:
     return applied
 
 
-def latest_calibration() -> dict | None:
-    cps = sorted(BASELINES.glob("thresholds_*.json"), key=lambda q: q.stat().st_mtime)
-    if not cps:
-        return None
-    cal = json.loads(cps[-1].read_text(encoding="utf-8"))
-    cal["_path"] = str(cps[-1])
-    return cal
+def latest_calibration(profile_id: str | None = None) -> dict | None:
+    """取**本工程归属**的最新标定文件。
+
+    阶段 8 选法 1 的前置修复：旧版按 mtime 全局取最新——接入第二个工程后，
+    谁最后标定谁就是"最新"，另一个工程的检出会拿错阈值。G7 确实会拦下
+    （profile_id 已在指纹里），但"每次换工程都撞墙再被拦"不是隔离，是串扰。
+    归属判据与全仓同源（owner_profile_id）：新标定文件的 protocol 里有
+    profile 键（protocol_block 写出）；历史文件没有 ⇒ 归内置档案——与
+    "此前所有产物只可能来自内置工程"的事实判定一致（I1，不是猜默认值）。
+    """
+    pid = profile_id or active_profile().profile_id
+    cps = sorted(BASELINES.glob("thresholds_*.json"),
+                 key=lambda q: q.stat().st_mtime, reverse=True)
+    for p in cps:
+        try:
+            cal = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if owner_profile_id(cal.get("protocol") or {}) == pid:
+            cal["_path"] = str(p)
+            return cal
+    return None
 
 
 def stats_from_windows(fx: dict) -> dict:
@@ -281,65 +348,75 @@ def main() -> int:
                         str(_pf.abs_project), profile_id=_pf.profile_id))
 
     cal = latest_calibration()
-    if cal is None:
-        print("!! 无标定文件（先跑 m1_multiwin --merge）；§8.1 禁止未标定检测")
+    # 标定闸只在**要跑相对判据**时生效（L2）。L0 下 compare 全落
+    # insufficient_evidence、用不到任何阈值，绝对下限腿又不依赖标定——
+    # 若照旧"无标定即整轮中止"，新工程没标定就直接失去了下限监测能力，
+    # 与阶段 8 设计 §1"L0 只走绝对门槛"矛盾（test_patrol ⑥ 实测撞出）。
+    if cal is None and basis_relational(basis):
+        print("!! 无本工程标定文件（先跑 m1_multiwin --merge）；§8.1 禁止未标定检测")
         return 1
 
     # G7 真实落点：**阈值源指纹 × 数据源指纹** 必须一致才可拿阈值比数据。
     # 同一次 merge 链里两者同源必然一致；换错标定文件（如 n 或窗口长度不同）
     # 在这里被拦下，而不是无声混比。协议字段一致即可比，scene_guid 在 v0
     # 只反映来源文件（数据文件与阈值文件哈希必然不同），故对比取协议子集。
+    # ⚠️ 整段只在**有标定**时跑：cal=None 只可能出现在 L0（无标定的 L2 上面
+    #    已 return）。L0 没有阈值可比，相对通路下面整体落 insufficient_evidence
+    #    （compare 缺 clean_stats 短路，连阈值都不读），只留下限腿——
+    #    但代码不能拿着 None 去算 fp_th/apply_calibration，那会 AttributeError。
     env_fp = tracer.env_fingerprint
     fp_data = fingerprint_from_protocol(mw.get("protocol", {}), mw.get("_path", ""),
                                         env_fp, int(mw.get("windows_target", 4)))
-    fp_th = fingerprint_from_protocol(cal.get("protocol", {}), cal.get("_path", ""),
-                                      env_fp, int(mw.get("windows_target", 4)))
-    # 判据与比对见模块级 G7_COMPARE_FIELDS / g7_mismatches（提到模块级的唯一
-    # 原因是可被断言：留在 main 里就是局部表达式，测试只能复刻一遍或 grep
-    # 源码文本——复刻的那份不是产品，grep 测的是字符串不是行为。）
-    mism = g7_mismatches(fp_data, fp_th)
-    if mism:
-        print("!! 阈值与数据协议不一致，禁止套用（G7）：", mism)
-        if "profile_id" in mism:
-            print(f"   数据侧工程={fp_data.profile_id}  标定侧工程={fp_th.profile_id}"
-                  f"  当前运行档案={active_profile().profile_id}")
-        return 1
-    print(f"G7 校验: 阈值源×数据源协议一致（{'|'.join(str(getattr(fp_data,f)) for f in ('warmup_samples','window_samples','poll_rate','scale_factor'))}）")
+    waterline_dets = []
+    if cal is not None:
+        fp_th = fingerprint_from_protocol(cal.get("protocol", {}), cal.get("_path", ""),
+                                          env_fp, int(mw.get("windows_target", 4)))
+        # 判据与比对见模块级 G7_COMPARE_FIELDS / g7_mismatches（提到模块级的唯一
+        # 原因是可被断言：留在 main 里就是局部表达式，测试只能复刻一遍或 grep
+        # 源码文本——复刻的那份不是产品，grep 测的是字符串不是行为。）
+        mism = g7_mismatches(fp_data, fp_th)
+        if mism:
+            print("!! 阈值与数据协议不一致，禁止套用（G7）：", mism)
+            if "profile_id" in mism:
+                print(f"   数据侧工程={fp_data.profile_id}  标定侧工程={fp_th.profile_id}"
+                      f"  当前运行档案={active_profile().profile_id}")
+            return 1
+        print(f"G7 校验: 阈值源×数据源协议一致（{'|'.join(str(getattr(fp_data,f)) for f in ('warmup_samples','window_samples','poll_rate','scale_factor'))}）")
 
-    # §3A 通路分流：本脚本=水位通路（窗口分布 × noise_calibration 阈值）。
-    # episode 检测器（frame_budget 阈值 × BreachSample 输入）的证据形态不同，
-    # 由 m2a_detect_breach.py 独立跑——混进本循环会发生两件坏事：
-    #   a) 窗口标定覆盖帧预算线（两套阈值体系互相污染，§8.1 违例）；
-    #   b) "全量覆盖"检查被帧预算指标撞停（T2w 收口实测发生）。
-    waterline_dets = [d for d in DEFAULT_REGISTRY
-                      if d.thresholds.threshold_source == "noise_calibration"]
-    other_dets = [d for d in DEFAULT_REGISTRY if d not in waterline_dets]
-    if other_dets:
-        print(f"通路分流: {len(other_dets)} 个非水位检测器移交对应通路 "
-              f"{[d.id for d in other_dets]}")
-    n_applied = apply_calibration(waterline_dets, cal)
-    print(f"标定应用: {n_applied}/{len(waterline_dets)} 项阈值来自 {Path(cal['_path']).name}")
-    if n_applied != len(waterline_dets):
-        print("!! 有水位检测器指标不在标定表内（§8.1 要求全量覆盖），中止")
-        return 1
+        # §3A 通路分流：本脚本=水位通路（窗口分布 × noise_calibration 阈值）。
+        # episode 检测器（frame_budget 阈值 × BreachSample 输入）的证据形态不同，
+        # 由 m2a_detect_breach.py 独立跑——混进本循环会发生两件坏事：
+        #   a) 窗口标定覆盖帧预算线（两套阈值体系互相污染，§8.1 违例）；
+        #   b) "全量覆盖"检查被帧预算指标撞停（T2w 收口实测发生）。
+        waterline_dets = [d for d in DEFAULT_REGISTRY
+                          if d.thresholds.threshold_source == "noise_calibration"]
+        other_dets = [d for d in DEFAULT_REGISTRY if d not in waterline_dets]
+        if other_dets:
+            print(f"通路分流: {len(other_dets)} 个非水位检测器移交对应通路 "
+                  f"{[d.id for d in other_dets]}")
+        n_applied = apply_calibration(waterline_dets, cal)
+        print(f"标定应用: {n_applied}/{len(waterline_dets)} 项阈值来自 {Path(cal['_path']).name}")
+        if n_applied != len(waterline_dets):
+            print("!! 有水位检测器指标不在标定表内（§8.1 要求全量覆盖），中止")
+            return 1
+    else:
+        print("无本工程标定：相对判据通路整体跳过（L0），仅评绝对下限")
 
     with tracer.stage("detect") as ctx:
         tracer.tool_call(ctx, kind="sqlite", name="read_calibration_windows", args=mw.get("_path", ""), exit_status=0)
-        tracer.tool_call(ctx, kind="sqlite", name="read_thresholds", args=cal.get("_path", ""), exit_status=0)
-        results = {}
-        for det in waterline_dets:
-            fid = det.subject
-            if fid not in fixs:
-                results[fid] = {"verdict": "insufficient_evidence", "why": "标定数据缺该夹具"}
-                continue
-            issue, detail = compare(det, fixs[fid], clean_stats)
-            detail["detector"] = det.id
-            detail["detector_version"] = det.version
-            detail["window_n"] = clean_stats.get(det.metric, {}).get("n")
-            if issue:
-                detail["issue_signature"] = issue.signature.model_dump()
-                detail["magnitude"] = issue.magnitude
-            results[fid] = detail
+        if cal is not None:
+            tracer.tool_call(ctx, kind="sqlite", name="read_thresholds", args=cal.get("_path", ""), exit_status=0)
+        # 选法 1 面板：机制×指标。评测集 = 档案 subjects ∪ 束里出现的被测机制
+        # （并集而非只取 subjects：标定/采样清单可能比档案更宽，比如 dev 手动
+        #  --fixtures 采的组合；漏评等于"没测"，多评只是多一行事实）。
+        # 分区语义见 waterline_matrix：home 行落 results（历史契约、进统计），
+        # 跨检行落 panel_results（筛查事实，不进 detector 检出率分母）。
+        # 内置档案上 home 行 == 旧 results 逐字节兼容（零行为变化验收线）。
+        _pf2 = active_profile()
+        eval_subjects = sorted(set(_pf2.subjects)
+                               | {k for k in fixs if k != _pf2.clean_subject})
+        results, panel_results = waterline_matrix(
+            eval_subjects, fixs, clean_stats, waterline_dets)
 
         # T7 矛盾规则表（P4，AGENTS §1.5）：跨指标组合的**机制签名**。
         # 边界（本轮口径修正）：不用于"判数据可信"——CLEAN 自比自时
@@ -401,12 +478,13 @@ def main() -> int:
                                "source": _tbl.source})
 
         out = {"run_id": run_id, "data_source": mw.get("_path"),
-               "thresholds_source": cal.get("_path"),
+               "thresholds_source": cal.get("_path") if cal else None,
                "protocol_fingerprint": fp_data.model_dump(),   # G7：本轮判定挂靠的指纹
                "replayable": fp_data.replay_script_hash != "none-v0",  # T2 未建 → False，如实标注
                "band_basis": "between_windows", "fp_selfcheck": fp_check,
                "noise_basis": basis,               # 阶段 8 A：本轮噪声带来源等级
                "floors": floors,                   # 绝对下限腿（与 results 分区）
+               "panel_results": panel_results,     # 跨检筛查行（不进 detector 分母）
                "conflicts": conflicts_all,
                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
         (RUNS / run_id).mkdir(parents=True, exist_ok=True)
@@ -418,10 +496,18 @@ def main() -> int:
 
     print(f"数据源: {Path(mw['_path']).name}（窗口间 σ，与阈值同源）  噪声带来源: {basis}")
     detected = sum(1 for r in results.values() if r.get("verdict") == "detected")
-    for fid, r in results.items():
+    for sub, r in results.items():
         mark = "检出" if r.get("verdict") == "detected" else ("证据不足" if "insufficient" in str(r.get("verdict")) else "未检出")
-        print(f"  [{mark:4s}] {fid:10s} {r.get('metric','')} fx={r.get('fixture')} clean={r.get('clean')} "
+        print(f"  [{mark:4s}] {sub:10s} {r.get('metric','')} "
+              f"fx={r.get('fixture')} clean={r.get('clean')} "
               f"delta={r.get('delta','')} ratio={r.get('deviation_ratio','')} n窗口={r.get('window_n','')} {r.get('reason','')}")
+    # 跨检筛查行：单列计数，与主位检出分开（G18 等级归属——它们不进检出率分母）
+    _pdet = [k for k, v in panel_results.items() if v.get("verdict") == "detected"]
+    if _pdet:
+        print(f"跨检筛查（指标面板，不计入 detector 检出率）命中 {len(_pdet)} 项:")
+        for k in _pdet:
+            v = panel_results[k]
+            print(f"  [跨检] {k} Δ={v.get('delta')} ratio={v.get('deviation_ratio')}")
     # L0 下 fp_check 为空是"没测"不是"零误报"，打印必须区分（G15 成对展示：
     # 不许只报检出率、把 FP 谎报成 0）。措辞里机制名用档案值，不写死 CLEAN。
     if basis_relational(basis):
