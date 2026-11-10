@@ -585,7 +585,7 @@ def _meta_metrics_q(c: sqlite3.Connection, db: Path | str) -> dict:
 
 
 def _fp_selfcheck() -> dict:
-    """CLEAN 自比自：任何 detected 都是误报（D6 口径）。取最新 detection.json。"""
+    """对照机制自比自：任何 detected 都是误报（D6 口径）。取最新 detection.json。"""
     ds = sorted(RUNS.glob("m1detect_*/detection.json"))
     if not ds:
         return {}

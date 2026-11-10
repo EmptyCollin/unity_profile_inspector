@@ -63,7 +63,11 @@ def fmt_rate(v) -> str:
 FIXTURE_SPEC = active_profile().fixture_spec
 
 
-CLEAN_ID = "CLEAN"
+# 对照机制名（负样本的 id）：内置档案里就是 "CLEAN"，但新工程可能叫别的。
+# 它不是纯标签——split_of() 用 `fid == CLEAN_ID` 判第三态，写死会让新工程的
+# 负样本被错分成 tuning/holdout，混进检出率分母（§8.1 要防的正是这个）。
+# 与 FIXTURE_SPEC 同口径在导入时取一次值，供测试覆盖入口。
+CLEAN_ID = active_profile().clean_subject
 
 
 def split_of() -> dict[str, str]:
@@ -148,8 +152,8 @@ def _compute(c) -> dict:
                     f"检出率 {fmt_rate(rates['tuning'])}（n={ns.get('tuning')}）、"
                     f"holdout={sorted(k for k, v in sp.items() if v == 'holdout')} "
                     f"检出率 {fmt_rate(rates['holdout'])}（n={ns.get('holdout')}）"
-                    + ("；CLEAN 已排除（无缺陷，专供 FP 测量）"
-                       if "CLEAN" in sp_all else ""))
+                    + (f"；{CLEAN_ID} 已排除（无缺陷，专供 FP 测量）"
+                       if CLEAN_ID in sp_all else ""))
         }
     else:
         out["tuning_holdout_gap"] = {
@@ -157,7 +161,7 @@ def _compute(c) -> dict:
             "why": f"夹具规格 {FIXTURE_SPEC.name} 缺 holdout 字段或值非 0/1 ⇒ 不猜测"
                    "分组（默认成 tuning 会把留出夹具喂进调参，正是 §8.1 要防的）"}
 
-    # ── 2) clean_fp_rate：CLEAN 自比自，任何 detected 即误报（D6 口径）──
+    # ── 2) clean_fp_rate：对照机制自比自，任何 detected 即误报（D6 口径）──
     alerts = total = 0
     n_runs_with = 0
     for p in sorted(AG.RUNS.glob("*/detection.json")):
@@ -176,7 +180,7 @@ def _compute(c) -> dict:
         "value": (alerts / total) if total else None,
         "ok": None if not total else bool(alerts == 0),
         "n": total,
-        "why": (f"CLEAN 自比自：阈值来自 CLEAN 自身，任何 detected 都是误报"
+        "why": (f"{CLEAN_ID} 自比自：阈值来自 {CLEAN_ID} 自身，任何 detected 都是误报"
                 f"（{n_runs_with} 轮的 detection.json 带 fp_selfcheck 字段）"
                 if total else "无任何 detection.json 带 fp_selfcheck 字段")}
 

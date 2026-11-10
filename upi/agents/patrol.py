@@ -44,6 +44,7 @@ from upi.config.settings import load_config                      # noqa: E402
 from upi.core import events as E                                  # noqa: E402
 from upi.core.breach_detector import findings_from_samples, load_breach_samples  # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
+from upi.config.project_profile import active_profile              # noqa: E402
 
 RUNS = ROOT / "runs"
 PATROL_LOG = RUNS / "patrol_runs.jsonl"
@@ -189,11 +190,13 @@ def spawn_resample(cmd: list[str], log_file):
                             cwd=str(ROOT))
 
 def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
-    """按标定协议重采一轮束并跑 m1_detect 判据链。CLEAN 必须同轮在场。"""
+    """按标定协议重采一轮束并跑 m1_detect 判据链。对照机制必须同轮在场。"""
     out = {"channel": "waterline", "findings": [], "blindspot": None}
     fixtures = cfg_mon.get("fixtures") or []
-    if "CLEAN" not in fixtures:
-        out["blindspot"] = "巡检夹具不含 CLEAN——无同期对照，禁止判定（§8.1）"
+    _clean = active_profile().clean_subject   # 对照机制名由档案派生（阶段 7）
+    if _clean not in fixtures:
+        out["blindspot"] = (f"巡检夹具不含 {_clean}"
+                            "——无同期对照，禁止判定（§8.1）")
         return out
     workdir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
@@ -333,7 +336,7 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     if apply_calibration(wln, cal) != len(wln):
         out["blindspot"] = "标定未覆盖全部水位检测器（§8.1 全量覆盖）"
         return out
-    clean = fixs.get("CLEAN")
+    clean = fixs.get(_clean)
 
     # ── 采样有效前提闸（实测失焦轮撞出的失效模式）：束里夹具无窗口/判定
     # 指标缺失 = 采集失败。判据链对空 stats 只会静默跳过——巡检照抄"零检出"
@@ -350,7 +353,7 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
             err = str((raw_fx.get(det.subject) or {}).get("error", "无窗口数据"))
             missing.append(f"{det.subject}({det.metric}): {err[:80]}")
     if clean is None:
-        missing.append("CLEAN 无有效统计——无对照基线，禁止判定（§8.1）")
+        missing.append(f"{_clean} 无有效统计——无对照基线，禁止判定（§8.1）")
     if missing:
         out["blindspot"] = "采样有效前提不成立，水通路本轮未评估：" + "；".join(missing)
         return out

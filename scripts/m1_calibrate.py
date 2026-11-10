@@ -1,4 +1,9 @@
-"""M1 标定：从最新基线的 CLEAN 统计生成检测阈值（DESIGN §8.1 的唯一合法来源）。
+"""M1 标定：从最新基线的对照机制统计生成检测阈值（DESIGN §8.1 的唯一合法来源）。
+
+⚠️ 本入口已被 `m1_multiwin.py --merge`（do_merge）取代：检测端
+  （scripts/m1_detect.py）明确禁止回退本脚本读的旧单窗口基线，
+  `mw is None` 时直接报"检测与标定必须来自同一多窗口数据源"。
+  实测本脚本作为独立入口仍可运行，所以对照机制名照样按档案取，不留写死字面。
 
 规则：
   min_magnitude = max(指标地板, 6 × clean_noise_band_mad)   # 6σ≈百万分之一误报率（近正态下）
@@ -10,11 +15,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 BASELINES = ROOT / "baselines"
+
+from upi.config.project_profile import active_profile  # noqa: E402
 
 # 指标地板：低于此绝对量的差异即便统计显著也不值得报（业务显著性）
 FLOORS = {
@@ -56,9 +65,9 @@ def main() -> int:
         return 1
     bp = bps[-1]
     doc = json.loads(bp.read_text(encoding="utf-8"))
-    clean = doc["fixtures"].get("CLEAN")
+    clean = doc["fixtures"].get(active_profile().clean_subject)
     if not clean or "error" in clean:
-        print("基线缺 CLEAN 变体")
+        print(f"基线缺对照机制 {active_profile().clean_subject} 变体")
         return 1
 
     stats = {**clean.get("A_stats", {})}

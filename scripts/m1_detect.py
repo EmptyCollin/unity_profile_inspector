@@ -234,10 +234,11 @@ def main() -> int:
         print("   检测与标定必须来自同一多窗口数据源，禁止回退旧单窗口基线（G7/§3）")
         return 1
     fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items() if "windows" in v}
-    if "CLEAN" not in fixs:
-        print("!! 缺 CLEAN 变体，无法对照（§8.1）")
+    _clean = active_profile().clean_subject   # 对照机制名来自档案，不写死
+    if _clean not in fixs:
+        print(f"!! 缺对照机制 {_clean}，无法对照（§8.1）")
         return 1
-    clean_stats = fixs["CLEAN"]
+    clean_stats = fixs[_clean]
 
     run_id = time.strftime("m1detect_%Y%m%d_%H%M%S")
     # 工程上下文来自档案（阶段 7）。标签位显式传 profile_id：
@@ -317,19 +318,19 @@ def main() -> int:
         # "数据可信"职责已由 instrument_distorted（三层开销）与 G17（分布退化）承担。
         conflicts_all = {}
         for fid, st in fixs.items():
-            if fid == "CLEAN":
+            if fid == _clean:
                 continue
             m = {k: v["median"] for k, v in st.items()}
             m.update({f"baseline_{k}": v["median"] for k, v in clean_stats.items()})
             cs = run_snapshot(m)
-            # pair 口径：CLEAN=改前、fixture=改后 —— 水位层的组合签名
+            # pair 口径：对照=改前、fixture=改后 —— 水位层的组合签名
             # （F-GPU-01 命中 P1 = 碎描签名与 drawCalls 检出互证）
             cs += run_pair({k: v["median"] for k, v in clean_stats.items()},
                            {k: v["median"] for k, v in st.items()})
             if cs:
                 conflicts_all[fid] = [c.model_dump() for c in cs]
 
-        # FP 自检：CLEAN 对自己跑一遍，任何"检出"都是误报（D6 口径）
+        # FP 自检：对照机制对自己跑一遍，任何"检出"都是误报（D6 口径）
         fp_check = {}
         for det in waterline_dets:
             _, d = compare(det, clean_stats, clean_stats)
