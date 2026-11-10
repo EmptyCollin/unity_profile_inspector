@@ -53,11 +53,17 @@ venv/
 Thumbs.db
 Desktop.ini
 
-# 注意：runs/（trace.jsonl 与证据链）与 knowledge/*.json 属于统计唯一数据源，需要跟踪，不在此忽略
-
-# 探针临时产物（常驻回调锁定的文件，非正式 run 数据）
-runs/_sampler_probe.json
-runs/_probe/
+# ── 运行留痕：整目录不入库（2026-11-10 改判）──
+# runs/ 存的是守护与管线跑出来的留痕（trace.jsonl / detection.json / 工单 /
+# 决策 / 采样束 / 守护进程状态）。全部不上传：内含本机绝对路径与逐帧采样数据，
+# 且体积绝大部分是可重采的再生物。统计与报告改用**本地** runs——换一台机器
+# clone 仓库后没有历史 runs，要重跑采集才出图（knowledge/*.json 仍入库：
+# 特征库与连通性实测值不是运行留痕，是跨机可比的先验）。
+# ⚠️ 本文件原有相反原则（"绝不整目录忽略 runs/patrol_*/，工单与 decision.json
+# 是批准审计链"），经用户明确要求作废。后果如实记录：批准审计链此后只存在于
+# 跑它的那台机器上，仓库不再承载。回滚不受影响——G9 走 upi/attempt-* 标签
+# 且只清夹具路径，runs 从来不是回滚目标；实测亦确认无任何代码从 git 读 runs。
+runs/
 
 # Unity 分析器二进制录制产物（单文件 ~11MB，不入库）
 ProfilerCaptures/
@@ -71,42 +77,9 @@ calibration/multiwin_full.json
 calibration/multiwin_idle.json
 calibration/multiwin_none.json
 
-# 交替实验的工作束（multiwin_full.json 每块 ~2MB，判读结论全在 summary.json）
-runs/a4_altertest_*/blocks/*/multiwin_full.json
-
-# 巡检可变运行态（样本消费偏移/冷却时间戳，进程本地状态非结论）
-runs/patrol_state.json
-
-# ── 守护/控制台运行态（进程本地状态非结论；事件与状态留档另见下）──
-runs/daemon.pid
-runs/daemon_status.json
-runs/daemon_progress.json
-runs/daemon_cmd.json
-runs/daemon_stdout.log
-# 运行时配置覆盖（UI 按 s 键写入）不入库：换机器默认应回落到 llm_config
-runs/daemon_conf.json
-# dry-run 工单渲染样例（可重生成的展示产物）
-runs/_dryrun_approval.md
-# 巡检单轮的工作束（multiwin_full.json 单文件 ~11MB，可重采再生）。
-# ⚠️ 只忽略束文件本身，绝不整目录 runs/patrol_*/ 忽略：唤起停轮目录里的
-# approvals/ 工单、decision.json、state.json、runreport.json、trace.jsonl
-# 是结论证据（"入库的是结论与指针"原则），随工作束一起吞会丢批准审计链
-# ——实测拒批轮撞出，旧规则 runs/patrol_*/ 已删。
-# 工作束含嵌套目录（唤起轮的 pre_attempt_*/ 与 after_*/），一律只忽略束本身
-runs/patrol_*/multiwin_full.json
-runs/patrol_*/**/multiwin_full.json
-runs/patrol_*/pre_attempt_*/*.json
-runs/patrol_*/after_*/*.json
-
-# 验证窗原始束（before/after multiwin_full.json，单文件 3.7~4.2MB，含 A2 逐帧
-# 序列）。原始序列可由 resample 重生成，判定结论全在 report.json（已入库），
-# 证据指针以路径形式留在 report 里——入库的是结论与指针，不是重生成物。
-runs/m3_rehearsal_*/before/
-runs/m3_rehearsal_*/after/
-
-# 彩排的终端回显日志（tee 产物，内容与 report.json 重复，不入库）
-runs/*_console.log
-runs/m3_rehearsal_final*.log
+# ↑ 以上 runs/ 细分条目（工作束/守护运行态/巡检状态/彩排日志）已被整目录
+#   runs/ 规则覆盖，2026-11-10 一并删除；原先"只忽略束文件、绝不整目录忽略
+#   runs/patrol_*/"的相反原则同时作废，理由见上节。
 
 # ── 阶段 8 浅验收试验台（选法1 真工程验收用）──
 # 模板可重生成（unity projects create upi-lab --template com.unity.template.urp-blank），
