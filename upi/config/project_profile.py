@@ -92,6 +92,15 @@ class ProjectProfile(BaseModel):
 
     quality_tier: str = "urp-balanced"
 
+    # 绝对下限目标表（阶段 8 A 方案）：相对工程根的 json 路径，空 = 该工程不启用。
+    # 为什么归 profile 而不是运行配置：表是**工程侧数据**（每个项目的帧预算/
+    # 画质目标不同），换工程必然换表；放运行配置会造成"切了工程还在用上一个
+    # 项目的下限"，那是把 A 工程判成 B 工程达标的假结论。
+    # 为什么允许空（不强制启用）：下限表是**可选增强**，L2/L1 噪声分级判据不
+    # 依赖它。身份缺失要停、增强缺失降级继续，两者方向不同（对照档案本身
+    # fail-closed 的理由）。表存在但内容坏 ⇒ 加载侧炸，不静默当空表（防假绿）。
+    floor_targets_rel: str = ""
+
     # 快照/回滚所依赖的 git 仓库根。⚠️ 这不是可选装饰，而是硬边界：
     # snapshot.workdir_state() 用 project_path.relative_to(git_root) 算脏区，
     # 回滚也只在 git_root 里打 tag。所以"与任意 Unity 工程协作"的真实条件是
@@ -119,6 +128,19 @@ class ProjectProfile(BaseModel):
                 raise ValueError(
                     f"profile {self.profile_id}: {name!r} 必须是工程内相对片段"
                     "（不得带根/盘符或 ..，防越界读写工程外文件）")
+        # 下限表路径同 scenes_dir/assets_root 的越界纪律（工程内相对片段）。
+        # 非空才校验：空串 = 该工程不启用下限表（合法缺省，见字段注释）。
+        if self.floor_targets_rel:
+            fq = Path(self.floor_targets_rel)
+            if fq.root or fq.drive or ".." in fq.parts:
+                raise ValueError(
+                    f"profile {self.profile_id}: floor_targets_rel="
+                    f"{self.floor_targets_rel!r} 必须是工程内相对片段"
+                    "（不得带根/盘符或 ..，防读到工程外的文件）")
+            if not fq.name.endswith(".json"):
+                raise ValueError(
+                    f"profile {self.profile_id}: floor_targets_rel 必须是 .json 文件，"
+                    f"收到 {self.floor_targets_rel!r}")
         if not self.scene_template or "{subject}" not in self.scene_template:
             raise ValueError(f"profile {self.profile_id}: scene_template 必须含 "
                              "{{subject}} 占位符，收到 {self.scene_template!r}")
@@ -170,6 +192,18 @@ class ProjectProfile(BaseModel):
     def fixture_spec(self) -> Path:
         """夹具规格文件绝对路径（tuning/holdout 切分的唯一依据，§8.1）。"""
         return self.abs_project / self.fixture_spec_rel
+
+    @property
+    def floor_targets_path(self) -> Optional[Path]:
+        """下限目标表绝对路径；未配置（floor_targets_rel 空）⇒ None（不启用）。
+
+        返回 None 而不是空 Path，是为了让消费方 `if prof.floor_targets_path:`
+        一步判启用与否，不用再去比对空串——空串拼进 / 运算会得到工程根本身，
+        那种"看起来有路径其实指向错东西"正是本仓反复拦的静默失效。
+        """
+        if not self.floor_targets_rel:
+            return None
+        return self.abs_project / self.floor_targets_rel
 
     def subject_asset_dir(self, subject: str) -> Path:
         """机制编号 → 该机制的代码目录。CLEAN 无目录是合法的（无候选）。"""
