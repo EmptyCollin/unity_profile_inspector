@@ -190,14 +190,23 @@ def spawn_resample(cmd: list[str], log_file):
                             cwd=str(ROOT))
 
 def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
-    """按标定协议重采一轮束并跑 m1_detect 判据链。对照机制必须同轮在场。"""
+    """按标定协议重采一轮束并跑 m1_detect 判据链。噪声基准缺失按三态分级处置。"""
     out = {"channel": "waterline", "findings": [], "blindspot": None}
     fixtures = cfg_mon.get("fixtures") or []
-    _clean = active_profile().clean_subject   # 对照机制名由档案派生（阶段 7）
-    if _clean not in fixtures:
-        out["blindspot"] = (f"巡检夹具不含 {_clean}"
+    from upi.core.floor_check import basis_relational, resolve_noise_basis
+    _clean = active_profile().clean_subject   # 噪声基准机制名由档案派生（阶段 7）
+    # 阶段 8 A（设计 §1）：旧版"不含基准就整轮拒判"在真实工程里等于自我否决
+    # ——多数工程没有无缺陷场景。三态判据单点在 resolve_noise_basis（与
+    # m1_detect 同源，两处各写一份迟早漂移成互相打脸）：
+    #   L0（档案有意声明无基准，clean_subject 为空）⇒ 继续，相对判据自然缺项，
+    #     结论由绝对下限表承担；
+    #   incomplete（声明了基准却没排进采集清单）⇒ 配置错，拒判。
+    _basis = resolve_noise_basis(_clean, _clean in fixtures)
+    if _basis == "incomplete":
+        out["blindspot"] = (f"巡检夹具不含噪声基准 {_clean}"
                             "——无同期对照，禁止判定（§8.1）")
         return out
+    out["noise_basis"] = _basis
     workdir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
            "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
@@ -343,6 +352,8 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     # 就是把"没采到"冒充"没有异常"（I1/I2 在调度层的同型错误）。本轮被请求
     # 采样的每个水位检测器夹具，其判定指标必须出现在统计里；任一缺失 ⇒
     # 水通路整轮按盲区记。请求集之外的夹具不算失败（本轮没要它，不覆盖而已）。
+    # ⚠️ 噪声基准的缺失只在 L2 记进 missing：L2 下它被请求却没采到 = 采集失败；
+    #    L0 是档案有意声明"无同期基准"，本来就不该有它，不能当失败（阶段 8 A）。
     requested = set(cfg_mon.get("fixtures") or [])
     raw_fx = mw.get("fixtures", {})
     missing = []
@@ -352,33 +363,56 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         if det.metric not in (fixs.get(det.subject) or {}):
             err = str((raw_fx.get(det.subject) or {}).get("error", "无窗口数据"))
             missing.append(f"{det.subject}({det.metric}): {err[:80]}")
-    if clean is None:
-        missing.append(f"{_clean} 无有效统计——无对照基线，禁止判定（§8.1）")
+    if clean is None and basis_relational(_basis):
+        missing.append(f"{_clean} 无有效统计——无噪声基准，禁止相对判定（§8.1）")
     if missing:
         out["blindspot"] = "采样有效前提不成立，水通路本轮未评估：" + "；".join(missing)
         return out
 
-    for det in wln:
-        fx = fixs.get(det.subject)
-        if fx is None or clean is None:
-            continue
-        issue, detail = compare(det, fx, clean)
-        if issue:
-            # 量级取 issue.magnitude（compare 的 detail 里同值键名是 delta，
-            # 上一版写 detail.get("magnitude") 会静默拿 None——契约键名错）
-            dr = detail.get("deviation_ratio")
-            undef = isinstance(dr, float) and math.isinf(dr)
-            # 零基线指标（F-ANIM-01，A2 债）ratio=inf：那是"无定义"不是
-            # "无穷偏离"。落 None + 显式标注——Infinity 进 JSONL 是非标准
-            # 扩展（跨工具解析失败），且 None 逼消费方去看标注而不是拿伪数
-            # 当依据（I1）。检出本身仍成立（绝对增量门限，A2 既定修法）。
-            out["findings"].append({
-                # 键名沿用 fixture（落盘契约），取值换成机制字段
-                "kind": "issue", "ptype": "waterline", "fixture": det.subject,
-                "detector": det.id, "metric": det.metric,
-                "magnitude": issue.magnitude,
-                "deviation_ratio": None if undef else dr,
-                "ratio_undefined_zero_baseline": undef})
+    if basis_relational(_basis):
+        for det in wln:
+            fx = fixs.get(det.subject)
+            if fx is None or clean is None:
+                continue
+            issue, detail = compare(det, fx, clean)
+            if issue:
+                # 量级取 issue.magnitude（compare 的 detail 里同值键名是 delta，
+                # 上一版写 detail.get("magnitude") 会静默拿 None——契约键名错）
+                dr = detail.get("deviation_ratio")
+                undef = isinstance(dr, float) and math.isinf(dr)
+                # 零基线指标（F-ANIM-01，A2 债）ratio=inf：那是"无定义"不是
+                # "无穷偏离"。落 None + 显式标注——Infinity 进 JSONL 是非标准
+                # 扩展（跨工具解析失败），且 None 逼消费方去看标注而不是拿伪数
+                # 当依据（I1）。检出本身仍成立（绝对增量门限，A2 既定修法）。
+                out["findings"].append({
+                    # 键名沿用 fixture（落盘契约），取值换成机制字段
+                    "kind": "issue", "ptype": "waterline", "fixture": det.subject,
+                    "detector": det.id, "metric": det.metric, "basis": "relational",
+                    "magnitude": issue.magnitude,
+                    "deviation_ratio": None if undef else dr,
+                    "ratio_undefined_zero_baseline": undef})
+    # 绝对下限腿（阶段 8 A，与相对检出正交）：档案配了表才评，L0/L2 都跑。
+    # ⚠️ 这类 finding 标记 kind="floor"，patrol_once 的唤起循环会跳过它——
+    #    自动修复链在状态机内重跑的是**相对** detect（m1_detect 子进程），
+    #    L0 下它复现不出 Issue，拿 floor finding 去唤起只会空转烧配额。
+    #    所以下限越线当前进"转人工队列"（B3 同型），不是缺陷，是能力边界。
+    _fp = active_profile().floor_targets_path
+    if _fp is not None:
+        from upi.core.floor_check import check_floors, load_floor_table
+        _tbl = load_floor_table(_fp)
+        if _tbl is None:
+            out["floor_why"] = f"下限表路径 {_fp} 指向的文件不存在，本腿未评"
+        else:
+            for _fid, _entry in (mw.get("fixtures") or {}).items():
+                if _fid == _clean or "windows" not in _entry:
+                    continue
+                for b in check_floors(_fid, _entry, _tbl)["breached"]:
+                    out["findings"].append({
+                        "kind": "floor", "ptype": "waterline", "fixture": _fid,
+                        "metric": b["metric"], "basis": "floor_target",
+                        "op": b["op"], "line": b["line"], "stat": b["stat"],
+                        "magnitude": round(b["stat"] - b["line"], 4)})
+            out["floor_hash"] = _tbl.content_hash()
     out["bundle"] = str(bundle)
     return out
 
@@ -446,6 +480,11 @@ def patrol_once(cfg_mon: dict) -> dict:
     auto_fx = set(af.get("fixtures") or [])
     cooldown = float(cfg_mon.get("cooldown_s", 0))
     for f in wl["findings"] + ep["findings"]:
+        # 下限越线（kind="floor"）不进自动修复：状态机内重跑的是相对 detect，
+        # L0 下它复现不出 Issue，拿 floor finding 唤起只会空转烧 attempt 配额
+        # （G11）。它进 findings 队列转人工，是能力边界不是缺陷（B3 同型）。
+        if f.get("kind") == "floor":
+            continue
         fx = f["fixture"]
         if fx not in auto_fx:
             continue                       # 转人工：进 findings 队列（B3）
@@ -465,6 +504,11 @@ def patrol_once(cfg_mon: dict) -> dict:
                                        "n_new_samples")},
            "waterline": {"findings": wl["findings"], "blindspot": wl["blindspot"],
                          "cancelled": bool(wl.get("cancelled")),
+                         # 噪声等级必须落到轮记录：统计/报告层靠它判"本轮 FP 是
+                         # not_measurable 还是真 0"（G15/G20）。只在 patrol_waterline
+                         # 里算完不往上传 = 算了没人看得见，正是本仓堵的假接线。
+                         "noise_basis": wl.get("noise_basis"),
+                         "floor_hash": wl.get("floor_hash"),
                          "bundle": wl.get("bundle")},
            "wake": wake,
            # B7 静默语义收紧：静默=采到了且无异常。任一通路未评估时整轮记

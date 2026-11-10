@@ -192,3 +192,33 @@ def check_floors(subject: str, bundle_fx_entry: dict, table: FloorTable) -> dict
         if verdict["breached"]:
             breached.append(row)
     return {"evaluated": evaluated, "breached": breached, "unevaluated": unevaluated}
+
+
+def resolve_noise_basis(clean_name: str, clean_present: bool) -> str:
+    """水位判据的噪声来源：L2 / L0 / incomplete。
+
+    三态而不是两态，因为"工程没有噪声基准"和"本轮没采到它"是**完全不同的
+    事实**，处置也相反：
+      · clean_name 为空 ⇒ 档案有意声明"本工程无同期基准" ⇒ **L0**：相对显著性
+        不可判，走绝对下限腿（合法降级，每轮都能出结论）。
+      · 声明了却没采到 ⇒ **incomplete**：这是采集失败不是工程属性。B7 的实测
+        教训（失焦轮五夹具全失败却被记成"零检出"）说：没采到冒充"没有异常"
+        比拒判危险得多，所以调用方必须整轮拒判，不许降级成 L0 蒙混。
+      · 两者皆有 ⇒ **L2**（现状最强）。
+
+    ⚠️ 这条判断**必须单点**：patrol_waterline 与 m1_detect 各有一份水位循环
+      （历史上"缺 CLEAN 怎么办"两处各写一份），两处各判迟早漂移成
+      "巡检出结论、状态机拒判"互相打脸。两边都调本函数，依据同源。
+    为什么没有 L1：设计里 L1=跨轮历史波动当噪声带，与 G7"跨 run 禁比"直接
+      冲突（要做得先有"同协议同指纹的历史方差库"，独立基建）。缺 L1 不假装
+      存在，落 L0——宁缺毋假（I1/G19 同纪律）。
+    """
+    if not clean_name:
+        return "L0"
+    return "L2" if clean_present else "incomplete"
+
+
+def basis_relational(basis: str) -> bool:
+    """相对显著性判据与 FP 自检都只有 L2 能跑（要有"自"才有"相对"）。
+    L0/L1/缺项下调用方必须输出 not_measurable，不许留空冒充 0（G15 成对展示）。"""
+    return basis == "L2"

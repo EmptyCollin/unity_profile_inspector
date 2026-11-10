@@ -88,6 +88,11 @@ def make_sample_jsonl(path: Path, seed=1):
 
 def main():
     shutil.rmtree(TMP, ignore_errors=True)
+    if TMP.exists():
+        # Windows 实测教训：上一轮崩溃时若有子进程还握着 TMP 里的文件句柄，
+        # ignore_errors=True 的 rmtree 会静默留下半成品目录，随后 mkdir 抛
+        # FileExistsError——报错看不出根因。宁可在这里说明白（本轮真撞上）。
+        raise RuntimeError(f"测试目录清不掉（残留句柄？手动删 {TMP} 后重跑）")
     TMP.mkdir(parents=True)
     P.PATROL_LOG = TMP / "patrol_runs.jsonl"
     P.STATE_FP = TMP / "patrol_state.json"
@@ -133,10 +138,28 @@ def main():
     check("replay_seed=-1 样本不进 findings（不可复现禁进修复循环）",
           r3["n_samples"] == 1 and not r3["findings"])
 
-    print("== ② 水通路：CLEAN 前置与真判据链 ==")
+    print("== ② 水通路：噪声基准前置与真判据链 ==")
+    # 拒判必须发生在**起采之前**（一轮真采样≈2.4 分钟，先采后拒等于白烧）。
+    # 这里装一个"被调用就记名字"的哨兵桩：既断言拒判文案，也断言没起过采样。
+    # 上一版直接裸调 patrol_waterline 靠早退躲过采样——一旦有人把判据改松，
+    # 测试不是变红而是真去拉 unity CLI 挂死（变异测试实测撞出，rc=124）。
+    _spawned = []
+    _real_spawn0 = P.spawn_resample
+
+    def _sentinel(cmd, log_file):
+        _spawned.append(cmd)
+        raise AssertionError("不该在拒判路径上起采样")
+
+    P.spawn_resample = _sentinel
+    try:
+        r_rej = P.patrol_waterline({"fixtures": ["F-CPU-01"]}, TMP / "w1")
+    except AssertionError:
+        r_rej = {"blindspot": "<起了真采样，判据已不做前置拒判>"}
+    finally:
+        P.spawn_resample = _real_spawn0
     check("夹具不含 CLEAN ⇒ 拒判（§8.1）",
-          "CLEAN" in (P.patrol_waterline({"fixtures": ["F-CPU-01"]},
-                                         TMP / "w1")["blindspot"] or ""))
+          "CLEAN" in (r_rej["blindspot"] or ""))
+    check("拒判发生在起采之前（不白烧一轮采样）", _spawned == [], str(_spawned)[:80])
 
     # ── 重采子进程替身 ──
     # ⚠️ 桩必须挂在 P.spawn_resample（我方定义的入口），不要挂 subprocess.run/Popen：
@@ -398,6 +421,89 @@ def main():
           rec4["quiet"] is False and bool(rec4["blindspots"]))
     P.wake_state_machine, P.patrol_episode, P.patrol_waterline = \
         real_wake, real_ep, real_wl
+
+    print("== ⑥ 阶段 8 A：噪声分级与绝对下限腿接线 ==")
+    # 前面 ①~⑤ 都跑在内置档案（L2、无下限表）上，只能证明既有行为没坏。
+    # 这里必须换档案把新增的三条腿走一遍——判据函数单测通过 ≠ 巡检真的调到了它
+    # （本仓反复犯的就是"写了字段没验证消费者"）。
+    from upi.config import project_profile as PP
+    _snap = PP.snapshot_profile()
+    _altroot = TMP / "altproj"
+    _altroot.mkdir(parents=True, exist_ok=True)
+    # 一份会破线的下限表：F-CPU-01 的 drawCalls base=40，线设 20 ⇒ 越线
+    (_altroot / "floor.json").write_text(json.dumps({
+        "source": "测试预算", "targets": [
+            {"metric": "drawCalls", "op": "<=", "value": 20, "unit": "calls",
+             "subject": "F-CPU-01"},
+            {"metric": "notMeasured", "op": "<=", "value": 1}]}), encoding="utf-8")
+    _l0 = PP.ProjectProfile(
+        profile_id="upi-l0-test", project_path=_altroot, git_root=_altroot,
+        subjects=["F-CPU-01"], clean_subject="",           # 有意无噪声基准 ⇒ L0
+        floor_targets_rel="floor.json", fix_subject="F-CPU-01",
+        defect_signature="x")
+    PP.register_profile(_l0, activate=True)
+    try:
+        # L0 + 有下限表：不因缺基准拒判，且越线进 findings（第二腿在跑）
+        (TMP / "w6").mkdir(parents=True, exist_ok=True)
+        synth_to(TMP / "w6", synth_bundle())
+        try:
+            r6 = P.patrol_waterline({"fixtures": ["F-CPU-01"],
+                                     "windows": 4, "waterline_timeout_s": 5},
+                                    TMP / "w6")
+        finally:
+            restore_spawn()
+        check("L0（无基准）不整轮拒判（设计§1 的核心改动）",
+              r6["blindspot"] is None, str(r6["blindspot"])[:90])
+        check("L0 记 noise_basis=L0", r6.get("noise_basis") == "L0", str(r6)[:80])
+        _floorf = [f for f in r6["findings"] if f.get("kind") == "floor"]
+        check("绝对下限腿接线生效：越线机制进 findings（kind=floor）",
+              len(_floorf) == 1 and _floorf[0]["metric"] == "drawCalls",
+              str(r6["findings"])[:120])
+        # 表里配了 notMeasured 但本轮没采到 ⇒ 不能冒充达标（unevaluated 语义在
+        # 单测里；这里验的是"只有真越线的 drawCalls 变成 finding"，不误报第二项）
+        check("下限腿只报真越线项，未采到的线不产 finding（不假绿）",
+              {f["metric"] for f in _floorf} == {"drawCalls"})
+        # L0 下相对判据必须缺席（compare 没有"自"可参照，不该硬产 issue）
+        check("L0 下不产相对检出（kind=issue 应为空）",
+              not [f for f in r6["findings"] if f.get("kind") == "issue"])
+
+        # 采集失败态（声明了基准却没排进清单）⇒ 仍拒判，不许降级成 L0 蒙混
+        _l0.clean_subject = "CLEAN"     # 变成"声明了基准"
+        (TMP / "w7").mkdir(parents=True, exist_ok=True)
+        synth_to(TMP / "w7", synth_bundle())
+        try:
+            r7 = P.patrol_waterline({"fixtures": ["F-CPU-01"],   # 清单里没有 CLEAN
+                                     "windows": 4, "waterline_timeout_s": 5},
+                                    TMP / "w7")
+        finally:
+            restore_spawn()
+        check("声明基准却没采到 ⇒ incomplete 拒判（≠L0，B7）",
+              r7["blindspot"] is not None and "禁止判定" in (r7["blindspot"] or ""),
+              str(r7["blindspot"])[:90])
+
+        # 唤起循环必须跳过 kind=floor（状态机重跑相对 detect，floor 唤不起=空烧）
+        woken.clear()
+        real_ep2, real_wl2 = P.patrol_episode, P.patrol_waterline
+        P.wake_state_machine = fake_wake
+        P.patrol_episode = lambda c: {"channel": "episode", "findings": [],
+                                      "blindspot": None}
+        P.patrol_waterline = lambda c, w: {
+            "channel": "waterline", "blindspot": None, "noise_basis": "L0",
+            "findings": [{"kind": "floor", "ptype": "waterline",
+                          "fixture": "F-CPU-01", "metric": "drawCalls",
+                          "basis": "floor_target", "op": "<=", "line": 20,
+                          "stat": 40.0, "magnitude": 20.0}]}
+        rec6 = P.patrol_once({"fixtures": ["F-CPU-01"],
+                              "auto_fix": {"fixtures": ["F-CPU-01"]},
+                              "cooldown_s": 0, "episode": {}})
+        check("下限越线 finding 不唤起状态机（避免空烧配额，G11）",
+              woken == [] and len(rec6["waterline"]["findings"]) == 1,
+              f"woken={woken}")
+        P.wake_state_machine, P.patrol_episode, P.patrol_waterline = \
+            real_wake, real_ep2, real_wl2
+    finally:
+        PP.unregister_profile(_l0.profile_id)
+        PP.restore_profile(_snap)
 
     print("== ④ 配置：缺段不启用 / 非法拒收 ==")
     from upi.config.settings import LlmConfig, MonitorConfig
