@@ -42,11 +42,17 @@ TIER_HARD = "token"       # 不可逆：手输 token
 def is_calibrated(runs_root: Optional[Path] = None) -> bool:
     """有无可用标定。无标定 ⇒ 检出不等于可信，整个链路只能看不能修。
 
-    判据取阈值文件存在性（baselines/thresholds_*.json），与 detect 链
-    "无标定禁止判定"的同一条约束一致，不在这里另立标准。
+    判据取阈值文件存在性，与 detect 链"无标定禁止判定"同一条约束，
+    不在这里另立标准。⚠️ 目录必须跟**当前工程档案**走（真工程实测撞出）：
+    阶段 8 起阈值按工程分目录（baselines_dir_rel），这里若还写死仓库根的
+    "baselines"，新工程明明标定好了，UI 仍永远显示"未标定"并把 [r] 置灰——
+    向导跑完看不到效果，等于向导白做（算了不往上抛的产物层变体）。
     """
-    root = (runs_root or E.RUNS).parent
-    return bool(list((root / "baselines").glob("thresholds_*.json")))
+    from upi.config.project_profile import active_profile
+    rel = active_profile().baselines_dir_rel
+    p = Path(rel)
+    root = p if p.is_absolute() else (runs_root or E.RUNS).parent / rel
+    return bool(list(root.glob("thresholds_*.json")))
 
 
 def derive_state(st: dict | None, *, calibrated: bool = True,
@@ -97,6 +103,7 @@ ACT_DECIDE = "decide"
 ACT_CONFIG = "config"
 ACT_REGISTER = "register_project"
 ACT_CALIBRATE = "calibrate"
+ACT_FLOOR = "edit_floor_table"
 ACT_SNAPSHOT = "snapshot"
 ACT_QUIT_UI = "quit_ui"
 
@@ -104,9 +111,9 @@ ACT_QUIT_UI = "quit_ui"
 # 逼着加它的人显式想清楚"什么时候能做"，而不是默认哪儿都能点）
 _MATRIX: dict[str, set[str]] = {
     NO_DAEMON: {ACT_START_DAEMON, ACT_SNAPSHOT, ACT_QUIT_UI, ACT_REGISTER,
-                ACT_VIEW_TICKET},
+                ACT_FLOOR, ACT_VIEW_TICKET},
     IDLE: {ACT_TOGGLE_SAMPLING, ACT_PAUSE, ACT_RUN_NOW, ACT_VIEW_TICKET,
-           ACT_CONFIG, ACT_REGISTER, ACT_CALIBRATE,
+           ACT_CONFIG, ACT_REGISTER, ACT_CALIBRATE, ACT_FLOOR,
            ACT_SNAPSHOT, ACT_QUIT_UI, ACT_STOP_DAEMON},
     ROUND_RUNNING: {ACT_CANCEL, ACT_SNAPSHOT, ACT_QUIT_UI, ACT_VIEW_TICKET,
                     ACT_CONFIG},
@@ -117,7 +124,7 @@ _MATRIX: dict[str, set[str]] = {
     DEGRADED: {ACT_SNAPSHOT, ACT_QUIT_UI, ACT_VIEW_TICKET, ACT_CONFIG,
                ACT_RESUME, ACT_TOGGLE_SAMPLING},
     UNCALIBRATED: {ACT_CALIBRATE, ACT_SNAPSHOT, ACT_QUIT_UI, ACT_VIEW_TICKET,
-                   ACT_CONFIG, ACT_REGISTER, ACT_STOP_DAEMON},
+                   ACT_CONFIG, ACT_REGISTER, ACT_FLOOR, ACT_STOP_DAEMON},
 }
 
 _REASONS = {
@@ -143,6 +150,10 @@ _REASONS = {
         UNCALIBRATED: "无标定，不该产出工单"},
     ACT_REGISTER: {ROUND_RUNNING: "轮次进行中不切换工程上下文",
                    AWAITING: "有工单待决，先决定它"},
+    ACT_FLOOR: {ROUND_RUNNING: "本轮正在采样，中途改下限会让这轮一半旧一半新",
+                AWAITING: "有工单在等决定，先别改判据",
+                DEGRADED: "存在未处理告警，先看清再改判据",
+                PAUSED: "已暂停：先继续或改完再采"},
     ACT_CALIBRATE: {ROUND_RUNNING: "轮次进行中不能并发标定",
                     AWAITING: "有工单待决", NO_DAEMON: "守护没在跑"},
     ACT_STOP_DAEMON: {
@@ -174,9 +185,11 @@ _ALL_ACTIONS = [
     {"key": "k", "name": ACT_CONFIG, "label": "改运行配置",
      "tier": TIER_SOFT, "cmd": "set"},
     {"key": "n", "name": ACT_REGISTER, "label": "注册新工程",
-     "tier": TIER_HARD, "cmd": "register", "wired": False, "stage": "阶段 7"},
+     "tier": TIER_HARD, "cmd": None},              # 本地流程：落盘走 onboarding
     {"key": "l", "name": ACT_CALIBRATE, "label": "跑标定向导",
      "tier": TIER_HARD, "cmd": "calibrate", "wired": False, "stage": "阶段 8"},
+    {"key": "f", "name": ACT_FLOOR, "label": "改下限目标表",
+     "tier": TIER_HARD, "cmd": None},              # 本地流程：写工程侧判据文件
     {"key": "x", "name": ACT_SNAPSHOT, "label": "打快照(只读)",
      "tier": TIER_NONE, "cmd": None},
     {"key": "q", "name": ACT_QUIT_UI, "label": "退出界面(不停守护)",
@@ -250,11 +263,16 @@ def consistency_report() -> dict:
     }
 
 
-# ⚠️ cmd=None 的三个动作各有原因，不是漏填：
+# ⚠️ cmd=None 的动作各有原因，不是漏填：
 #   · view_ticket / decide 走文件与意向通道（E.stage_decide），不发命令——
 #     批准凭据必须由守护经 ApprovalStore 单点落盘（阶段 2 的单一写入者约定）；
 #   · snapshot 是本地只读渲染，根本不涉及守护；
-#   · start_daemon 由 UI 直接拉起分离进程（阶段 6），也不走命令通道。
+#   · start_daemon 由 UI 直接拉起分离进程（阶段 6），也不走命令通道；
+#   · register_project / edit_floor_table（阶段 8 接入向导）是**本地落盘**：
+#     写 projects/<id>.json 与工程侧 floor 文件都经 onboarding 的写出口，
+#     不碰编辑器也不占命令槽。注册改的是"下次进程默认用哪个工程"的指针，
+#     当前守护仍跑老工程——所以它天然是 UI 侧动作，不该发给守护（守护没有
+#     "切换工程"这种命令，发过去只会 command_ignored）。
 # 把它们塞进 cmd 列只会得到 daemon 的 command_ignored，看起来像功能坏了。
 
 # p 键在两态下含义不同（暂停 / 继续），显式声明避免动作表里靠顺序猜

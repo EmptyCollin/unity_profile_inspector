@@ -460,6 +460,143 @@ def edit_config(st_now: dict, send_, line_read) -> str:
     return f"{item.key}: {old} → {val}{tag}"
 
 
+def _ask(line_read, prompt, default=""):
+    """读一行；直接回车用默认值。默认值原样回填（向导是"缺省优先"的）。"""
+    raw = (line_read(prompt) or "").strip()
+    return raw if raw else default
+
+
+def register_flow(line_read) -> str:
+    """注册新 Unity 工程（阶段 8 接入向导，本地落盘、不发守护命令）。
+
+    流程：逐项收集答案 → 用**产品模型**校验（build_profile 内部走
+    ProjectProfile 全部硬校验，不在 UI 复刻规则）→ 打印"将要写入什么 + 还缺
+    什么"→ 人工 y 确认才落盘。确认放在看得到具体内容之后，而不是之前：
+    step 的 token 门只证明"我要做这件不可逆动作"，路径填错得靠这份预览拦。
+
+    ⚠️ 标定/阈值目录默认给**工程隔离子目录**（calibration/<id>、baselines/<id>），
+      不留默认的裸 calibration//baselines/ —— 后者与夹具共用会当场把刚修的
+      "跨工程串档 / S2 隔离闸误报 13 条"重新引入。这是本向导存在的意义之一，
+      写错就等于把 #21 的成果抵消掉。
+
+    ⚠️ 诚实边界：注册只改"下次进程默认用哪个工程"的指针 + 落档案文件，
+      **当前在跑的守护/界面仍服务原工程**（active_profile 在进程启动时定，
+      运行中不热切）。要让新工程生效需重启守护（UI 里按 Q 停再按 b 起）。
+      这句话必须打印，否则按完 n 看到"注册成功"会以为界面已经在测新工程。
+    """
+    from upi.tooling import onboarding as OB
+    from upi.config.project_profile import active_profile, DEFAULT_PROFILE_ID
+
+    lines = ["注册新工程（回车=用默认值；profile_id / 工程路径留空即取消）"]
+    pid = _ask(line_read, "\n".join(lines) + "\n1) profile_id（全局唯一标签，如 my-game）：")
+    if not pid:
+        return "已取消，未写任何文件"
+    proj = _ask(line_read, f"2) 工程绝对路径（含 Assets/，当前默认工程={active_profile().profile_id} 用 [.]）：")
+    if proj == ".":
+        return f"当前已是默认工程 {DEFAULT_PROFILE_ID}，无需注册自己"
+    if not proj:
+        return "已取消：工程路径为空，未写任何文件"
+    scenes_dir = _ask(line_read, "3) 场景目录（工程内相对，默认 Assets/Scenes）：", "Assets/Scenes")
+    template = _ask(line_read, "4) 场景命名模板（默认 {subject}.unity）：", "{subject}.unity")
+    clean = _ask(line_read, "5) 噪声基准场景名（留空=无同期基准 ⇒ 走 L0 只出绝对线）：")
+    floor = _ask(line_read, "6) 下限目标表相对路径（默认建 floor_targets.json）：", "floor_targets.json")
+
+    answers = {
+        "profile_id": pid, "project_path": proj,
+        "scenes_dir": scenes_dir, "scene_template": template,
+        "clean_subject": clean, "floor_targets_rel": floor,
+        "cal_dir_rel": f"calibration/{pid}",       # 工程隔离，不撞夹具
+        "baselines_dir_rel": f"baselines/{pid}",
+    }
+    prof, problems = OB.build_profile(answers)
+    if prof is None:
+        return "未能生成档案（未写任何文件）：\n  - " + "\n  - ".join(problems)
+
+    steps = OB.calibration_next_steps(prof)
+    prev = [
+        f"将注册工程 {prof.profile_id}：",
+        f"  工程路径   = {prof.project_path}",
+        f"  git 根     = {prof.git_root}",
+        f"  被测机制   = {prof.subjects}",
+        f"  噪声基准   = {prof.clean_subject or '（无 ⇒ L0）'}",
+        f"  标定目录   = {prof.cal_dir_rel}",
+        f"  阈值目录   = {prof.baselines_dir_rel}",
+        f"  下限表     = {prof.floor_targets_rel or '（未启用）'}",
+        "",
+        "注册后还缺（这是下一步要做的）：",
+        *[f"  · {s}" for s in steps],
+    ]
+    if str(line_read("\n".join(prev) + "\n确认写入档案并设为默认工程？(y=写入 / 其他=取消)：")
+           .strip().lower()) != "y":
+        return "已取消，未写任何文件"
+
+    try:
+        fp = OB.commit_profile(prof, activate=True)
+    except Exception as e:  # noqa: BLE001 — 落盘失败要说清，别让人以为注册好了
+        return f"写入失败（未改默认工程）：{type(e).__name__}: {str(e)[:180]}"
+    return (f"已注册 {prof.profile_id}（档案 {fp.name}），并设为默认工程。\n"
+            "⚠️ 当前在跑的守护仍服务原工程——按 Q 停守护、再按 b 起，新进程才会接管新工程。\n"
+            "下一步若还没标定：标定完才有可信的相对检出。")
+
+
+def floor_flow(line_read) -> str:
+    """编辑当前工程的下限目标表（本地写工程侧文件；确认后才落盘）。
+
+    校验走 FloorTarget/FloorTable 本体（op 枚举、value 非负、source 必填），
+    UI 不复刻规则。写完不静默覆盖——先渲染"改完长什么样"再问一次 y，
+    因为写坏一张表 = 所有绝对下限判据消失（假绿），比没表更危险。
+    """
+    from upi.tooling import onboarding as OB
+    from upi.config.project_profile import active_profile
+    prof = active_profile()
+    tbl, notes = OB.floor_view(prof)
+    head = ["绝对下限目标表（提高下限标准 ⇒ 瓶颈暴露，A 方案）",
+            f"当前工程：{prof.profile_id}"]
+    head += [f"  {n}" for n in notes]
+    head.append("现表：\n" + OB.floor_render(tbl) if tbl else "现表：（无）")
+    acts = "1=改出处(source)  2=加一条(add)  3=删一条(del)  0=取消"
+    pick = _ask(line_read, "\n".join(head) + f"\n选操作（{acts}）：").strip()
+    if pick == "0" or not pick:
+        return "已取消，下限表未改动"
+    fields = {}
+    if pick == "1":
+        fields["source"] = _ask(line_read, "新出处（须说明目标线来源，无出处=手调将被拒）：")
+        action = "source"
+    elif pick == "2":
+        action = "add"
+        # 没有表 ⇒ 这是新建表的第一条：出处必须此刻问，不能等 onboarding
+        # 校验时再报"无出处"——那时用户已经在"加一条"的路径里，报错看起来
+        # 像在骂他填的线值不对（实测推演出的措辞陷阱，同 §8.1 手调纪律）。
+        if tbl is None:
+            fields["source"] = _ask(
+                line_read, "  本工程还没有下限表。新表出处（目标线依据，"
+                           "如「性能预算 v3 / 60fps」；无出处=手调将被拒）：")
+        fields["metric"] = _ask(line_read, "  指标名（如 drawCalls / cpuFrameTimeMs）：")
+        fields["op"] = _ask(line_read, "  判据算子（<= / p95<= / p99<= / >=，默认 <=）：", "<=")
+        fields["value"] = _ask(line_read, "  线值（正数）：")
+        fields["unit"] = _ask(line_read, "  单位（可空）：")
+        fields["subject"] = _ask(line_read, "  适用机制名（留空=全部被测机制）：")
+    elif pick == "3":
+        action = "del"
+        fields["index"] = _ask(line_read, f"  删除第几条（1-{len(tbl.targets) if tbl else 0}）：")
+    else:
+        return f"未知操作 {pick!r}，下限表未改动"
+
+    new_tbl, msg = OB.floor_apply(prof, tbl, action, fields)
+    if new_tbl is None:
+        return f"未改动：{msg}"
+    preview = f"{msg}\n改完预览：\n" + OB.floor_render(new_tbl)
+    if str(_ask(line_read, preview + "\n确认写入工程侧下限表？(y=写入 / 其他=取消)：")
+           .strip().lower()) != "y":
+        return "已取消，下限表未写入"
+    try:
+        wp = OB.floor_write(prof, new_tbl)
+    except Exception as e:  # noqa: BLE001
+        return f"写入失败：{type(e).__name__}: {str(e)[:180]}"
+    return (f"已写入 {wp.name}（{len(new_tbl.targets)} 条目标线）。\n"
+            "⚠️ 改下限会改变检出范围；标定阈值目录若沿用旧表，下一轮巡检自动用新线判。")
+
+
 
 def step(state: str, st_now: dict, key: str, pending=None, *,
          sender=None, runner=None, token_input=None, line_reader=None,
@@ -542,6 +679,13 @@ def step(state: str, st_now: dict, key: str, pending=None, *,
                          else "enable")[1], None)
     if act["name"] == UA.ACT_CONFIG:
         return out(edit_config(st_now, send_, line_read), None)
+    if act["name"] == UA.ACT_REGISTER:
+        # 本地流程：内部有"看到具体内容再 y"的确认门，故 step 的通用 token 已足够
+        # 前置（token 证明意图，预览证明内容）。不发守护命令——注册改的是下次
+        # 进程的默认工程指针，守护没有"切工程"这种命令。
+        return out(register_flow(line_read), None)
+    if act["name"] == UA.ACT_FLOOR:
+        return out(floor_flow(line_read), None)
     if act["name"] == UA.ACT_CANCEL:
         # 取消粒度是"下一个采样边界"，不是瞬时停：走文件通道才换得来子进程
         # 的 finally 真执行（退 Play、卸回调、写完自己的留痕）。这句话必须说
