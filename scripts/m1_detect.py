@@ -181,6 +181,20 @@ def apply_calibration(dets: list, cal: dict) -> int:
     return applied
 
 
+def applicable_waterline(wln: list, cal: dict) -> tuple[list, list]:
+    """把水位检测器按**本工程标定是否含该指标**收窄为可适用集。
+
+    返回 (applicable, skipped)。判据不猜：标定来自本工程实测束，含该指标=
+    能测，不含=这工程不产生这类计数（真工程可能根本没有 Animator）。
+    §8.1 的原保护完整保留——不可适用的指标**不判**，而不是拿注册表初值判。
+    抽出为函数是因为 m1_detect 与 patrol 两处都要用，两处各写迟早漂移。
+    """
+    cal_th = set((cal.get("thresholds") or {}).keys())
+    applicable = [d for d in wln if d.metric in cal_th]
+    skipped = [d for d in wln if d.metric not in cal_th]
+    return applicable, skipped
+
+
 def latest_calibration(profile_id: str | None = None) -> dict | None:
     """取**本工程归属**的最新标定文件。
 
@@ -410,9 +424,9 @@ def main() -> int:
         # 判据不猜：以**本工程自己的标定表**是否含该指标为准（标定来自本工程
         # 实测束，含=能测，不含=这工程没有）。§8.1 的原保护（绝不拿注册表
         # 未标定初值去判）完整保留——不可适用的指标我们不判，而不是拿旧值判。
-        _cal_th = set((cal.get("thresholds") or {}).keys())
-        applicable = [d for d in waterline_dets if d.metric in _cal_th]
-        skipped = [d for d in waterline_dets if d.metric not in _cal_th]
+        # 判据本体在 applicable_waterline（patrol 同源调用；此前这里是内联
+        # 副本，抽出后忘了收敛 = 本会话反复堵的"两处各写一份迟早漂移"）。
+        applicable, skipped = applicable_waterline(waterline_dets, cal)
         for d in skipped:
             out_unav = {"subject": d.subject, "metric": d.metric, "detector": d.id,
                         "why": "本工程标定表无此指标（该工程不产生这类计数）"}

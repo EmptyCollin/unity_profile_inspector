@@ -261,6 +261,58 @@ def main():
         restore_spawn()
     check("正常束 ⇒ 零检出", not r["findings"] and not r["blindspot"])
 
+    # ── 面板接线（阶段 8 选法 1）：本位进 findings、跨检进 panel_findings ──
+    # 真工程实测暴露的缺口：机制名不在注册表 home 里时，相对判据全落跨检区，
+    # 旧 patrol 只读 home 循环 ⇒ 监控路径给真工程零相对信号。现在两处同源。
+    # 造一个"F-CPU-01 的 totalAllocatedBytes 超阈"的束：该指标的本位机制是
+    # F-LOAD-01（不在本束），所以它只能是**跨检**命中——正是真工程的形态。
+    def cross_bundle():
+        doc = synth_bundle(cpu_defect=False)
+        # 把 F-CPU-01 的 totalAllocatedBytes 推高过标定地板（>2MB 绝对增量）
+        for w in doc["fixtures"]["F-CPU-01"]["windows"]:
+            w["metrics"]["totalAllocatedBytes"]["median"] = \
+                w["metrics"]["totalAllocatedBytes"]["median"] + 50e6
+        return doc
+    synth_to(TMP / "wcross", cross_bundle())
+    try:
+        rc = P.patrol_waterline({"fixtures": ["CLEAN", "F-CPU-01"],
+                                 "windows": 4, "waterline_timeout_s": 5},
+                                TMP / "wcross")
+    finally:
+        restore_spawn()
+    cross = rc.get("panel_findings") or []
+    check("跨检命中进 panel_findings（真工程唯一的相对信号出口）",
+          any(c.get("metric") == "totalAllocatedBytes"
+              and c.get("fixture") == "F-CPU-01" and c.get("home") is False
+              for c in cross), str(cross)[:120])
+    check("跨检行不混进 findings（G18：筛查事实不算 detector 战绩、不唤起）",
+          not [f for f in rc["findings"] if f.get("metric") == "totalAllocatedBytes"],
+          str(rc["findings"])[:120])
+    check("跨检行带 kind=panel 与 basis=relational_cross（下游可区分）",
+          bool(cross) and cross[0].get("kind") == "panel"
+          and cross[0].get("basis") == "relational_cross", str(cross[:1])[:120])
+
+    # quiet 必须把跨检命中算成"不静默"：筛出问题却标静默 = 假安心
+    real_wl, real_ep = P.patrol_waterline, P.patrol_episode
+    # 这次 patrol_once 只为验 quiet 判据，日志单独指一份：B1 那条断言按
+    # 精确行数计数，多写一行会让它红——红的是计数被污染，不是产品，
+    # 所以隔离写入目标而不是去放松那条断言。
+    _log_bak = P.PATROL_LOG
+    P.PATROL_LOG = TMP / "quiet_probe.jsonl"
+    P.patrol_episode = lambda c: {"channel": "episode", "findings": [],
+                                  "blindspot": None}
+    P.patrol_waterline = lambda c, w: {
+        "channel": "waterline", "blindspot": None, "findings": [],
+        "noise_basis": "L2", "panel_findings": [
+            {"kind": "panel", "fixture": "F-CPU-01", "metric": "totalAllocatedBytes",
+             "home": False, "magnitude": 5.0}]}
+    rec_q = P.patrol_once({"fixtures": ["CLEAN"], "auto_fix": {"fixtures": []},
+                           "cooldown_s": 0, "episode": {}})
+    P.patrol_waterline, P.patrol_episode, P.PATROL_LOG = real_wl, real_ep, _log_bak
+    check("只有跨检命中的一轮不算静默（筛查事实也算不静默，G20 假安心防线）",
+          rec_q["quiet"] is False
+          and rec_q["waterline"]["panel_findings"], str(rec_q["waterline"])[:120])
+
     # 零基线无穷比值清洗（实测轮撞出：F-ANIM-01 ratio=Infinity 写进 JSONL）
     def anim_bundle():
         doc = synth_bundle()
