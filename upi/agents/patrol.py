@@ -204,7 +204,7 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     _basis = resolve_noise_basis(_clean, _clean in fixtures)
     if _basis == "incomplete":
         out["blindspot"] = (f"巡检夹具不含噪声基准 {_clean}"
-                            "——无同期对照，禁止判定（§8.1）")
+                            "——无同期基准，禁止判定（§8.1）")
         return out
     out["noise_basis"] = _basis
     workdir.mkdir(parents=True, exist_ok=True)

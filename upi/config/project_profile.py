@@ -58,7 +58,10 @@ class ProjectProfile(BaseModel):
     assets_root: str = "Assets/UpiFixtures"  # 候选代码扫描根
     subject_dir_style: str = "underscore"    # F-CPU-01 → F_CPU_01 目录名映射方式
 
-    # 测哪些机制、谁是同期对照（原散在 llm_config/fixtures 清单里）
+    # 测哪些机制、谁是噪声基准（原散在 llm_config/fixtures 清单里）。
+    # ⚠️ 语义辨析（阶段 8 设计 §0）：clean_subject 是**噪声基准**——量"这台
+    # 机器不干活时抖多少"的标定源；它与"改前基线"（verify 用同协议重采的
+    # before bundle，判"改动有没有优化"）是两回事，此前都叫"对照"造成混淆。
     subjects: list[str] = Field(default_factory=list)
     clean_subject: str = "CLEAN"
 
@@ -152,7 +155,7 @@ class ProjectProfile(BaseModel):
                 f"profile {self.profile_id}: scene_template 必须是单个文件名，"
                 f"收到 {self.scene_template!r}")
         if self.clean_subject and self.clean_subject in self.subjects:
-            # CLEAN 是"同期对照"，不该同时出现在被测清单里：
+            # 噪声基准不该同时出现在被测清单里：
             # 那样它会既当尺子又当对象，检出率分母失真（§8.1）
             raise ValueError(f"profile {self.profile_id}: clean_subject={self.clean_subject} "
                              "不能同时出现在 subjects 里")
@@ -244,8 +247,8 @@ class ProjectProfile(BaseModel):
         清单、可移植性测试、界面呈现都可能读它；两处拼法不同就会出现
         "界面显示 5 个、守护实际采 4 个"——而且它不会被任何测试发现，
         因为少采只是安静地没数据，看起来像"这轮没问题"。
-        clean_subject 为空 ⇒ 不占位（无同期对照的工程，§8.1 的检出判据
-        本就不成立，由标定覆盖检查兜住，不在这里假装清单完整）。
+        clean_subject 为空 ⇒ 不占位（无噪声基准的工程，§8.1 的相对检出判据
+        本就不成立——阶段 8 起由绝对下限腿降级承担，不在这里假装清单完整）。
         """
         return ([self.clean_subject] if self.clean_subject else []) + list(self.subjects)
 

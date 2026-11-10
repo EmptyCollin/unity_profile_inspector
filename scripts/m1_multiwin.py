@@ -427,7 +427,7 @@ def main() -> int:
             #    引入把增量补采这件事废掉（夹具一轮 12 分钟）。quality_tier 与
             #    profile_id 同属"本轮才补写进 protocol"的键，历史束都没有。
             # ② 归属必须由 owner_profile_id 判（旧束没这个键 ⇒ 归内置档案），
-            #    跨工程时绝不能把别人的场景保留进来当同期对照（G7）。
+            #    跨工程时绝不能把别人的场景保留进来当噪声基准（G7）。
             # ⚠️ 这里放松档位比较只是补采便利的判断，不是可比性硬闸：
             #    "能不能拿这批阈值比这批数据"由检测端 G7_COMPARE_FIELDS 判，
             #    那里 quality_tier 仍逐字段比较（见 m1_detect.g7_mismatches）。
