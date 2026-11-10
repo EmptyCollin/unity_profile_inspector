@@ -33,6 +33,8 @@ ROOT = Path(__file__).resolve().parents[2]
 class RunState(TypedDict, total=False):
     run_id: str
     fixture: str
+    profile_id: str               # 本轮在哪个工程上跑（阶段 7 批 2）：统计层
+                                  # 按它分组，跨工程同名机制不得算作可比
     quality_tier: str
     budget: dict                  # G11: max_issues/max_review_rounds/
                                   # max_attempts_per_issue/wallclock_s/max_tokens
@@ -209,9 +211,14 @@ class Runner:
     def __init__(self, run_id: str, fixture: str, budget: Optional[dict] = None):
         self.dir = ROOT / "runs" / run_id
         self.dir.mkdir(parents=True, exist_ok=True)
+        _pf = active_profile()        # 取一次：路径与标签必须同源，分两次取
         self.tracer = Tracer(run_id, root=str(ROOT / "runs"), channel="dev",
+                             # 标签位显式传 profile_id（阶段 7 批 2）。内置档案的
+                             # id 与工程目录名同值，历史轮次的 env_fingerprint
+                             # 逐字节不变（已实测）；接了外部工程后，"目录同名但
+                             # 内容不同"的两份数据必须靠这个标签区分得开。
                              env_fingerprint=environment_fingerprint(
-                                 str(active_profile().abs_project)))
+                                 str(_pf.abs_project), profile_id=_pf.profile_id))
         self.budget = {"max_issues": 1, "max_review_rounds": 3,
                        "max_attempts_per_issue": 3, "wallclock_s": 2400,
                        "max_tokens": 60_000, **(budget or {})}
@@ -219,6 +226,10 @@ class Runner:
 
     def initial_state(self) -> RunState:
         return {"run_id": self.dir.name, "fixture": self.fixture,
+                # 归属在**开轮时**落进 state.json：聚合层据此分组（§8.7 第 6 项）。
+                # 不能等聚合时再取"当前档案"——重灌历史轮次那会儿档案可能已经
+                # 切到别的工程，那样会把旧工程的轮次标成新工程的。
+                "profile_id": active_profile().profile_id,
                 "quality_tier": active_profile().quality_tier, "budget": self.budget,
                 "spent": {"wallclock_s": 0.0, "tokens": 0}, "findings": [],
                 "issue": None, "hypotheses": [], "edit_plan": None,

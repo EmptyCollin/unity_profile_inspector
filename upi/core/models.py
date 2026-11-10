@@ -318,6 +318,16 @@ class Fingerprint(BaseModel):
     environment_fingerprint: str
     scale_factor: float = 1.0
     graphics_api: str = "unknown"   # EX-1 预留：切 DX11 前后数值禁止对比靠它兜底（AGENTS G7）
+    # 阶段 7 批 2：工程标识入指纹。
+    # ⚠️ 为什么 env_fingerprint 里已经有标签、还要再加一个显式字段：
+    #   env 里那份是**哈希掉的名字**，两条数据不一致时报出来的是
+    #   "environment_fingerprint 不同"，人看不出到底是驱动变了、电源计划变了
+    #   还是换了工程——而这三种情况的处置完全不同（前两种重采即可，
+    #   第三种是"拿错了标定文件"，重采一百次也不会变好）。显式字段让
+    #   G7 的拒绝信息能直接说出"profile=upi-fixture vs profile=我的工程"。
+    # 默认空串（而不是必填）：历史 bundle/标定文件里没有这个键，
+    # 强制必填会让旧产物一律读不出来——那是把兼容性砸了。
+    profile_id: str = ""
 
     # 注意：这里**不**按 editor_mode 拒绝构造。实测 memory / Scripts / Loading 计数器在
     # 无头模式同样出真值（§2.2.1 事实 1 仅适用于渲染类目），拦掉会误伤 CPU/加载链路。

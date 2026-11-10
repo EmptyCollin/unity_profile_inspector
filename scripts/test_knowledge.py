@@ -137,6 +137,81 @@ def main():
     chk("FP 按 detector_version 分桶",
         f1["fp_rate"] == 0.5 and f2["fp_rate"] == 0.0, f"v1={f1['fp_rate']} v2={f2['fp_rate']}")
 
+    # ---- 阶段 7 批 2：n_effective 的上下文键含工程档案（§8.2）----
+    # §8.2 问的是"这个动作在几种不同处境下有效"。两个工程各修一次同一机制，
+    # 旧口径会折叠成 1 个场景——跨工程复用恰恰是经验是否泛化的最强证据，
+    # 漏数它会让升维永远凑不够样本；反过来若把"同工程重复跑"错分成多个场景，
+    # 成功率分母就会被自己的复现验证灌水。两个方向都要钉住。
+    ks3 = KnowledgeStore(tempfile.mktemp(suffix=".db"))
+    ks3.upsert_pattern("P-P", "gc:alloc", "cpu", "per-frame-new-list", "reuse")
+    ks3.record_outcome("P-P", "r1", "F-CPU-01", "high", "resolved", profile="gameA")
+    ks3.record_outcome("P-P", "r2", "F-CPU-01", "high", "resolved", profile="gameB")
+    chk("同机制同档位但不同工程 ⇒ 算 2 个独立场景",
+        ks3.n_effective("P-P") == 2, f"n_eff={ks3.n_effective('P-P')}")
+    ks3.record_outcome("P-P", "r3", "F-CPU-01", "high", "resolved", profile="gameA")
+    chk("同工程重复跑仍只算 1（防分母被复现验证灌水）",
+        ks3.n_effective("P-P") == 2, f"n_eff={ks3.n_effective('P-P')}")
+
+    # 缺省归属取"调用时"的档案，不是 def 时求值的默认参数：后者切了档案
+    # 再记账仍会写旧工程名，表现为"经验库里的归属全是内置夹具"。
+    from upi.config import project_profile as PP
+    try:
+        PP.use_profile(PP.DEFAULT_PROFILE_ID)
+        ks3.record_outcome("P-P", "r4", "F-CPU-01", "high", "resolved")
+        got = ks3.db.execute(
+            "SELECT profile FROM outcomes WHERE run_id='r4'").fetchone()[0]
+        chk("不传 profile 时按当前档案记账（非 def 期快照）",
+            got == PP.DEFAULT_PROFILE_ID, got)
+    finally:
+        PP.reset_profile()      # 还原：不还原会把当前档案钉死，污染后续用例
+
+    # 老库兼容：真实仓库里那份 patterns.db 至今没有 profile 列。不补列则一写
+    # 就 "no column named profile"；补列不回填则历史行的拼接结果是 NULL，
+    # COUNT(DISTINCT ...) 把它们全折叠，n_effective 静默掉到接近 0——
+    # 不报错、只让结论悄悄反转，是最难查的失真。
+    import sqlite3
+    # 老库用 _SCHEMA 原样建、再把 profile 列删掉——**不许手写列清单**：
+    # 上一版手写的表缺了 issue_id，record_outcome 一走真实路径就炸
+    # （schema 一改测试就与产品脱节，这正是"复刻的那份不是产品"）。
+    from upi.core.knowledge import _SCHEMA
+    old_db = Path(tempfile.mktemp(suffix=".db"))
+    oc = sqlite3.connect(str(old_db))
+    oc.executescript(_SCHEMA)
+    assert sqlite3.sqlite_version >= "3.35", (
+        f"老库模拟需要 DROP COLUMN，当前 SQLite {sqlite3.sqlite_version}")
+    oc.execute("ALTER TABLE outcomes DROP COLUMN profile")
+    for i in range(2):
+        oc.execute("INSERT INTO outcomes(pattern_id,run_id,fixture,quality_tier,state)"
+                   " VALUES('P-OLD',?,'F-CPU-01','high','resolved')", (f"o{i}",))
+    oc.commit()
+    oc.close()
+    ks_old = KnowledgeStore(old_db)
+    chk("无 profile 列的老库：连接即补列", "profile" in {
+        r[1] for r in ks_old.db.execute("PRAGMA table_info(outcomes)")})
+    backfilled = {r[0] for r in ks_old.db.execute(
+        "SELECT profile FROM outcomes WHERE pattern_id='P-OLD'")}
+    chk("历史行按归属判据回填（不留 NULL，否则口径静默归零）",
+        backfilled == {PP.owner_profile_id({})}, str(backfilled))
+    chk("回填后老样本仍可数出独立场景（未因 NULL 消失）",
+        ks_old.n_effective("P-OLD") == 1, str(ks_old.n_effective("P-OLD")))
+    ks_old.record_outcome("P-OLD", "new1", "F-CPU-01", "high", "resolved")
+    chk("补列后写入不再报 no column named profile", True)
+    ks_old.close()
+
+    # 读侧（aggregate / checklist 只连库不改库）：列还不存在时必须退回旧键，
+    # 而不是抛 OperationalError 让整块统计变成 None。
+    from upi.core.knowledge import context_key_expr
+    # KnowledgeStore 刚把列补回来，这里再 DROP 回"老库原貌"验证读侧回退
+    rc = sqlite3.connect(str(old_db))
+    rc.execute("ALTER TABLE outcomes DROP COLUMN profile")
+    chk("读侧：无 profile 列 ⇒ 退回不含工程的旧键",
+        "profile" not in context_key_expr(rc), context_key_expr(rc))
+    chk("读侧：无 profile 列 ⇒ n_eff 仍可计算（不为 NULL 表达式）",
+        rc.execute(f"SELECT COUNT(DISTINCT {context_key_expr(rc)})"
+                   " FROM outcomes").fetchone()[0] >= 1)
+    rc.close()
+    ks3.close()
+
     print(f"\n知识库测试 {len(PASS)}/{len(PASS) + len(FAIL)}"
           + (f"，失败项: {FAIL}" if FAIL else "，全部通过"))
     return 0 if not FAIL else 1

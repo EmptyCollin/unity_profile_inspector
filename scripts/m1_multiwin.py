@@ -40,7 +40,7 @@ RC_CANCELLED = 3
 # 阶段 7：工程根/场景目录来自 profile。本脚本是**子进程**（由 verify.resample
 # 或标定链以 --fixtures/--windows 拉起），profile 经环境变量 UPI_PROFILE 传入，
 # 在进程启动时就固定，因此模块级快照不会造成"同进程换档案读到旧值"的问题。
-from upi.config.project_profile import active_profile   # noqa: E402
+from upi.config.project_profile import active_profile, owner_profile_id  # noqa: E402
 
 _PROF = active_profile()
 PROJECT = _PROF.abs_project
@@ -366,16 +366,30 @@ def main() -> int:
         report_done()
         return 2
     doc = {"session": args.session, "windows_target": args.windows,
-           "protocol": {"warmup": WARMUP, "window_polls": WINDOW, "poll_interval_s": POLL},
+           # profile_id 写进 protocol 块：它是"这份数据属于哪个工程"的归属标签，
+           # 检测端（m1_detect）从同一个块构造 G7 指纹，两处读同一份才不漂移。
+           # ⚠️ 内置档案的 id 恰好等于工程目录名，已实测两种写法产生的
+           #   environment_fingerprint 摘要逐字节相同 ⇒ 历史 38 轮次不必作废。
+           "protocol": {"warmup": WARMUP, "window_polls": WINDOW,
+                        "poll_interval_s": POLL, "profile_id": _PROF.profile_id},
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "fixtures": {}}
     # 增量补采：同会话/同窗口数/同协议的历史场景保留（补漏采的，不覆盖已采的）
     fp_keep = CALDIR / f"multiwin_{args.session}.json"
     if fp_keep.exists():
         try:
             prev = json.loads(fp_keep.read_text(encoding="utf-8"))
+            # 协议比较**排除 profile_id**，再单独判归属：
+            # ① 若沿用 prev["protocol"] == doc["protocol"] 整字典相等，新加的
+            #    profile_id 键会让所有历史束判成"协议不同"，已采场景全部重采
+            #    ——一个键的引入把增量补采这件事废掉（夹具一轮 12 分钟）；
+            # ② 归属必须由 owner_profile_id 判（旧束没这个键 ⇒ 归内置档案），
+            #    跨工程时绝不能把别人的场景保留进来当同期对照（G7）。
+            pp, cp = prev.get("protocol") or {}, doc["protocol"]
+            strip = lambda d: {k: v for k, v in d.items() if k != "profile_id"}
             same = (prev.get("session") == args.session
                     and prev.get("windows_target") == args.windows
-                    and prev.get("protocol") == doc["protocol"])
+                    and strip(pp) == strip(cp)
+                    and owner_profile_id(pp) == owner_profile_id(cp))
             if same:
                 for k, v in prev.get("fixtures", {}).items():
                     if k not in fixtures and "windows" in v:
