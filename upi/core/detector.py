@@ -51,7 +51,14 @@ class Playbook(BaseModel):
 class Detector(BaseModel):
     id: str
     link: Literal["cpu", "gpu", "anim", "loading"]
-    fixture: str                            # 绑定的夹具机制（机制级，非场景实例）
+    # 被测机制（机制级，非场景实例）。原名 fixture，阶段 7 改名 subject：
+    # §8.3 禁的是把具体标识符写进签名，而 "fixture" 读起来像"某个夹具目录"，
+    # 接新工程时会被误读成"这条检测器不可迁移"。现在它与 profile.subjects
+    # 同口径，值仍形如 F-CPU-01（那是机制编号，不是路径）。
+    # ⚠️ 只改内存字段：detection.json 的 results 键、runs.fixture 列、
+    #    Issue dict 的 "fixture" 键都是**已落盘契约**，保持原名（改了历史
+    #    数据读不到，且不会有任何报错——只会静默变成 None/缺项）。
+    subject: str
     metric: str                             # 判定指标名（get_performance / a2 的键）
     unit: str
     source_tier: DataTier                   # 指标归属制（G16/G17）：水位=A，GC=A2，逐帧计时=A4
@@ -110,7 +117,7 @@ class Detector(BaseModel):
 
 DEFAULT_REGISTRY: list[Detector] = [
     Detector(
-        id="DET-CPU-GC-FRAMEALLOC", link="cpu", fixture="F-CPU-01",
+        id="DET-CPU-GC-FRAMEALLOC", link="cpu", subject="F-CPU-01",
         metric="gc_alloc_per_frame", unit="B/frame", source_tier="A2",
         thresholds=Thresholds(min_magnitude=100_000, deviation_ratio=1.5,
                               threshold_source="noise_calibration"),
@@ -131,7 +138,7 @@ DEFAULT_REGISTRY: list[Detector] = [
         default_tier="auto",
     ),
     Detector(
-        id="DET-GPU-BATCHBREAK", link="gpu", fixture="F-GPU-01",
+        id="DET-GPU-BATCHBREAK", link="gpu", subject="F-GPU-01",
         metric="drawCalls", unit="calls", source_tier="A",
         thresholds=Thresholds(min_magnitude=30, deviation_ratio=1.3,
                               threshold_source="noise_calibration"),
@@ -141,7 +148,7 @@ DEFAULT_REGISTRY: list[Detector] = [
         default_tier="semi",
     ),
     Detector(
-        id="DET-ANIM-PARAMRTT", link="anim", fixture="F-ANIM-01",
+        id="DET-ANIM-PARAMRTT", link="anim", subject="F-ANIM-01",
         # 指标贴机制（M1 标定实测）：主线程帧时被整帧 4ms 摊薄 ⇒ 0.27ms delta 过不了地板；
         # Animator.ProcessAnimations 直接量动画管线，缺陷场景 med≈0.36ms vs clean≈0.0002ms
         metric="animator_process_animations_ns", unit="ns", source_tier="A2",
@@ -154,7 +161,7 @@ DEFAULT_REGISTRY: list[Detector] = [
         default_tier="semi",
     ),
     Detector(
-        id="DET-LOAD-SYNCPEAK", link="loading", fixture="F-LOAD-01",
+        id="DET-LOAD-SYNCPEAK", link="loading", subject="F-LOAD-01",
         metric="totalAllocatedBytes", unit="B", source_tier="A",
         thresholds=Thresholds(min_magnitude=5_000_000, deviation_ratio=1.05,
                               threshold_source="noise_calibration"),
@@ -169,7 +176,7 @@ DEFAULT_REGISTRY: list[Detector] = [
     # 防误报三件套：线位离常态足够远 + warmup 豁免 + replayable() 复现判据。
     # GPU 发作 detector 暂缺（探针判定路径未接 gpuFrameTime 越线，G19 宁缺毋假）。
     Detector(
-        id="DET-LOAD-FRAMESPIKE", link="loading", fixture="F-LOAD-01",
+        id="DET-LOAD-FRAMESPIKE", link="loading", subject="F-LOAD-01",
         metric="frame_time_ms", unit="ms", source_tier="A4",
         ptype="episode", attribution_source="auto",   # CPU 侧越线有归因源（gc_ring/a4 cpu 分解）
         thresholds=Thresholds(min_magnitude=33.333, deviation_ratio=1.2,

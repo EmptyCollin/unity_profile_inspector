@@ -296,7 +296,7 @@ def main() -> int:
         tracer.tool_call(ctx, kind="sqlite", name="read_thresholds", args=cal.get("_path", ""), exit_status=0)
         results = {}
         for det in waterline_dets:
-            fid = det.fixture
+            fid = det.subject
             if fid not in fixs:
                 results[fid] = {"verdict": "insufficient_evidence", "why": "标定数据缺该夹具"}
                 continue
