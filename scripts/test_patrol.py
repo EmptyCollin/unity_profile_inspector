@@ -138,6 +138,50 @@ def main():
     check("replay_seed=-1 样本不进 findings（不可复现禁进修复循环）",
           r3["n_samples"] == 1 and not r3["findings"])
 
+    # ── #28 三态：全程档放宽线只豁免发作腿，豁免账照记 ──
+    print("== ①b 三态发作线放宽（全程档豁免）==")
+    # 样本值 65.5ms、正常线 33.333ms。relax=3.0 ⇒ 放宽线 99.999ms ⇒ 65.5 落在
+    # 以内 ⇒ 不该成 finding，但必须进 shape.relax 豁免账（"豁免的账照记"）。
+    make_sample_jsonl(jb)   # 合规可复现样本（seed=1）
+    cfg_full = {**cfg2, "sampling_mode": "full", "episode_relax": 3.0}
+    P._save_state({"episode_offset": 0})
+    rf = P.patrol_episode(cfg_full)
+    check("full 档 relax=3 ⇒ 正常越线被放宽线豁免（findings 空）",
+          not rf["findings"])
+    check("full 档生效值透传进结果（sampling_mode/relax 可见）",
+          rf.get("sampling_mode") == "full"
+          and abs(rf.get("episode_relax_effective", 0) - 3.0) < 1e-6)
+    _sh = rf.get("shape") or {}
+    check("豁免账照记（shape.relax.n_exempted=1，含原值与两条线）",
+          _sh.get("relax", {}).get("n_exempted") == 1
+          and abs(_sh["relax"]["relaxed"][0]["normal_thr"] - 33.333) < 1e-6
+          and abs(_sh["relax"]["relaxed"][0]["relaxed_thr"] - 33.333 * 3) < 1e-3,
+          str(_sh.get("relax"))[:120])
+
+    # full 档但 relax=1.0 ⇒ 等价正常线，不豁免
+    cfg_full1 = {**cfg2, "sampling_mode": "full", "episode_relax": 1.0}
+    P._save_state({"episode_offset": 0})
+    r11 = P.patrol_episode(cfg_full1)
+    check("full+relax=1.0 不豁免（findings=1，无 shape.relax）",
+          len(r11["findings"]) == 1 and "relax" not in (r11.get("shape") or {}))
+
+    # 稳态档即使误配 relax=3 也必须忽略（relax 只属 full 档）——这是"别把
+    # relax 漏到别的腿"的红线在发作腿自身的兜底
+    cfg_steady = {**cfg2, "sampling_mode": "steady", "episode_relax": 3.0}
+    P._save_state({"episode_offset": 0})
+    r12 = P.patrol_episode(cfg_steady)
+    check("steady 档忽略 episode_relax（仍正常线判，findings=1）",
+          len(r12["findings"]) == 1
+          and abs(r12.get("episode_relax_effective", 9) - 1.0) < 1e-6
+          and "relax" not in (r12.get("shape") or {}))
+
+    # off 档：patrol_episode 本身不判 enabled（调度门在守护侧），但 mode 仍透传
+    P._save_state({"episode_offset": 0})
+    r13 = P.patrol_episode({**cfg2, "sampling_mode": "off"})
+    check("off 档 relax 不生效（透传 mode=off，按 1.0 判）",
+          r13.get("sampling_mode") == "off"
+          and abs(r13.get("episode_relax_effective", 9) - 1.0) < 1e-6)
+
     print("== ② 水通路：噪声基准前置与真判据链 ==")
     # 拒判必须发生在**起采之前**（一轮真采样≈2.4 分钟，先采后拒等于白烧）。
     # 这里装一个"被调用就记名字"的哨兵桩：既断言拒判文案，也断言没起过采样。

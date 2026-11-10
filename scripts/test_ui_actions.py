@@ -268,6 +268,44 @@ msg, pend2, _ = U.step(UA.IDLE, st_of(), "s", pend, sender=spy_send)
 ok("待确认时换键作废（不执行原动作）",
    pend2 != "run_now" and ("run_now", {}) not in sent, str(sent))
 
+# ── #28 三态：s 键进"选档流程"（软确认两按 + 读行选档 + 发 sampling 命令）──
+# ⚠️ 必须传 line_reader=spy_line：sampling_flow 靠 line_read 收档位选择，
+#    漏传就退回真实 stdin 拿 EOF 全走"未选择有效档位"，白测（注册流程同款坑）。
+sent.clear(); answers, lines = [], []
+_, pend_s, _ = U.step(UA.IDLE, st_of(), "s", sender=spy_send, line_reader=spy_line)
+ok("s 第一次只挂起待确认，不发命令、不读档",
+   pend_s == UA.ACT_TOGGLE_SAMPLING and not sent and not lines,
+   f"pend={pend_s} sent={sent} lines={lines}")
+answers = ["3"]            # st_of 无 sampling_mode ⇒ 当前 off；选 3=full
+msg, _, _ = U.step(UA.IDLE, st_of(), "s", pend_s, sender=spy_send, line_reader=spy_line)
+ok("选 full ⇒ 发 sampling mode=full（不再走二态 enable/disable）",
+   sent == [("sampling", {"mode": "full"})], str(sent))
+# 选档与当前相同 ⇒ 不发命令（避免无谓改盘 + 无谓留痕）
+sent.clear(); answers = ["1"]
+_, p2, _ = U.step(UA.IDLE, st_of(sampling_mode="off"), "s",
+                  sender=spy_send, line_reader=spy_line)
+msg, _, _ = U.step(UA.IDLE, st_of(sampling_mode="off"), "s", p2,
+                   sender=spy_send, line_reader=spy_line)
+ok("选 off 与当前一致 ⇒ 不发命令", not sent and "未变" in msg, f"{sent}|{msg}")
+# 空回车取消 ⇒ 不发命令
+sent.clear(); answers = [""]
+_, p3, _ = U.step(UA.IDLE, st_of(sampling_mode="steady"), "s",
+                  sender=spy_send, line_reader=spy_line)
+msg, _, _ = U.step(UA.IDLE, st_of(sampling_mode="steady"), "s", p3,
+                   sender=spy_send, line_reader=spy_line)
+ok("空输入取消选档 ⇒ 不发命令", not sent and "未选择" in msg, f"{sent}|{msg}")
+
+# 档位文本（_sampling_text 抽函数后渲染与测试共用同一份判断）
+_txt_full = U._sampling_text({"sampling_mode": "full", "episode_relax_effective": 3.0})
+ok("full 档文本含档位名与放宽倍数（放宽必须可见）", "全程" in _txt_full and "3.0" in _txt_full, _txt_full)
+ok("steady/off 文本各可读", "稳态" in U._sampling_text({"sampling_mode": "steady"})
+   and "关" in U._sampling_text({"sampling_mode": "off"}))
+ok("未启动(st=None)不崩且落 off 文案", "关" in U._sampling_text(None))
+# 旧快照只有 enabled（无 mode）必须向后兼容派生，不能崩也不能显示成未知
+ok("旧 enabled-only 快照派生正确",
+   "稳态" in U._sampling_text({"sampling_enabled": True})
+   and "关" in U._sampling_text({"sampling_enabled": False}))
+
 # 未识别键必须作废 pending —— 否则下一次按键会被当成它的确认而误执行
 sent.clear()
 _, pend, _ = U.step(UA.IDLE, st_of(), "r", sender=spy_send)

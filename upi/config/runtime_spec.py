@@ -14,8 +14,9 @@ CFG_FIELDS、daemon `set` 分支的白名单、各自的边界校验。任何一
 防止日后有人绕过 spec 在某一侧硬编码。
 
 不进这份 spec 的两类：
-  - enabled（采样总开关）：走专门的 enable/disable 命令，有独立留痕事件
-    （sampling_enabled/disabled），不与普通数值项混在一张表单里；
+  - enabled / sampling_mode（采样档位，#28 三态 off/steady/full）：走专门的
+    enable/disable/sampling 命令，有独立留痕事件（sampling_enabled/disabled），
+    不与普通数值项混在一张表单里；但放宽值 episode_relax 是数值项，进表单；
   - fixtures 清单、episode 探针路径：结构是列表/嵌套路径，属于阶段 7
     ProjectProfile 的范畴（按工程注入），不作为运行期手改项。
 """
@@ -28,10 +29,10 @@ from dataclasses import dataclass
 class SpecItem:
     key: str                 # UI 表单与 set 命令参数用的扁平名
     label: str               # 人读的中文名
-    kind: type               # int | bool
+    kind: type               # int | bool | float
     path: tuple              # 在 conf dict 里的嵌套写入路径
-    lo: int | None = None    # 数值下界（含）。bool 项不填
-    hi: int | None = None    # 数值上界（含）
+    lo: int | float | None = None    # 数值下界（含）。bool 项不填
+    hi: int | float | None = None    # 数值上界（含）
     unit: str = ""           # 展示单位，帮人判断量级（秒/次/窗口）
     # 改这个值会带来的**非直观代价**。为什么要有这个字段：有些配置改下去
     # 不会报错，只是把历史结论变得不可比（G7），而这种后果只在 yaml 注释里
@@ -70,6 +71,16 @@ class SpecItem:
                     return False
                 raise ValueError(f"布尔项只能填 y/n，收到 {v!r}")
             return bool(v)
+        if self.kind is float:
+            try:
+                x = float(str(v).strip()) if isinstance(v, str) else float(v)
+            except (ValueError, TypeError):
+                raise ValueError(f"{self.key} 需要数值，收到 {v!r}") from None
+            if self.lo is not None and x < self.lo:
+                raise ValueError(f"{self.key}={x} 低于下限 {self.lo}{self.unit}")
+            if self.hi is not None and x > self.hi:
+                raise ValueError(f"{self.key}={x} 高于上限 {self.hi}{self.unit}")
+            return x
         try:
             n = int(str(v).strip()) if isinstance(v, str) else int(v)
         except (ValueError, TypeError):
@@ -109,6 +120,11 @@ SPEC: list[SpecItem] = [
              ("auto_fix", "enabled")),
     SpecItem("live_llm", "真模型归因（花积分）", bool,
              ("auto_fix", "live_llm")),
+    SpecItem("episode_relax", "全程档发作线放宽倍数", float,
+             ("episode_relax",), 1.0, 100.0, "倍",
+             warn="仅在 sampling_mode=full（全程档）时生效；1.0=与正常线同，"
+                  "越大越宽松（加载期尖峰越容易落在豁免以内）。"
+                  "稳态档恒按 1.0 用；此值不进协议指纹，改它不需要重新标定"),
 ]
 
 KEYS: frozenset[str] = frozenset(i.key for i in SPEC)

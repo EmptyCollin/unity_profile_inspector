@@ -97,6 +97,28 @@ def _hb_age(ts: str | None) -> int | None:
     return int(time.time() - t)
 
 
+def _sampling_text(st: dict | None) -> str:
+    """采样档位的界面文本（#28 三态）。
+
+    为什么抽成函数：状态行渲染埋在 snapshot() 里，而 snapshot() 自己走真实
+    daemon_running()——测试构造不出"守护在跑且档位=full×3.0"的现场，只能测
+    想象中的文本（替身失真=白跑，注册流程同款教训）。抽出来后渲染与测试
+    共用同一份判断，且 st=None（守护未启动）路径可断言（字典字面量会无条件
+    求值三个分支，早先版本在 snapshot(None) 上当场 AttributeError，实测撞出）。
+    三档各自可读：off=○关；steady=●稳态（加载完再开测）；full=●全程（含加载，
+    发作线放宽×relax）。full 必须显式带 relax 倍数——否则"看着在测，其实被
+    放宽到几乎不响"在界面上看不出来。
+    """
+    _s = st or {}
+    mode = str(_s.get("sampling_mode") or
+               ("steady" if _s.get("sampling_enabled") else "off"))
+    if mode == "full":
+        return f"{YELLOW}● 全程(发作线×{_s.get('episode_relax_effective', 1.0)}){RESET}"
+    if mode == "steady":
+        return f"{GREEN}● 稳态{RESET}"
+    return f"{DIM}○ 关{RESET}"
+
+
 def snapshot() -> str:
     """一帧全屏文本（也可单独用于非 TTY 一次性输出）。"""
     running, st = E.daemon_running()
@@ -122,10 +144,10 @@ def snapshot() -> str:
         dot = f"{RED}● 已停止{RESET} {DIM}pid 不存活{RESET}"
     else:
         dot = f"{RED}● 未启动{RESET}"
-    sampling = (st or {}).get("sampling_enabled")
+    _samp_txt = _sampling_text(st)
     phase = (st or {}).get("phase", "-")
     out.append(f" 守护 {dot}  pid={(st or {}).get('pid','-')}  "
-               f"采样 {'{0}{1}开{2}'.format(GREEN, '●', RESET) if sampling else '{0}{1}关{2}'.format(DIM, '○', RESET)}  "
+               f"采样 {_samp_txt}  "
                f"状态 {phase}")
 
     # ── 进度：当前在采哪个夹具第几窗口 ──
@@ -205,6 +227,7 @@ def snapshot() -> str:
              "ticket": YELLOW, "resume_started": CYAN,
              "resume_finished": GREEN, "resume_failed": RED,
              "sampling_enabled": GREEN, "sampling_disabled": YELLOW,
+             "sampling_mode_changed": CYAN,
              "command_received": DIM, "command_ignored": RED,
              "cancel_sent": YELLOW, "progress": DIM}
     for ev in evs:
@@ -460,6 +483,36 @@ def edit_config(st_now: dict, send_, line_read) -> str:
     return f"{item.key}: {old} → {val}{tag}"
 
 
+def sampling_flow(st_now: dict, send_, line_read) -> str:
+    """采样档位选择（#28 三态）。发 `sampling` 命令带目标 mode，守护改内存+落盘。
+
+    为什么不做"再按一次 s 盲循环三档"：用户拍板的是**手动开关**——"加载完
+    再开测"与"开着进加载"是两种不同的测量意图，盲循环会把"想选稳态"误按成
+    "全程"，而两者唯一区别是发作线宽不宽，按错了界面上只差一个字，代价却是
+    加载期真尖峰被豁免掉没人知道。所以这里显式列三档让人选。
+    ⚠️ 走 line_read（同 edit_config 先例）：软确认"再按一次 s"发生在进流程
+       之前，进了流程就是要读选择，与配置表单同一契约。
+    """
+    cur = str(st_now.get("sampling_mode") or
+              ("steady" if st_now.get("sampling_enabled") else "off"))
+    _ZH = {"off": "关（整轮不测）", "steady": "稳态（加载完再开，发作线用正常值）",
+           "full": "全程（开着进加载也测，发作线放宽×episode_relax）"}
+    lines = [f"采样档位（当前={cur}；回车取消，不改任何东西）："]
+    for i, m in enumerate(("off", "steady", "full"), 1):
+        mark = " ←当前" if m == cur else ""
+        lines.append(f"  {i}. {m:7s} {_ZH[m]}{mark}")
+    pick = (line_read("\n".join(lines) + "\n选哪档(1-3)：") or "").strip()
+    if not pick.isdigit() or not (1 <= int(pick) <= 3):
+        return f"未选择有效档位，采样仍为 {cur}"
+    target = ("off", "steady", "full")[int(pick) - 1]
+    if target == cur:
+        return f"档位未变（{cur}），未发命令"
+    ack, info = send_("sampling", mode=target)
+    if not ack:
+        return f"未受理：{info}（档位仍为 {cur}）"
+    return f"采样档位 {cur} → {target}（{info}）"
+
+
 def _ask(line_read, prompt, default=""):
     """读一行；直接回车用默认值。默认值原样回填（向导是"缺省优先"的）。"""
     raw = (line_read(prompt) or "").strip()
@@ -675,8 +728,7 @@ def step(state: str, st_now: dict, key: str, pending=None, *,
     if act["name"] == UA.ACT_SNAPSHOT:
         return out("已刷新（本帧即快照）", None)
     if act["name"] == UA.ACT_TOGGLE_SAMPLING:
-        return out(send_("disable" if st_now.get("sampling_enabled")
-                         else "enable")[1], None)
+        return out(sampling_flow(st_now, send_, line_read), None)
     if act["name"] == UA.ACT_CONFIG:
         return out(edit_config(st_now, send_, line_read), None)
     if act["name"] == UA.ACT_REGISTER:

@@ -125,6 +125,41 @@ E.save_conf({"enabled": False})
 ok("用户显式 enabled=False ⇒ 真实配置的 true 被覆盖",
    D.load_runtime_conf()["enabled"] is False)
 
+# ── #28 三态：覆盖层显式 enabled 绝不能被"打底派生的 sampling_mode"盖回 ──
+# 这是本轮真撞红过的回归：base=MonitorConfig.model_dump() 永远同时带
+# enabled 和派生 sampling_mode，若把 merged/base 里的 sampling_mode 当权威，
+# 用户按 disable（覆盖层 enabled=False）会被 base 的 steady 复活成 True。
+# 判据只能看覆盖层 ov 里有没有显式写 mode（见 daemon.load_runtime_conf 注释）。
+_cs = D.load_runtime_conf()
+ok("显式 enabled=False 覆盖后 mode 同步落 off（不留 enabled=False/mode=steady 分裂态）",
+   _cs["enabled"] is False and _cs["sampling_mode"] == "off", str(_cs)[:150])
+
+# 覆盖层显式 mode=full ⇒ enabled 必须被派生为 True，且 relax 透传生效
+E.save_conf({"sampling_mode": "full", "episode_relax": 3.0})
+_cf = D.load_runtime_conf()
+ok("显式 sampling_mode=full ⇒ enabled 派生 True", _cf["enabled"] is True
+   and _cf["sampling_mode"] == "full", str(_cf)[:150])
+ok("episode_relax 合法区间内透传", abs(_cf["episode_relax"] - 3.0) < 1e-6)
+
+# 覆盖层 mode=off ⇒ enabled 必须 False（mode 权威覆盖打底 enabled=true）
+E.save_conf({"sampling_mode": "off"})
+ok("显式 mode=off ⇒ enabled=False（两键不各说各话）",
+   D.load_runtime_conf()["enabled"] is False)
+
+# relax 越界/非法 ⇒ 回落 1.0（正常线），绝不"配了个 0 就把发作判据整个关掉"
+E.save_conf({"sampling_mode": "full", "episode_relax": 0.0})
+ok("relax<1.0 ⇒ 回落 1.0（越界不等于关掉判据）",
+   abs(D.load_runtime_conf()["episode_relax"] - 1.0) < 1e-6)
+E.save_conf({"sampling_mode": "full", "episode_relax": "abc"})
+ok("relax 非数值 ⇒ 回落 1.0 并留痕",
+   abs(D.load_runtime_conf()["episode_relax"] - 1.0) < 1e-6)
+
+# 非法 mode（手改 json）⇒ 回落 enabled 派生并 degrade 留痕，不静默当 steady
+E.save_conf({"sampling_mode": "warmup", "enabled": True})
+_cw = D.load_runtime_conf()
+ok("非法 mode ⇒ 回落到 enabled 派生 steady 且留痕 degraded",
+   _cw["sampling_mode"] == "steady" and _cw["enabled"] is True, str(_cw)[:150])
+
 
 # ─────────── ② 取消通道：绝不误伤活进程（自愈第 2、3 项） ───────────
 print("== ② 取消通道与启动清扫 ==")

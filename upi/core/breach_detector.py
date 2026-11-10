@@ -86,20 +86,35 @@ def sample_to_finding(sample: BreachSample, det: Detector,
 
 
 def findings_from_samples(samples: list[BreachSample], det: Detector,
-                          run_id: str, raw_ref: str) -> tuple[list[tuple[Finding, BreachSample]], dict]:
+                          run_id: str, raw_ref: str,
+                          relax: float = 1.0) -> tuple[list[tuple[Finding, BreachSample]], dict]:
     """批量判定 + 归组统计（发作形状：孤立/成簇/周期，供 Diagnose 使用）。
 
     返回 (judged, shape)：judged = [(Finding, 对应样本)] 成对，位置匹配由判定
     循环维护——消费方不得按列表下标自行配对（实测踩过：过滤后的 findings
     与全量 samples 下标错位）。
+
+    ⚠️ relax（#28 全程档放宽线）：只在**发作腿**生效（调用方保证），语义=
+    "越正常线但没越 正常线×relax 的样本记进豁免账、不成 finding"。探针捕获
+    线不动（C# 侧仍按正常线记录）⇒ 原始证据不丢，豁免发生在**判定层**，
+    人随时能在 shape.relaxed[] 里看到被豁免的是哪几帧、越了多少——"豁免的
+    账照记"的落点。relax=1.0（默认）与旧行为逐字等价，其他消费方不受影响。
     """
     judged: list[tuple[Finding, BreachSample]] = []
     rels = []
+    relaxed: list[dict] = []
+    eff_thr = det.thresholds.min_magnitude * max(1.0, float(relax))
     for s in samples:
         if s.metric != det.metric:
             continue
         f = sample_to_finding(s, det, run_id, raw_ref)
         if f and f.issue:
+            if relax > 1.0 and s.value <= eff_thr:
+                relaxed.append({"rel": s.rel, "frame_idx": s.frame_idx,
+                                "value": s.value,
+                                "normal_thr": det.thresholds.min_magnitude,
+                                "relaxed_thr": eff_thr})
+                continue
             judged.append((f, s))
             rels.append(s.rel)
     rels.sort()
@@ -114,6 +129,10 @@ def findings_from_samples(samples: list[BreachSample], det: Detector,
              "cluster_rel_ranges": [(c[0], c[-1]) for c in clusters],
              "max_deviation_ratio": (max((f.issue.deviation_ratio for f, _ in judged
                                           if f.issue), default=None))}
+    if relax > 1.0:
+        shape["relax"] = {"factor": relax, "n_exempted": len(relaxed),
+                          "relaxed": relaxed[:20],
+                          "note": "全程档豁免：越正常线未越放宽线，不计发作 finding"}
     return judged, shape
 
 

@@ -108,8 +108,11 @@ def cmd_status(_args=None) -> int:
         from upi.core import events as E
         running, dst = E.daemon_running()
         if running:
+            _mzh = {"off": "关", "steady": "稳态", "full": "全程"}
+            _mode = str(dst.get("sampling_mode") or
+                        ("steady" if dst.get("sampling_enabled") else "off"))
             print(f"  守护进程        : 运行中 pid={dst.get('pid')} "
-                  f"采样={'开' if dst.get('sampling_enabled') else '关'} "
+                  f"采样={_mzh.get(_mode, _mode)} "
                   f"阶段={dst.get('phase')} 下次轮次={dst.get('next_round_at')}")
         elif dst:
             print(f"  守护进程        : 已停止（最后心跳 {dst.get('updated_at')}）")

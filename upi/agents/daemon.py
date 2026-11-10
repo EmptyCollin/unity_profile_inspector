@@ -41,6 +41,15 @@ def _progress_path():
 # 漂移的后果是命令历史静默不进统计（G13），而这正是最难发现的一类错。
 CMD_TRACE_DIR = E.CMD_TRACE_DIR
 
+# 守护认识的命令集 = 单一真相（#28 起两处派发共用，过去 _CmdTracer 与
+# _dispatch_cmd 各写一份，加命令忘另一处就会"界面发了、trace 判成未知命令"）。
+# ⚠️ 这个名字必须是 known：ui_actions.daemon_commands() 用 AST 从源码取名为
+# known 的元组做"动作表↔命令表"交叉校验（故意不 import，让守护未被导入时
+# 也能跑）。改名或改成派生表达式 ⇒ 校验取到空集，所有真接线命令被误判成
+# "守护不认识"——那是把校验打空，不是放松校验。
+known = ("enable", "disable", "pause", "resume", "run_now",
+         "cancel", "set", "quit", "calibrate", "sampling")
+
 
 class _CmdTracer:
     """命令动作的 trace span（I10/G13：无 trace 不入统计）。
@@ -184,6 +193,32 @@ def load_runtime_conf() -> dict:
         E.emit("config_incomplete", reason="enabled 未在任何配置源声明",
                action="sampling_disabled_fail_closed")
     merged["enabled"] = bool(merged.get("enabled", False))
+    # ── #28 三态档位：权威顺序 = 覆盖层显式 mode > 覆盖层/打底的 enabled 派生
+    #    > 两处都读不出来落 off（fail-closed）──
+    # ⚠️ 判"显式声明过 mode"绝不能看 merged/base：base 是 model_dump()，
+    #   **永远带 sampling_mode**（MonitorConfig 从 enabled 派生出来的），那是
+    #   派生值不是用户意图。拿它当权威时，用户按 disable（覆盖层 enabled=False）
+    #   会被 base 派生的 steady 盖回 True——test_recovery"显式 False 必须赢"
+    #   断言正是这样被撞红的（与 fixtures 键存在性同款错，教训第三次上膛）。
+    _MODES = ("off", "steady", "full")
+    if "sampling_mode" in ov:
+        _m = str(ov.get("sampling_mode"))
+        if _m not in _MODES:
+            # 手改 json 塞进非法档位：留痕回落 enabled 派生，不静默当 steady
+            degraded.append(f"sampling_mode_invalid:{_m[:24]}")
+            _m = "steady" if merged["enabled"] else "off"
+    else:
+        _m = "steady" if merged["enabled"] else "off"
+    merged["sampling_mode"] = _m
+    merged["enabled"] = _m != "off"
+    # 放宽线只在 full 档生效；数值非法/越界 ⇒ 回落 1.0（正常线）并留痕——
+    # "宽松线配了个 0"若照用等于发作判据整个关掉，宁可按不放宽处理。
+    try:
+        _r = float(merged.get("episode_relax", 1.0))
+    except (TypeError, ValueError):
+        _r = 1.0
+        degraded.append(f"episode_relax_unparseable:{str(merged.get('episode_relax'))[:40]}")
+    merged["episode_relax"] = _r if 1.0 <= _r <= 100.0 else 1.0
     # 阶段 7：缺省清单来自 profile（对照 + 被测机制）。
     # 优先级是"配置文件显式声明 > 档案缺省"（用户写的意图优先，与 enabled
     # 同规则）。⚠️ 判"有没有显式声明"不能用 `"fixtures" in merged`：
@@ -331,8 +366,8 @@ class Daemon:
         这种实现与界面不同步的问题，在统计里表现为完全无痕。
         """
         cmd = str(c.get("cmd") or "")
-        known = ("enable", "disable", "pause", "resume", "run_now",
-                 "cancel", "set", "quit", "calibrate")
+        # 命令集取模块级 known（单一真相），不在此重写一份：过去两处各写一份，
+        # 加 sampling 时忘这里就会"命令真被受理、trace 却记成 cmd:unknown/exit=1"
         t0 = time.perf_counter()
         rc = 0 if cmd in known else 1
         try:
@@ -394,19 +429,46 @@ class Daemon:
 
     def _dispatch_cmd(self, c: dict):
         cmd, args = c.get("cmd", ""), c.get("args") or {}
-        known = ("enable", "disable", "pause", "resume", "run_now",
-                 "cancel", "set", "quit", "calibrate")
+        # 命令集 = 模块级 known（与 _CmdTracer 同一份，见常量区注释）
         if cmd not in known:
             E.emit("command_ignored", reason="unknown_cmd", cmd=cmd)
             return
         if cmd == "enable":
+            # 三态兼容：enable 语义=“恢复测”，落到 steady（除非已经是 full）。
+            # mode 与 enabled 必须同写——只写 enabled 会让 mode 停在 off，
+            # 下次 set/状态读取两处各信一边（同一意图两处各写一份必漏一处）。
+            _m_prev = str(self.conf.get("sampling_mode") or "")
+            _m = _m_prev if _m_prev in ("steady", "full") else "steady"
+            self.conf["sampling_mode"] = _m
             self.conf["enabled"] = True
-            E.save_conf({**E.load_conf(), "enabled": True})   # 合并存盘：
-            E.emit("sampling_enabled")                        # 整文件覆盖会抹掉
-        elif cmd == "disable":                                # auto_fix 等其他键
+            _ov = {**E.load_conf(), "sampling_mode": _m, "enabled": True}   # 合并存盘：
+            E.save_conf(_ov)                        # 整文件覆盖会抹掉
+            E.emit("sampling_enabled", mode=_m)     # auto_fix 等其他键
+        elif cmd == "disable":
+            self.conf["sampling_mode"] = "off"
             self.conf["enabled"] = False
-            E.save_conf({**E.load_conf(), "enabled": False})
+            E.save_conf({**E.load_conf(), "sampling_mode": "off", "enabled": False})
             E.emit("sampling_disabled")
+        elif cmd == "sampling":
+            # #28 三态档位：off/steady/full 由 s 键循环或 dev 通道显式设定。
+            # 未知档位值必须拒（fail-loud）："warmup" 这种拼错静默当 steady，
+            # 用户以为在收加载期数据其实没有——比报错危险得多。
+            _MODES = ("off", "steady", "full")
+            _m = str(args.get("mode") or "")
+            if _m not in _MODES:
+                E.emit("command_ignored", reason="bad_sampling_mode",
+                       cmd=cmd, mode=_m, allowed=list(_MODES))
+                return
+            _prev = str(self.conf.get("sampling_mode") or "")
+            self.conf["sampling_mode"] = _m
+            self.conf["enabled"] = _m != "off"
+            E.save_conf({**E.load_conf(), "sampling_mode": _m,
+                         "enabled": _m != "off"})
+            # 事件名带 mode：统计轴要能把"稳态轮 vs 全程轮"分开（豁免账只在
+            # full 轮存在，混进同一分母会稀释稳态轮的发作口径）
+            E.emit("sampling_mode_changed", old=_prev, new=_m)
+            E.emit("sampling_enabled" if _m != "off" else "sampling_disabled",
+                   mode=_m)
         elif cmd == "pause":
             self.paused = True
             E.emit("paused")
@@ -484,6 +546,10 @@ class Daemon:
         E.emit("round_started", trigger=trigger,
                fixtures=self.conf.get("fixtures"),
                sampling=self.conf.get("enabled"),
+               # 档位进留痕：全程轮的豁免账与稳态轮不是同一种检出（G15 成本与
+               # 质量分轴），事后统计要能只看稳态轮，靠这个字段筛。
+               sampling_mode=str(self.conf.get("sampling_mode") or
+                                 ("steady" if self.conf.get("enabled") else "off")),
                auto_fix=self.conf.get("auto_fix"))
         threading.Thread(target=self._round, daemon=True).start()
         threading.Thread(target=self._progress_poller, daemon=True).start()
@@ -845,6 +911,13 @@ class Daemon:
         E.write_status({
             "pid": os.getpid(),
             "sampling_enabled": bool(self.conf.get("enabled")),
+            # 三态快照（#28）：UI 的 s 键靠 mode 决定下一档，不能靠 bool 猜——
+            # full 档 sampling_enabled 同样为 True，只有 mode 能区分。
+            "sampling_mode": str(self.conf.get("sampling_mode") or
+                                 ("steady" if self.conf.get("enabled") else "off")),
+            "episode_relax_effective": (float(self.conf.get("episode_relax") or 1.0)
+                                        if str(self.conf.get("sampling_mode")) == "full"
+                                        else 1.0),
             "paused": self.paused,
             "busy": self.busy,
             "phase": ("round_running" if self.busy else

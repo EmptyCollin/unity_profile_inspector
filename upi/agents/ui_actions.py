@@ -168,8 +168,12 @@ _REASONS = {
 _ALL_ACTIONS = [
     {"key": "b", "name": ACT_START_DAEMON, "label": "启动守护",
      "tier": TIER_SOFT, "cmd": None},
-    {"key": "s", "name": ACT_TOGGLE_SAMPLING, "label": "开/关采样",
-     "tier": TIER_SOFT, "cmd": None},              # enable/disable 按实况定
+    {"key": "s", "name": ACT_TOGGLE_SAMPLING, "label": "选采样档位(关/稳态/全程)",
+     "tier": TIER_SOFT, "cmd": "sampling"},        # #28 三态：sampling_flow 显式发
+    # mode 参数。cmd 登记进"动作表↔命令表"交叉校验（过去留 None 是因为
+    # enable/disable 按实况二选一、不是固定命令；三态后固定发 sampling，
+    # 不登记就等于这条真发命令游离在防假接线核对之外）。step() 的专用
+    # 分支先返回，通用兜底 send_(act["cmd"]) 不会带空 args 重发。
     {"key": "p", "name": ACT_PAUSE, "label": "暂停排期",
      "tier": TIER_SOFT, "cmd": "pause"},
     {"key": "p", "name": ACT_RESUME, "label": "继续排期",

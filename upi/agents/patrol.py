@@ -158,10 +158,18 @@ def patrol_episode(cfg_mon: dict) -> dict:
     for d in DEFAULT_REGISTRY:
         if d.ptype == "episode":
             by_fx.setdefault(d.subject, []).append(d)
+    # #28 三态：全程档给发作腿套放宽线（判定层豁免，账照记进 shape.relax）。
+    # ⚠️ 只作用于发作通路——水路与下限腿都是 warmup 后的窗口中位，加载尖峰
+    #    不在采样窗内；把 relax 漏到那边等于把真劣化也豁免掉。
+    _mode = str(cfg_mon.get("sampling_mode") or "steady")
+    relax = float(cfg_mon.get("episode_relax") or 1.0) if _mode == "full" else 1.0
+    out["sampling_mode"] = _mode
+    out["episode_relax_effective"] = relax
     judged_any = []
     for fx, dets in by_fx.items():
         for det in dets:
-            judged, shape = findings_from_samples(samples, det, "patrol", str(jsonl))
+            judged, shape = findings_from_samples(samples, det, "patrol", str(jsonl),
+                                                  relax=relax)
             for f, s in judged:
                 judged_any.append({
                     "kind": "issue", "ptype": "episode", "fixture": fx,

@@ -107,12 +107,53 @@ def main():
           and saved.get("auto_fix", {}).get("fixtures") == ["F-CPU-01"])
     d._apply_cmd({"cmd": "enable", "args": {}})
     check("enable 还原=True", E.load_conf().get("enabled") is True)
+    # enable 语义恢复测：mode 同步落到 steady（除非已是 full），不留
+    # "enabled=True 但 mode=off" 的分裂态（两键必须同源，见 dispatch 注释）
+    check("enable 后 mode 与 enabled 同源（不出现 True/off 分裂）",
+          d.conf.get("sampling_mode") in ("steady", "full")
+          and E.load_conf().get("sampling_mode") == d.conf.get("sampling_mode"),
+          str(d.conf.get("sampling_mode")))
+
+    print("== ②a1 三态：sampling 命令（off/steady/full + 非法拒收）==")
+    d._apply_cmd({"cmd": "sampling", "args": {"mode": "full"}})
+    check("sampling full ⇒ 内存 mode=full 且 enabled 派生 True",
+          d.conf.get("sampling_mode") == "full" and d.conf.get("enabled") is True)
+    _sv = E.load_conf()
+    check("sampling full ⇒ 落盘活过重启（mode+enabled 同写）",
+          _sv.get("sampling_mode") == "full" and _sv.get("enabled") is True, str(_sv)[:120])
+    _evs = E.tail_events(6)
+    check("full 档留痕 sampling_mode_changed（old→new 可追溯）",
+          any(e.get("kind") == "sampling_mode_changed" and e.get("new") == "full"
+              for e in _evs), str([e.get("kind") for e in _evs]))
+
+    # 非法档位必须拒（fail-loud）：拼错的 "warmup" 静默当 steady，
+    # 用户以为在收加载期数据其实没有，比报错危险得多
+    _before = dict(sampling_mode=d.conf.get("sampling_mode"),
+                   enabled=d.conf.get("enabled"))
+    E.emit("marker-clear")
+    d._apply_cmd({"cmd": "sampling", "args": {"mode": "warmup"}})
+    check("非法 mode ⇒ 拒收且配置不变",
+          d.conf.get("sampling_mode") == _before["sampling_mode"],
+          str(d.conf.get("sampling_mode")))
+    check("非法 mode ⇒ command_ignored 留痕（不静默）",
+          any(e.get("kind") == "command_ignored"
+              and e.get("reason") == "bad_sampling_mode"
+              for e in E.tail_events(5)))
+
+    d._apply_cmd({"cmd": "sampling", "args": {"mode": "off"}})
+    check("sampling off ⇒ enabled 派生 False 且落盘同步",
+          d.conf.get("enabled") is False
+          and E.load_conf().get("sampling_mode") == "off")
 
     E.emit("marker-clear")
     d._apply_cmd({"cmd": "teleport", "args": {}})
-    got = [e for e in E.tail_events(5) if e.get("kind") == "command_ignored"]
+    # 判据锁定"teleport 自己产生了 unknown_cmd 留痕"，而不是"尾部有任何
+    # command_ignored"——后者会被上面 bad_sampling_mode 那条同型留痕污染
+    # （实测就是被污染的：tail(5) 里混进两条 ignored 让 len==1 假红）。
+    got = [e for e in E.tail_events(8)
+           if e.get("kind") == "command_ignored" and e.get("cmd") == "teleport"]
     check("未知命令 ⇒ command_ignored 留痕（不静默）", len(got) == 1
-          and got[0]["reason"] == "unknown_cmd")
+          and got[0]["reason"] == "unknown_cmd", str(got)[:120])
 
     d._apply_cmd({"cmd": "set", "args": {"interval_s": 600, "live_llm": False}})
     check("set 改内存配置", d.conf["interval_s"] == 600

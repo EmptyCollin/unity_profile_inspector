@@ -83,8 +83,19 @@ class MonitorConfig(BaseModel):
     """pipeline.monitor：自主巡检调度参数（DESIGN §2.4 T1/T2w/T3）。
 
     判定口径不在此处——阈值永远来自标定链（§8.1），本段只管"什么时候跑、
-    跑哪些、跑完之后唤不唤起修复循环"。"""
+    跑哪些、跑完之后唤不唤起修复循环"。
+
+    采样档位（#28 三态，替代旧的开/关二态但保持 `enabled` 向后兼容）：
+      - off：整轮不跑（=旧 enabled=False）；
+      - steady：加载完再开测（巡检轮本就有 warmup 收线）——发作线用正常值；
+      - full：开着进加载也测，对**发作（探针）通路**套 `episode_relax` 放宽线，
+        加载/开场杀这类"可接受的高"落在放宽线以内不响，砸穿放宽线才成 finding。
+    ⚠️ 放宽只作用于发作通路，不作用于下限/水位腿：水路与下限都是 warmup 之后的
+       窗口中位，加载尖峰本就不在采样窗内（#27 exp6 口径），给它再放一档只会
+       掩盖真劣化。把 relax 加到水路上是常见误接，这里显式挡在门外。"""
     enabled: bool = False
+    sampling_mode: str = ""            # ""=由 enabled 派生（向后兼容）；否则 off/steady/full
+    episode_relax: float = Field(1.0, ge=1.0, le=100.0)  # full 档发作线倍数；steady/off 恒按 1.0 用
     interval_s: int = Field(1800, ge=60)
     windows: int = Field(4, ge=2)
     fixtures: list[str] = Field(default_factory=list)
@@ -94,6 +105,23 @@ class MonitorConfig(BaseModel):
     cooldown_s: int = 0
     max_consecutive_failures: int = Field(3, ge=1)
     budget: dict = Field(default_factory=dict)
+
+    @field_validator("sampling_mode")
+    @classmethod
+    def _mode_in_set(cls, v: str) -> str:
+        if v not in ("", "off", "steady", "full"):
+            raise ValueError(f"sampling_mode 只认 off/steady/full（或留空由 enabled 派生），收到 {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _reconcile_mode_and_enabled(self) -> "MonitorConfig":
+        # 单一真相 = sampling_mode；enabled 派生并回写，保证 model_dump() 里
+        # 两个键语义一致（daemon 各处仍读 conf["enabled"]，不能让它和 mode 打架）。
+        # validate_assignment 默认关，after 校验器里普通赋值不重触发字段校验。
+        if self.sampling_mode == "":
+            self.sampling_mode = "steady" if self.enabled else "off"
+        self.enabled = self.sampling_mode != "off"
+        return self
 
 
 class LlmConfig(BaseModel):
