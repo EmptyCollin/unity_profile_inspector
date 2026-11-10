@@ -221,6 +221,30 @@ class ProjectProfile(BaseModel):
         return self.profile_id
 
 
+def owner_profile_id(record: dict) -> str:
+    """一份产物（bundle / 标定文件 / state.json）属于哪个工程档案。
+
+    没有 profile 键 ⇒ 归内置档案。**这条判断全仓库只许写在这一处**：
+    检测链、聚合层、体检表都要问"这两份数据是不是同一个工程采的"，
+    各处自己写一遍 `rec.get("profile") or "upi-fixture"` 就会漂移
+    ——漂移的表现是"检测说可比、报告说跨工程"，两份输出互相打脸，
+    而排查的人不知道该信哪一个（本轮在配置面/待批队列已各撞过一次）。
+
+    ⚠️ "缺键 ⇒ 内置"是有事实依据的归属判定，不是猜默认值（I1）：
+      profile_id 是阶段 7 批 2 才并入指纹的，在此之前仓库里所有产物
+      都只可能来自内置夹具工程（接入外部工程的能力是本次批 2 才开始有的）。
+      反过来，一旦数据里显式写了 profile 键，就必须以它为准——
+      这时缺省回落到内置会把"别人工程的标定"读成"夹具的标定"。
+    """
+    if not isinstance(record, dict):
+        return DEFAULT_PROFILE_ID
+    v = record.get("profile_id") or record.get("profile")
+    if isinstance(v, dict):                 # 兼容 protocol 块里嵌套写法
+        v = v.get("id")
+    s = str(v or "").strip()
+    return s or DEFAULT_PROFILE_ID
+
+
 #: 内置档案：值与阶段 7 之前散在各处的硬编码**逐字一致**，
 #: 所以接入后既有回归不会变（这是"重构不改行为"的验收线）。
 _BUILTIN: dict[str, ProjectProfile] = {

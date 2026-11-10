@@ -76,12 +76,23 @@ class Tracer:
         })
 
 
-def environment_fingerprint(project_path: str = "") -> str:
-    """Unity/URP 版本 × GPU 驱动 × 电源计划（G7 环境漂移门禁的输入）。
+def environment_fingerprint(project_path: str = "",
+                            profile_id: Optional[str] = None) -> str:
+    """Unity/URP 版本 × GPU 驱动 × 电源计划 × 工程标识（G7 环境漂移门禁的输入）。
 
     采集失败时返回带 unknown 标记的串，而不是猜测值（I1）。
     ⚠️ 中文 Windows 的控制台输出编码不稳定（ver/powercfg 直出会乱码），
        因此对外只暴露 sha256 摘要 + 关键 GUID，保证跨会话可比。
+
+    阶段 7 批 2：标签位从"工程目录名"改为 profile_id（档案标识）。
+    为什么目录名不够：两个工程可以同名（同一模板复制出两份 MyGame，
+    或 CI 把工程 checkout 到不同父目录但末级同名）——那时目录名相同而
+    内容完全不同，指纹却一致，等于 G7 形同虚设。profile_id 是接入时
+    人为声明、必须全局唯一的标识。
+    ⚠️ 内置档案的 profile_id 恰好等于其目录名（都是 upi-fixture），
+      已实测两种写法产生的 sha256 摘要逐字节相同 ⇒ 历史 38 轮次的
+      env_fingerprint 不改写也继续可比，不必因这次改动整库作废。
+      project_path 参数保留：没传 profile_id 时退回目录名，老调用点行为不变。
     """
     import hashlib
     import re
@@ -98,8 +109,9 @@ def environment_fingerprint(project_path: str = "") -> str:
     except Exception:  # noqa: BLE001
         ok = False
     raw.append(os.sys.version.split()[0])
-    if project_path:
-        raw.append(Path(project_path).name)
+    label = profile_id or (Path(project_path).name if project_path else "")
+    if label:
+        raw.append(label)
     blob = "|".join(raw).encode("utf-8", "replace")
     power_guid = ""
     m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",

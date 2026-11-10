@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from upi.config.project_profile import active_profile, owner_profile_id  # noqa: E402
 from upi.core.conflicts import run_pair, run_snapshot                    # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
 from upi.core.models import Evidence, Fingerprint, Issue, IssueSignature  # noqa: E402
@@ -26,6 +27,30 @@ from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
 BASELINES = ROOT / "baselines"
 CALDIR = ROOT / "calibration"
 RUNS = ROOT / "runs"
+
+# G7 可比性判据的字段清单（阈值源指纹 × 数据源指纹，逐字段相等才允许拿
+# 阈值比数据）。提到模块级是为了让它**可被断言**：写在 main 里就是局部变量，
+# test_profile_portability 只能去 grep 源码文本，那等于测字符串而不是测行为——
+# 清单一旦改名或漏项，grep 版本照样"通过"。
+# 不含 scene_guid：v0 它只反映来源文件内容，数据文件与阈值文件的哈希必然不同。
+# 含 profile_id（阶段 7 批 2）：别的协议字段全对得上、但数据来自 A 工程而标定
+# 来自 B 工程时，噪声带量的是另一个工程的抖动分布，拿它判本工程 = 无意义比较。
+# environment_fingerprint 的哈希里虽然也混了工程标签，但那里不一致只能报
+# "环境指纹不同"，看不出是驱动变了还是换了工程——两者处置完全不同（前者重采
+# 即可，后者是拿错标定文件，重采一百次也不会变好），所以归属单列一个字段。
+G7_COMPARE_FIELDS = ["replay_script_hash", "quality_tier", "warmup_samples",
+                     "window_samples", "n_samples", "poll_rate", "data_tier",
+                     "editor_mode", "scale_factor", "environment_fingerprint",
+                     "profile_id"]
+
+
+def g7_mismatches(a: Fingerprint, b: Fingerprint) -> list[str]:
+    """两份协议指纹在 G7 判据上不一致的字段清单（空=可比）。
+
+    单独成函数是为了让**判定本身**可被断言：测试给出"数据来自 A 工程、
+    标定来自 B 工程"的两个指纹，直接问它拦不拦，而不是复刻一遍推导。
+    """
+    return [f for f in G7_COMPARE_FIELDS if getattr(a, f) != getattr(b, f)]
 
 
 def latest_baseline() -> Path:
@@ -175,6 +200,11 @@ def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
     Unity 场景查询后换成真 guid，届时旧指纹自然失配、按 G7 禁止新旧混比，
     这正是指纹字段该有的行为。replay_script_hash v0="none"：回放基建（T2）
     未建，如实标注，不假装有回放。
+
+    profile_id 取 protocol 块里声明的归属（没有则 owner_profile_id 判为
+    内置档案）。这里**不取当前运行档案的值**：指纹要描述"这份数据是怎么
+    采出来的"，不是"现在是谁在跑"——取当前值的话，换档案后重跑检测会让
+    同一份旧数据的指纹跟着变，历史数据被改写成本源，G7 就失去了可比依据。
     """
     import hashlib
     try:
@@ -193,6 +223,7 @@ def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
         editor_mode="gui",                          # G16：渲染值只在 GUI 有效
         environment_fingerprint=env_fp,
         scale_factor=float(proto.get("scale_factor", 1.0)),
+        profile_id=owner_profile_id(proto),
     )
 
 
@@ -209,8 +240,13 @@ def main() -> int:
     clean_stats = fixs["CLEAN"]
 
     run_id = time.strftime("m1detect_%Y%m%d_%H%M%S")
+    # 工程上下文来自档案（阶段 7）。标签位显式传 profile_id：
+    # 内置档案的 id 与工程目录名同值（已实测指纹摘要逐字节相同），
+    # 所以这一步不会让历史轮次的 env_fingerprint 失配。
+    _pf = active_profile()
     tracer = Tracer(run_id, root=str(RUNS), channel="dev",
-                    env_fingerprint=environment_fingerprint(str(ROOT / "fixtures/upi-fixture")))
+                    env_fingerprint=environment_fingerprint(
+                        str(_pf.abs_project), profile_id=_pf.profile_id))
 
     cal = latest_calibration()
     if cal is None:
@@ -226,13 +262,15 @@ def main() -> int:
                                         env_fp, int(mw.get("windows_target", 4)))
     fp_th = fingerprint_from_protocol(cal.get("protocol", {}), cal.get("_path", ""),
                                       env_fp, int(mw.get("windows_target", 4)))
-    compare_fields = ["replay_script_hash", "quality_tier", "warmup_samples",
-                      "window_samples", "n_samples", "poll_rate", "data_tier",
-                      "editor_mode", "scale_factor", "environment_fingerprint"]
-    mism = [f for f in compare_fields
-            if getattr(fp_data, f) != getattr(fp_th, f)]
+    # 判据与比对见模块级 G7_COMPARE_FIELDS / g7_mismatches（提到模块级的唯一
+    # 原因是可被断言：留在 main 里就是局部表达式，测试只能复刻一遍或 grep
+    # 源码文本——复刻的那份不是产品，grep 测的是字符串不是行为。）
+    mism = g7_mismatches(fp_data, fp_th)
     if mism:
         print("!! 阈值与数据协议不一致，禁止套用（G7）：", mism)
+        if "profile_id" in mism:
+            print(f"   数据侧工程={fp_data.profile_id}  标定侧工程={fp_th.profile_id}"
+                  f"  当前运行档案={active_profile().profile_id}")
         return 1
     print(f"G7 校验: 阈值源×数据源协议一致（{'|'.join(str(getattr(fp_data,f)) for f in ('warmup_samples','window_samples','poll_rate','scale_factor'))}）")
 

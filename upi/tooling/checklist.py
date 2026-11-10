@@ -105,7 +105,12 @@ def compute(db: Path | str | None = None) -> dict:
 
     ok=None 表示"未计算"（不是不达标）；报告与提案都必须区分这两者。
     """
-    c = AG.connect_ro(db or AG.DB)
+    # 走 aggregate._with_ro：异常路径也要释放句柄（Windows 未关句柄会锁库，
+    # 让"SQL 报错"退化成"文件删不掉"，现场被第二个故障覆盖）。
+    return AG._with_ro(db or AG.DB, _compute)
+
+
+def _compute(c) -> dict:
     out: dict[str, dict] = {}
 
     # ── 1) tuning_holdout_gap：按 fixture_spec 的 holdout 标记分组实测 ──
@@ -189,8 +194,11 @@ def compute(db: Path | str | None = None) -> dict:
         k = sqlite3.connect(str(kb))
         try:
             n_trials = k.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+            # 上下文键三处同源（KnowledgeStore.n_effective / aggregate / 这里），
+            # 阶段 7 批 2 起含工程档案维度。
+            from upi.core.knowledge import context_key_expr
             n_eff = k.execute(
-                "SELECT COUNT(DISTINCT fixture||'|'||quality_tier) FROM outcomes"
+                f"SELECT COUNT(DISTINCT {context_key_expr(k)}) FROM outcomes"
             ).fetchone()[0]
         except sqlite3.OperationalError:
             pass
@@ -210,29 +218,43 @@ def compute(db: Path | str | None = None) -> dict:
         "why": "签名可迁移性需为同机制造变体夹具并做命中测试（§8.3），"
                "当前每机制仅 1 个缺陷夹具，无变体可比"}
 
-    # ── 6) verdict_consistency：同夹具×同协议的完整判定轮次 ──
+    # ── 6) verdict_consistency：同工程×同夹具×同协议的完整判定轮次 ──
     # G7 要求"协议指纹一致才可对比"。实测：巡检轮次不产 detection.json
     # ⇒ protocol_fingerprint 为 NULL。此时**不能**只看夹具同名就当可比：
     # 两轮的档位/窗口数/环境若不同，判定一致率就是把不可比数据算成一致。
+    # profile 进分组（阶段 7 批 2）：不同工程可以有同名机制编号，协议与环境
+    # 字段也可能恰好相同，但那不是同一处境下的复现——并到一组算"判定一致"
+    # 等于拿 A 工程的稳定冒充 B 工程的稳定。
     # 一致率的定义（§8.7）：可比的每一组内，判定结论是否全部相同；
     # 全同的组记 1，否则记 0，再对组数取比例——不是把"resolved"当正确。
-    groups = c.execute("""
-      SELECT ru.fixture, ru.protocol_fingerprint, ru.env_fingerprint,
+    # ⚠️ SELECT 加了 profile 一列，下面取 verdicts 的下标从 g[3] 变 g[4]。
+    #    取错列不会报错，只会拿环境指纹那串去比"是否全同"，一致率恒为 0。
+    # 分组键来自 aggregate.runs_group_cols（唯一来源），两个理由：
+    #  · 旧库兼容——checklist 走 connect_ro，只读连接不跑迁移，写死 ru.profile
+    #    会让整份体检表崩在 "no such column: ru.profile"。拿旧 stats.db 出报告
+    #    是真实用户路径，必须降级而不是抛错；
+    #  · SELECT 前几列与 GROUP BY 永远同序，下面取 verdicts 的下标按 len(grp)
+    #    现算。本轮已栽过一次：加列后下标写死，把环境指纹当成判定结果比，
+    #    一致率静默变成 0，看起来像"结论不一致"其实是取错了列。
+    grp = AG.runs_group_cols(c, "ru")
+    ng = len(grp)                       # 分组列数 == verdicts 的下标
+    groups = c.execute(f"""
+      SELECT {", ".join(grp)},
              GROUP_CONCAT(DISTINCT ru.verdict) verdicts, COUNT(*) n
       FROM runs ru
       WHERE ru.verdict IS NOT NULL AND ru.protocol_fingerprint IS NOT NULL
-      GROUP BY ru.fixture, ru.protocol_fingerprint, ru.env_fingerprint""").fetchall()
-    cmp_groups = [g for g in groups if g[4] >= 2]        # 单轮组无"一致"可言
+      GROUP BY {", ".join(grp)}""").fetchall()
+    cmp_groups = [g for g in groups if g[ng + 1] >= 2]   # 单轮组无"一致"可言
     if cmp_groups:
         agree = sum(1 for g in cmp_groups
-                    if len(set((g[3] or "").split(","))) == 1)
+                    if len(set((g[ng] or "").split(","))) == 1)
         val = agree / len(cmp_groups)
         out["cross_run_verdict_consistency"] = {
             "value": round(val, 3),
             "ok": val >= 0.9,
             "n": len(cmp_groups),
-            "why": f"可比组（同夹具×同协议×同环境且 ≥2 轮判定）{len(cmp_groups)} 组，"
-                   f"其中判定全一致的 {agree} 组"}
+            "why": (f"可比组（{AG.runs_group_label(c, 'ru')}且 ≥2 轮判定）"
+                    f"{len(cmp_groups)} 组，其中判定全一致的 {agree} 组")}
     else:
         n_v = c.execute("SELECT COUNT(*) FROM runs WHERE verdict IS NOT NULL").fetchone()[0]
         out["cross_run_verdict_consistency"] = {
@@ -252,7 +274,6 @@ def compute(db: Path | str | None = None) -> dict:
     n_bad = sum(1 for v in out.values() if v["ok"] is False)
     n_verdict = c.execute(
         "SELECT COUNT(*) FROM runs WHERE verdict IS NOT NULL").fetchone()[0]
-    c.close()          # 只读连接也要关：Windows 上未关句柄会锁住 .db
     return {"items": out,
             "n_items": len(out), "n_missing": n_missing, "n_fail": n_bad,
             "status": ("incomplete" if n_missing else

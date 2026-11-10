@@ -239,6 +239,57 @@ ok("附加：HTML 含中文 lang 与 UTF-8 声明",
    '<html lang="zh-CN"' in HTML and 'charset="utf-8"' in HTML)
 ok("附加：非 ASCII 未转义成实体（中文可读）", "历史统计与总结报告" in HTML)
 
+# ── ⑩ 阶段 7 批 2：可比组分组必须计入工程归属（§8.7 第 6 项）──
+# 这条断言是变异测试逼出来的：现有夹具数据全属同一工程，把 GROUP BY 里的
+# profile 删掉**一个测试都不会红**——分组列少写一个而样本恰好同值时行为完全
+# 等价。这种"改了也不报错"的判据就是假保护，必须显式造跨工程样本才测得到。
+# 为什么跨工程不能并组：两个工程可以有同名机制编号，协议与环境字段也可能
+# 恰好相同，但那不是同一处境下的复现；并到一组算"判定一致"，等于拿 A 工程
+# 的稳定冒充 B 工程的稳定。
+with tempfile.TemporaryDirectory() as t10:
+    db10 = Path(t10) / "g.db"
+
+    def _vc(pairs):
+        """写入 (run_id, profile) 若干轮（其余字段刻意全同），取第 6 项。"""
+        c = A.connect(db10)
+        c.execute("DELETE FROM runs")
+        c.executemany(
+            "INSERT INTO runs(run_id,kind,fixture,profile,verdict,"
+            " protocol_fingerprint,env_fingerprint) VALUES(?,?,?,?,?,?,?)",
+            [(rid, "patrol", "F-CPU-01", pf, "resolved", "fp-same", "env-same")
+             for rid, pf in pairs])
+        c.commit()
+        c.close()
+        # compute 返回 {"items": {...}, "status": ...}，第 6 项在 items 里
+        return CL.compute(db10)["items"]["cross_run_verdict_consistency"]
+
+    g_same = _vc([("a1", "gameA"), ("a2", "gameA")])
+    ok("⑩同工程两轮 ⇒ 1 个可比组（基准）", g_same["n"] == 1, str(g_same["n"]))
+    g_part = _vc([("a1", "gameA"), ("a2", "gameA"), ("b1", "gameB")])
+    ok("⑩另一工程只 1 轮 ⇒ 仍 1 组（单轮无'一致'可言，不跨工程凑数）",
+       g_part["n"] == 1, str(g_part["n"]))
+    g_two = _vc([("a1", "gameA"), ("a2", "gameA"),
+                 ("b1", "gameB"), ("b2", "gameB")])
+    ok("⑩两工程各两轮 ⇒ 2 个可比组（分组确实计入工程归属）",
+       g_two["n"] == 2,
+       f"n={g_two['n']}  ← GROUP BY 少写 profile 时会并成 1 组")
+    ok("⑩一致率按组取比例，跨工程两组判定全同 ⇒ 1.0",
+       g_two["value"] == 1.0 and g_two["ok"] is True,
+       json.dumps(g_two, ensure_ascii=False)[:120])
+    ok("⑩口径文案声明含工程维度（§7.3 要求给出口径不只给数）",
+       "同工程" in g_two["why"], g_two["why"][:70])
+    # 反向：某工程组内判定分歧时，一致率必须掉下来（分组不是只做加法）
+    _vc([("a1", "gameA"), ("a2", "gameA"),
+         ("b1", "gameB"), ("b2", "gameB")])
+    c = A.connect(db10)
+    c.execute("UPDATE runs SET verdict='failed' WHERE run_id='b2'")
+    c.commit()
+    c.close()
+    g_split = CL.compute(db10)["items"]["cross_run_verdict_consistency"]
+    ok("⑩某工程组内判定分歧 ⇒ 一致率降到 0.5（组内才谈一致）",
+       g_split["n"] == 2 and abs(g_split["value"] - 0.5) < 1e-9,
+       json.dumps(g_split, ensure_ascii=False)[:120])
+
 print(f"\nM7 报告层测试：{len(PASS)} 通过 / {len(FAIL)} 失败")
 for f in FAIL:
     print("  ✗", f)

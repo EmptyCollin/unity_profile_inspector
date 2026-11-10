@@ -331,7 +331,13 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 闭包变量在函数内赋值会整体变成局部变量（条件里先读会
         # UnboundLocalError）——批准文本一律走局部 note，不回写外层。
         note = approval_note or ""
-        fp = "warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,replay=none-v0"
+        # 协议指纹串带 profile 归属（阶段 7 批 2）：它落进 snapshot / state.json，
+        # 是"这次 attempt 在哪个工程上做"的自描述。⚠️ 不作为 run 内对比闸——
+        # 改前后同属一次进程、同一个档案，那种对比由 verify.assert_comparable
+        # 查仪器状态；跨工程的真正硬闸在标定侧（m1_detect 的 G7 比较含
+        # profile_id），标定只能来自它自己标出来的工程。
+        fp = ("warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,"
+              f"replay=none-v0,profile={_prof().profile_id}")
         stamp = time.strftime("%H%M%S")
         proj, scene = _ctx(st)
         # root 一律取 profile.git_root：diff 的 file、快照脏区、apply 落盘

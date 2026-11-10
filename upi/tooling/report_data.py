@@ -140,7 +140,13 @@ def bars_svg(rows: list[tuple[str, float, Optional[float]]], *, w=760, bh=22,
 # ─────────────────────────── 数据装配 ───────────────────────────
 
 def gather(db: Path | str | None = None) -> dict:
-    c = AG.connect_ro(db or AG.DB)
+    # 只读连接统一由 aggregate._with_ro 开关：异常路径也必须释放，否则
+    # Windows 上未关句柄把 stats.db 锁到进程退出——实测过后果是统计报错
+    # 伪装成"文件删不掉"，第二个故障把第一个的现场一起毁掉。
+    return AG._with_ro(db or AG.DB, lambda c: _gather_q(c, db))
+
+
+def _gather_q(c, db: Path | str | None) -> dict:
     # ⚠️ kind='interaction'（守护命令 span 目录 daemon_cmdtrace）必须从
     #   报告的一切"轮次/阶段/事故/版本"轴里排除：它是**人机交互留痕**，
     #   G13 要求它进统计（有 span 就有据），但它不是判定轮次——
@@ -230,7 +236,6 @@ def gather(db: Path | str | None = None) -> dict:
                               "asset_restored": fr.get("asset_manifest_restored"),
                               "scene_restored": fr.get("scene_restored"),
                               "出口兜底": True})
-    c.close()
     versions["weights"] = weights
     return {"runs": runs, "guards": guards, "unevaluated": unev, "stages": stages,
             "incidents": incidents, "tools": tools, "conflicts": conflicts,

@@ -22,7 +22,11 @@ from upi.core.memory_guard import FRESH_POST_GC_METRICS, GC_UNRESPONSIVE_KNOWN
 
 
 def build(db: Path | str | None = None, runs_root: Path | None = None) -> dict:
-    c = AG.connect_ro(db or AG.DB)
+    # 只读连接统一由 aggregate._with_ro 开关（异常路径也释放，同 gather）
+    return AG._with_ro(db or AG.DB, lambda c: _build_q(c, db, runs_root))
+
+
+def _build_q(c, db: Path | str | None, runs_root: Path | None) -> dict:
     # 缺省每次调用现取 AG.RUNS（而非模块级快照），便于测试整体隔离
     runs = runs_root or AG.RUNS
 
@@ -119,7 +123,6 @@ def build(db: Path | str | None = None, runs_root: Path | None = None) -> dict:
     items = [item1, item2, item3, item4]
     # 与检出率同屏（G20 的字面要求）：清单和检出率一起返回，报告层不得拆分渲染
     rp = AG._recall_pairs(db or AG.DB)
-    c.close()
     return {"items": items,
             "undetectable": True,
             "n_blocked": sum(1 for i in items if i["state"] != "unlocked"),

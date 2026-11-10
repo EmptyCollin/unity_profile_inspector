@@ -21,8 +21,14 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
+
+# 归属判据（全仓唯一一份）：产物没写 profile 时按它归内置档案。
+# 放模块顶部而不是在函数里局部 import——ingest_run 与 _migrate 都要用，
+# 只在其中一个里导入，另一个就会 NameError（本轮实测撞过）。
+from upi.config.project_profile import owner_profile_id
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -36,6 +42,8 @@ CREATE TABLE IF NOT EXISTS runs(
   run_id TEXT PRIMARY KEY,
   kind TEXT,                     -- patrol | m4 | m1detect | m3_rehearsal | ...
   fixture TEXT,
+  profile TEXT,                  -- 本轮所属工程档案（阶段 7 批 2）；跨工程同名
+                                 -- 机制不算同一可比上下文，见 §8.7 第 6 项分组
   started_at TEXT, ended_at TEXT,
   wallclock_s REAL, tokens INTEGER,
   route TEXT, verdict TEXT, error TEXT, attempts INTEGER,
@@ -90,8 +98,15 @@ CREATE TABLE IF NOT EXISTS unevaluated(
 
 # 缓存库结构演进：本库是 jsonl/产物的**派生缓存**（DESIGN §7.1），
 # 一旦列语义变了，直接丢弃整库重灌，绝不做"猜旧值填新列"的迁移。
+# ⚠️ 下面 profile 这条是**加列 + 按事实归属回填**，不属于被禁止的那类：
+#   禁止的是"旧行没有这个信息、拿个默认值凑一个数出来"（那等于造数据，
+#   违反 I1）；而"profile 列落地前全仓只有内置工程采过数据"是事实判定，
+#   走的是与检测链同一条 owner_profile_id 判据，不引入任何猜测值。
 _MIGRATION = [("runs", "time_source", "TEXT"),
-              ("runs", "env_fingerprint", "TEXT")]
+              ("runs", "env_fingerprint", "TEXT"),
+              # 阶段 7 批 2。这条必须在 _migrate 的回填语句之前生效：
+              # 老库靠它把列 ALTER 出来，顺序反了就报 "no column named profile"。
+              ("runs", "profile", "TEXT")]
 # 判据只能是**旧形态独有的列**是否存在：新表/新列存在是正常状态，
 # 拿它当重建信号会让每次 connect 都整库重建（自己造的坑，实测踩过）。
 _OBSOLETE_COLS = [("runs", "blindspots"),      # 旧：采集层盲区，语义已换
@@ -115,6 +130,17 @@ def _migrate(c: sqlite3.Connection) -> None:
         have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
         if col not in have:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+    # 补列之后必须回填，不能留给"下次重灌自然会写上"：runs 行是否重灌由
+    # ingest_fp 决定，产物没变的老轮次**永远不会**再被灌一次，那些行的
+    # profile 会一直是 NULL。§8.7 第 6 项按 profile 分组时 NULL 自成一类，
+    # 历史轮次就从可比组里静默消失——一致率算出来变成"样本不足"而不是
+    # "旧数据在"，结论方向可能没变但依据悄悄换了，是最难查的失真。
+    # 回填走 owner_profile_id({})：与检测链、特征库同一条归属判据，不在此
+    # 重写默认值。缓存库本身可丢弃（DESIGN §7.1），但"可丢弃"不等于
+    # "允许读出错的数"——重建之前它得是自洽的。
+    c.execute("UPDATE runs SET profile=? WHERE profile IS NULL",
+              (owner_profile_id({}),))
+    c.commit()
 
 
 def _fp_of(paths: list[Path]) -> str:
@@ -175,6 +201,49 @@ def connect_ro(db: Path | str = DB):
         c.executescript(SCHEMA)          # 只在内存建结构，不落盘
         return c
     return sqlite3.connect(f"file:{p.as_posix()}?mode=ro", uri=True)
+
+
+# runs 表"可比组"分组键的唯一来源（§8.7 第 6 项 / G7）。
+# 三件事必须同源，否则迟早漂移：
+#   · GROUP BY 用哪些列
+#   · SELECT 取哪一列算 verdicts（列顺序一变，下标就指错列——本轮在
+#     checklist 里真的因为加了一列而把环境指纹当成判定结果比）
+#   · 报告里给人看的口径文案（§7.3 要求"给口径不只给数"）
+GROUP_LABELS = {"profile": "工程", "fixture": "夹具",
+                "protocol_fingerprint": "协议", "env_fingerprint": "环境"}
+
+
+def runs_group_cols(c: sqlite3.Connection, prefix: str = "") -> list[str]:
+    """可比组的分组列（带可选表别名前缀），按当前库实际有的列返回。
+
+    列存在性判断**不能省**：connect_ro 是只读连接、不跑 _migrate，旧库没有
+    profile 列时写死列名会让整块统计崩在 "no such column: profile"——真实
+    路径是用户拿旧的 dashboard/stats.db 跑 `upi dev stats` 或出报告，
+    "只读但库是旧的"必须降级而不是抛错。
+    旧库里所有轮次都出自唯一存在过的内置工程，分组带不带 profile 结果等价
+    （事实判定，非猜测，见 project_profile.owner_profile_id）。
+    """
+    p = f"{prefix}." if prefix else ""
+    cols = {r[1] for r in c.execute("PRAGMA table_info(runs)")}
+    out = [f"{p}fixture", f"{p}protocol_fingerprint", f"{p}env_fingerprint"]
+    if "profile" in cols:
+        out.insert(0, f"{p}profile")          # 工程排在最前，口径读起来自然
+    return out
+
+
+def runs_group_sql(c: sqlite3.Connection, prefix: str = "") -> str:
+    """GROUP BY 用的逗号串（与 runs_group_cols 同一来源）。"""
+    return ", ".join(runs_group_cols(c, prefix))
+
+
+def runs_group_label(c: sqlite3.Connection, prefix: str = "") -> str:
+    """给报告看的口径文案，如"同工程×同夹具×同协议×同环境"。
+
+    从分组列反推，不另写一份中文：写第二份就会出现"实际按三列分组、
+    说明写四列"这种互相打脸，而读者无从判断该信哪个。
+    """
+    return "×".join("同" + GROUP_LABELS[col.split(".")[-1]]
+                    for col in runs_group_cols(c, prefix))
 
 
 def _run_time(d: Path, spans: list[dict]) -> tuple[Optional[str], str]:
@@ -271,13 +340,22 @@ def ingest_run(c: sqlite3.Connection, d: Path) -> str:
     ended, tsrc = _run_time(d, spans)
     env_fp = next((s.get("environment_fingerprint") for s in spans
                    if s.get("environment_fingerprint")), None)
+    # 归属取数有优先级，顺序错了会把轮次标到别的工程上：
+    #   ① state.json 的 profile_id —— 开轮那一刻写下的，最权威；
+    #   ② detection.json 的 protocol_fingerprint.profile_id —— 数据侧声明"我是
+    #      哪个工程采的"（m1detect 这类不产 state.json 的轮次走这条）；
+    #   ③ 都没有 ⇒ 产物写于 profile 落地之前，按 owner_profile_id({}) 归内置。
+    # 绝不取"当前运行档案"：重灌是离线动作，那时档案可能已切到别的工程。
+    prof = (st.get("profile_id")
+            or (det.get("protocol_fingerprint") or {}).get("profile_id")
+            or owner_profile_id({}))
     c.execute("""INSERT OR REPLACE INTO runs(
-                   run_id, kind, fixture, started_at, ended_at,
+                   run_id, kind, fixture, profile, started_at, ended_at,
                    wallclock_s, tokens, route, verdict, error, attempts,
                    traced, findings, unevaluated_guards, protocol_fingerprint,
                    ingest_fp, time_source, env_fingerprint)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-              (run_id, kind, rep.get("fixture"), ended, ended,
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (run_id, kind, rep.get("fixture"), prof, ended, ended,
                wall, toks, rep.get("route"), v, str(rep.get("error"))[:200],
                rep.get("attempts"), traced, n_find, n_unev,
                (det.get("protocol_fingerprint") or {}).get("scene_guid"),
@@ -389,7 +467,28 @@ def rebuild(db: Path | str = DB, force: bool = False) -> dict:
 def meta_metrics(db: Path | str = DB) -> dict:
     """DESIGN §7.2 三类指标里"当前能算的"。算不出的显式返回 None 并注明缺什么，
     禁止用估算填充（I1）；G15 要求成对展示的，这里成对返回。"""
+    # lambda 透传 db：_meta_metrics 体内要按 db 算 recall_pairs，
+    # 上一版拆分时把 db 参数留在外面，变成 NameError（真 bug，非风格问题）。
+    return _with_ro(db, lambda c: _meta_metrics_q(c, db))
+
+
+def _with_ro(db, fn):
+    """借一个只读连接跑 fn，**异常路径也必须释放句柄**。
+
+    为什么不能只在末尾 c.close()：Windows 上未关的 sqlite 句柄会锁住 .db，
+    异常一抛就锁到进程退出——表现是"统计报错之后，整个 dashboard 目录删不掉、
+    重建也失败"，第二个故障会把第一个的现场一起毁掉（实测就撞在测试的
+    TemporaryDirectory 清理上：断言本该报红，结果被 PermissionError 盖住，
+    排查的人只看到文件锁、看不到真正那条 SQL 错）。
+    """
     c = connect_ro(db)
+    try:
+        return fn(c)
+    finally:
+        c.close()
+
+
+def _meta_metrics_q(c: sqlite3.Connection, db: Path | str) -> dict:
     q = lambda sql, *a: c.execute(sql, a).fetchall()
 
     # ⚠️ 轮次计数必须排除 kind='interaction'（守护命令 span 目录）。
@@ -443,18 +542,27 @@ def meta_metrics(db: Path | str = DB) -> dict:
     # 文档腐坏的典型形态就是数字不随实况变。一律改为现算。
     roe_tot = roe_null = 0
     if Path(KB_DB).exists():
-        try:
-            k = sqlite3.connect(f"file:{Path(KB_DB).as_posix()}?mode=ro", uri=True)
-            roe_tot, roe_null = k.execute(
-                "SELECT COUNT(*), SUM(CASE WHEN realized_over_expected IS NULL "
-                "THEN 1 ELSE 0 END) FROM outcomes").fetchone()
-            k.close()
-        except sqlite3.OperationalError:
-            pass
-    # 可比组：同夹具 × 同协议 × 同环境且有判定，组内 ≥2 轮才谈得上"一致"
-    n_cmp_groups = len(q("""SELECT 1 FROM runs WHERE verdict IS NOT NULL
+        # 特征库是**另一个库**，不能复用传入的 stats.db 连接；句柄必须走
+        # closing：原来 k.close() 写在 try 里面，SQL 一抛错就跳过它，未关的
+        # 只读句柄在 Windows 上把 patterns.db 锁到进程退出——"统计报错"于是
+        # 伪装成"文件删不掉"，排查的人只看得到文件锁，看不到真正那条 SQL 错。
+        with closing(sqlite3.connect(
+                f"file:{Path(KB_DB).as_posix()}?mode=ro", uri=True)) as k:
+            try:
+                roe_tot, roe_null = k.execute(
+                    "SELECT COUNT(*), SUM(CASE WHEN realized_over_expected IS NULL "
+                    "THEN 1 ELSE 0 END) FROM outcomes").fetchone()
+            except sqlite3.OperationalError:
+                pass        # 老库没这列：按"无观测"处理，不冒充 0（I1）
+    # 可比组：同工程 × 同夹具 × 同协议 × 同环境且有判定，组内 ≥2 轮才谈得上"一致"
+    # profile 必须在分组里（阶段 7 批 2）：两个工程可以有同名机制编号
+    # （如都叫 F-CPU-01），协议与环境字段也可能恰好相同，但那不是同一处境下
+    # 的复现，把它们并到一组算"判定一致"，等于拿 A 工程的稳定冒充 B 工程的
+    # 稳定（§8.7 第 6 项的"可比"二字就没了）。
+    grp = runs_group_sql(c)      # 分组键与口径文案同源，且兼容无 profile 列的旧库
+    n_cmp_groups = len(q(f"""SELECT 1 FROM runs WHERE verdict IS NOT NULL
                             AND protocol_fingerprint IS NOT NULL
-                            GROUP BY fixture, protocol_fingerprint, env_fingerprint
+                            GROUP BY {grp}
                             HAVING COUNT(*) >= 2"""))
     missing = {
         "ece": f"需校准曲线：置信度分箱后与结局对齐，可配对观测仅 {n_verdict} 个"
@@ -465,13 +573,12 @@ def meta_metrics(db: Path | str = DB) -> dict:
         "potential_ratification_rate": "M3.5 未建，无 potential 可追认",
         "shadow_agreement": "影子模式未启用",
         "cross_run_verdict_consistency": (
-            f"同夹具×同协议×同环境且 ≥2 轮判定的可比组共 {n_cmp_groups} 组"
+            f"{runs_group_label(c)}且 ≥2 轮判定的可比组共 {n_cmp_groups} 组"
             + ("（协议指纹缺失的轮次不计，按 G7 不拿夹具同名冒充可比）"
                if n_cmp_groups == 0 else "")),
         "holdout_gap": "分组已可用（按 fixture_spec.holdout，见 checklist.split_of "
                        "三态建模）；缺的是每侧的置信度×结局分箱样本",
     }
-    c.close()
     return {"cost": cost, "quality": quality, "stability": stability,
             "missing": missing,
             "n_note": "n 全部随值返回；n<30 的报告禁止画折线，只画点（§7.3）"}
@@ -489,11 +596,16 @@ def _fp_selfcheck() -> dict:
 
 
 def _recall_pairs(db: Path | str = DB) -> dict:
+    return _with_ro(db, _recall_pairs_q)
+
+
+def _recall_pairs_q(c: sqlite3.Connection) -> dict:
+    # 连接一律由 _with_ro 传入并负责关闭。这里曾多出一行 c = connect_ro(db)：
+    # 它把传入的连接换成一把永不关闭的新连接，_with_ro 关的成了空锁。
     """检出率与 FP 率成对（G15）：按 detector 版本分面。
     ⚠️ 早期（2026-11-07）detection.json 的 results 只有 verdict/why 两键、
     无 detector 字段（实测 2 行），把它们混进分母会算出"检出率 0"的假结论。
     正确做法是排除并显式报排除数——数据缺口要可见，不能靠合并掩盖（I1）。"""
-    c = connect_ro(db)
     rows = c.execute("""
       SELECT detector, detector_version,
              COUNT(*) n_obs,
@@ -503,7 +615,6 @@ def _recall_pairs(db: Path | str = DB) -> dict:
       GROUP BY detector, detector_version ORDER BY detector""").fetchall()
     n_skipped = c.execute(
         "SELECT COUNT(*) FROM detections WHERE detector IS NULL").fetchone()[0]
-    c.close()
     return {
         "pairs": [{"detector": det, "version": ver, "n_obs": n, "n_runs": nr,
                    "n_detected": n_det,
@@ -517,15 +628,20 @@ def _success_rate(kb: Path | str | None = None) -> Optional[dict]:
     kb = Path(KB_DB if kb is None else kb)
     if not kb.exists():
         return None
-    k = sqlite3.connect(str(kb))
-    try:
-        rows = k.execute("SELECT state, COUNT(*) FROM outcomes GROUP BY state").fetchall()
-    except sqlite3.OperationalError:
-        k.close()
-        return None
-    n_eff = k.execute(
-        "SELECT COUNT(DISTINCT fixture||'|'||quality_tier) FROM outcomes").fetchone()[0]
-    k.close()
+    # 两条 SQL 都要在保护范围内：原来只有第一条在 try 里、k.close() 在末尾，
+    # 第二条算 n_eff 时若老库缺 profile 列抛 OperationalError，句柄直接漏出去。
+    with closing(sqlite3.connect(str(kb))) as k:
+        try:
+            rows = k.execute(
+                "SELECT state, COUNT(*) FROM outcomes GROUP BY state").fetchall()
+        except sqlite3.OperationalError:
+            return None
+        # 上下文键与 KnowledgeStore.n_effective、体检表第 4 项同源（§8.2）：
+        # 三处各写一遍 SQL 就会漂移，漂移的表现是"提案说证据够、报告说不够"。
+        from upi.core.knowledge import context_key_expr
+        n_eff = k.execute(
+            f"SELECT COUNT(DISTINCT {context_key_expr(k)}) FROM outcomes"
+        ).fetchone()[0]
     c = dict(rows)
     res, fail = c.get("resolved", 0), c.get("failed", 0) + c.get("rolled_back", 0)
     den = res + fail
@@ -539,7 +655,10 @@ def _success_rate(kb: Path | str | None = None) -> Optional[dict]:
 
 def summary(db: Path | str = DB) -> dict:
     """给控制台一帧用的紧凑摘要。"""
-    c = connect_ro(db)
+    return _with_ro(db, lambda c: _summary_q(c, db))
+
+
+def _summary_q(c: sqlite3.Connection, db: Path | str) -> dict:
     # recent_runs 与 meta 的轮次轴同口径：都不列 kind='interaction'。
     # 两处一个排一个不排，控制台会出现"轮次数 5、列表里 6 行"这种自相矛盾。
     rows = c.execute("""SELECT run_id, kind, traced, wallclock_s, tokens,
@@ -548,7 +667,6 @@ def summary(db: Path | str = DB) -> dict:
                         ORDER BY run_id DESC LIMIT 60""").fetchall()
     stage = c.execute("""SELECT stage, SUM(n), AVG(p50_ms), AVG(p95_ms), SUM(tokens)
                          FROM stage_stats GROUP BY stage""").fetchall()
-    c.close()
     return {"recent_runs": rows, "stages": stage, "meta": meta_metrics(db)}
 
 

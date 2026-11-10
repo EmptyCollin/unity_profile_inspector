@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS patterns(
 CREATE TABLE IF NOT EXISTS outcomes(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   issue_id TEXT, pattern_id TEXT NOT NULL, run_id TEXT,
-  fixture TEXT, quality_tier TEXT,            -- n_effective 的上下文键（§8.2）
+  fixture TEXT, quality_tier TEXT, profile TEXT,   -- n_effective 的上下文键（§8.2）
   state TEXT NOT NULL,                        -- resolved|failed|needs_human|rolled_back
   metric_delta REAL, guards_json TEXT,
   realized_over_expected REAL, review_rounds INTEGER,
@@ -78,11 +78,63 @@ _CHECKLIST = {
 }
 
 
+# §8.2 的"独立场景"上下文键：**工程档案 × 机制 × 档位**。
+# 全仓库只许有这一份定义——n_effective（本文件）、聚合层质量轴
+# （aggregate.meta_metrics）、体检表第 4 项（checklist）三处都要算同一个数，
+# 各写一遍 SQL 就会漂移；漂移的表现是"提案说证据够、报告说证据不够"，
+# 而看的人不知道该信哪一个（本轮在待批队列判据上已经撞过一次）。
+#
+# 阶段 7 批 2 把 profile 加进键里：两个工程各修一次同一机制，旧口径会算成
+# "1 个独立场景"，而 §8.2 要的是"这个动作在几种不同处境下有效"——跨工程
+# 复用同一条经验正是它要数进去的那份独立性。
+# ⚠️ 用 COALESCE 而不是裸拼接：SQLite 里 || 遇 NULL 结果是 NULL，历史行没填
+# profile 时会全部折叠成同一个 NULL，n_effective 静默归零。
+N_EFF_CONTEXT_KEY = "COALESCE(profile,'') || '|' || fixture || '|' || quality_tier"
+
+
+def context_key_expr(db: sqlite3.Connection) -> str:
+    """按当前库**有没有 profile 列**返回可用的 §8.2 上下文键表达式。
+
+    为什么读侧不顺手 ALTER 补列：aggregate / checklist 是**出数**入口，不该在
+    统计过程中写特征库（aggregate 里还有一路是 mode=ro 只读连接，ALTER 会直接
+    报错）。而"列还没有"这件事本身就说明这批样本全部写于 profile 落地之前，
+    按归属判据它们同属内置档案——此时候选键里加不加 profile 结果等价，退回
+    旧键既正确又不需要动库。列一旦被 KnowledgeStore 建出来，这里自动切到含
+    工程档案的新键。
+    """
+    cols = {r[1] for r in db.execute("PRAGMA table_info(outcomes)")}
+    return N_EFF_CONTEXT_KEY if "profile" in cols else "fixture || '|' || quality_tier"
+
+
 class KnowledgeStore:
     def __init__(self, db_path: str | Path):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(db_path))
         self.db.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """补 outcomes.profile 列（阶段 7 批 2），并把历史行回填成内置档案。
+
+        两个坑都在这一步：
+         · `CREATE TABLE IF NOT EXISTS` 对**已存在**的表不会加列。不 ALTER 的话
+           老库一写入就 "no column named profile"，而临时目录新建库永远测不到
+           ——只有真实仓库里那份 patterns.db 会炸，正好是最不该炸的地方。
+         · 口径是 `COUNT(DISTINCT fixture||'|'||quality_tier||'|'||profile)`，
+           而 SQLite 里字符串拼接遇到 NULL 结果就是 NULL。历史行若留 NULL，
+           所有老样本会被折叠成同一个 NULL 组，n_effective 掉到接近 0，
+           升维提案集体变成"证据不足"。这种失真不报错，只让结论悄悄反转，
+           所以必须显式回填，不能靠 DEFAULT 蒙混（DEFAULT 只对 INSERT 生效）。
+        回填走 owner_profile_id({})：与检测链、聚合层同一条归属判据，
+        不在这里另写一份 "upi-fixture" 字面量（两处规则迟早漂移）。
+        """
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(outcomes)")}
+        if "profile" not in cols:
+            self.db.execute("ALTER TABLE outcomes ADD COLUMN profile TEXT")
+        from upi.config.project_profile import owner_profile_id
+        self.db.execute("UPDATE outcomes SET profile=? WHERE profile IS NULL",
+                        (owner_profile_id({}),))
+        self.db.commit()
 
     def close(self):
         self.db.close()
@@ -114,13 +166,22 @@ class KnowledgeStore:
                        metric_delta: float | None = None,
                        realized_over_expected: float | None = None,
                        review_rounds: int | None = None,
+                       profile: str | None = None,
                        introduced_new_issue_rolled_back: bool = False) -> None:
-        """attempt 结果入账。引入新问题被回滚 → 立即降 semi + 复盘标记（硬降级，§1.7）。"""
+        """attempt 结果入账。引入新问题被回滚 → 立即降 semi + 复盘标记（硬降级，§1.7）。
+
+        profile 缺省取**调用时**的当前档案，不写成 `= DEFAULT_PROFILE_ID`：
+        默认参数在 def 时求值一次，那样切了档案再记账仍会写 upi-fixture
+        （同一个坑本轮在配置面已撞过一次）。
+        """
+        if profile is None:
+            from upi.config.project_profile import active_profile
+            profile = active_profile().profile_id
         self.db.execute(
             "INSERT INTO outcomes(issue_id, pattern_id, run_id, fixture, quality_tier,"
-            " state, metric_delta, guards_json, realized_over_expected, review_rounds,"
-            " created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (None, pattern_id, run_id, fixture, quality_tier, state,
+            " profile, state, metric_delta, guards_json, realized_over_expected,"
+            " review_rounds, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (None, pattern_id, run_id, fixture, quality_tier, profile, state,
              metric_delta, None, realized_over_expected, review_rounds, time.time()))
         if introduced_new_issue_rolled_back:
             self.db.execute(
@@ -152,9 +213,12 @@ class KnowledgeStore:
     # ---------- 口径 ----------
 
     def n_effective(self, pattern_id: str) -> int:
-        """独立场景 × 档位的去重计数（§8.2）。同一上下文重复运行只算 1。"""
+        """独立场景 × 档位的去重计数（§8.2）。同一上下文重复运行只算 1。
+
+        上下文键用模块级 N_EFF_CONTEXT_KEY（含工程档案），不在这里重写拼接。
+        """
         cur = self.db.execute(
-            "SELECT COUNT(DISTINCT fixture || '|' || quality_tier) FROM outcomes"
+            f"SELECT COUNT(DISTINCT {N_EFF_CONTEXT_KEY}) FROM outcomes"
             " WHERE pattern_id=?", (pattern_id,))
         return int(cur.fetchone()[0])
 

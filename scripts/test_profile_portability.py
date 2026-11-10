@@ -346,12 +346,44 @@ def main() -> int:
        and back.scene_of("F-CPU-01").name == "Scene_F-CPU-01.unity",
        back.profile_id)
 
-    # ── ⑥ 诚实边界：profile_id 尚未进协议指纹（批 2）──
+    # ── ⑥ 阶段 7 批 2：profile 归属进了协议指纹与 G7 比较闸 ──
+    # 保护的场景是"其余协议字段全对得上、但数据来自 A 工程而标定来自 B 工程"：
+    # 噪声带量的是另一个工程的抖动分布，拿它判本工程 = 无意义比较。
+    # 中间那层必须调**产品的比对函数**——测试自己复刻一遍推导等于没测
+    # （复刻的那份不是产品，产品改了清单测试照样绿）。
     from upi.core.models import Fingerprint
-    fields = set(Fingerprint.model_fields)
-    ok("⚠ 已知边界：profile_id 未进指纹（批 2 待做，测试如实记录）",
-       "profile_id" not in fields,
-       "若已并入请同步更新本断言与文档")
+
+    ok("profile_id 已进协议指纹字段", "profile_id" in Fingerprint.model_fields)
+    import scripts.m1_detect as MD
+    ok("G7 比较清单含 profile_id（不是只加了字段没参与比对）",
+       "profile_id" in MD.G7_COMPARE_FIELDS, str(MD.G7_COMPARE_FIELDS))
+
+    _base = dict(scene_guid="sha256:same", replay_script_hash="none-v0",
+                 quality_tier="urp-balanced", warmup_samples=8, window_samples=20,
+                 n_samples=4, poll_rate=1.0, data_tier="A", editor_mode="gui",
+                 environment_fingerprint="env-equal", scale_factor=1.0)
+    ok("同一工程的两份标定判为可比",
+       MD.g7_mismatches(Fingerprint(**_base, profile_id="A"),
+                        Fingerprint(**_base, profile_id="A")) == [])
+    _m = MD.g7_mismatches(Fingerprint(**_base, profile_id="A"),
+                          Fingerprint(**_base, profile_id="B"))
+    ok("跨工程套用标定被拦（且报出的就是归属这一项）", _m == ["profile_id"], str(_m))
+
+    # 历史产物兼容：批 2 之前仓库里所有标定都没有 profile 键，只可能来自内置
+    # 夹具工程，所以"缺键 ⇒ 内置"是事实判定而非猜默认（I1）。这条一旦写歪，
+    # 现成的 baselines/ 会被判成"归属未知"，G7 直接把检测全拦停。
+    ok("无 profile 键的历史标定归内置档案（历史 38 轮次不作废）",
+       PP.owner_profile_id({}) == PP.DEFAULT_PROFILE_ID
+       and PP.owner_profile_id({"profile": "ext-game"}) == "ext-game",
+       "缺键或显式值判错")
+
+    # 环境指纹的标签位：内置档案 id 与工程目录名同值 ⇒ 历史 env_fingerprint
+    # 逐字节不变（若这里变了，跨 profile 改造会把旧数据全判成环境漂移）。
+    from upi.tooling.trace import environment_fingerprint as EF
+    _ip = PP.load_profile(PP.DEFAULT_PROFILE_ID)
+    ok("内置档案的 env 指纹与按目录名计算逐字节相同",
+       EF(str(_ip.abs_project), profile_id=_ip.profile_id)
+       == EF(str(_ip.abs_project)), "标签改动污染了历史指纹")
 
     # projects/ 里不许留下临时档案：③ 与体检表那处都用 try/finally 删了，
     # 但这类"临时文件残留"不会让任何断言变红，只会让仓库多出一个未跟踪文件
