@@ -147,7 +147,9 @@ def main() -> int:
             print(f"   {k:26s} n={s['n']:4d} median={s['median']:>12} noise={s['noise_band']:>10} p95={s['p95']:>12}")
 
         fp = environment_fingerprint(str(PROJECT))
-        report = {"window_frames": WINDOW, "target_fps": TARGET_FPS, "collector": "sampler_v3 (A″ 备选通路，实测渲染读数为 0)",
+        report = {"window_frames": WINDOW, "target_fps": TARGET_FPS,
+                  "collector": "sampler_v3.1 (A2 逐帧注入；v3 短名静默零已修，"
+                               "exp5/exp6 与轮询比值 1.00 实证，见 #27)",
                   "stats": stats, "sample_head": raw,
                   "editor_mode": "gui", "play_mode_during_sample": data["play"],
                   "skipped_counters": data.get("skipped", []),

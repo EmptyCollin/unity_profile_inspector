@@ -1,18 +1,38 @@
-// probe/sampler_v3.cs —— 常驻采样器 v3（M0' 验收版）
-// 实测决定的四条实现规则（DESIGN §2.2.1）：
+// probe/sampler_v3.cs —— 常驻采样器 v3.1（#27 计数器名修正版）
+// 实测决定的实现规则（DESIGN §2.2.1）：
 //   1. 回调跨 eval 存活，静态字段不跨存活 ⇒ 幂等不能用静态 bool，也不能用 SessionState
 //      （SessionState 跨域重载存活，而回调注册不跨域重载存活 ⇒ 会留下"标记已装、实际没人采样"的死状态）
 //      ⇒ 改用**心跳文件新鲜度**作为"是否有采样器活着"的唯一可观测判据
 //   2. 先建全部计数器、后注册回调 ⇒ 中途异常不会泄漏幽灵回调
-//   3. 每个计数器独立 try/catch ⇒ 名称不存在只跳过该项并记录
-//   4. 按 Time.frameCount 门控 ⇒ update 频率(~2100/s)不是帧率
+//   3. 按 Time.frameCount 门控 ⇒ update 频率(~2100/s)不是帧率
+// v3.1 变更（2026-11-11，#27，全部有实测证据 runs/_probe/counter_cat_full.txt 5298 行 +
+// exp5 两侧对表 runs/_probe/exp5_probe.jsonl/exp5_poll.jsonl）：
+//   A. 渲染计数真名带 " Count" 后缀（"Draw Calls"/"Batches" 等短名**不在句柄表里**）。
+//      `new ProfilerRecorder(类目, 短名)` 不抛异常、构造"成功"、LastValue 恒 0 ⇒
+//      静默假数据（v3 的 7 项里渲染 4 项全中此招，skipped=[] 却读数全 0）。
+//   B. 同名句柄有 13 个（UI Toolkit 类目先注册遮蔽）⇒ 必须 **名字==目标 且
+//      类目==Render** 双条件遍历 GetAvailable 定位（exp5 R3 写法）。
+//   C. 句柄表证实**不存在**的目标，v3 在装但永远读 0，本版移除并记入盲区：
+//      "Mono Used Memory"（全表无任何 Mono*Used* 句柄 ⇒ 该口径唯一源=轮询
+//      get_performance 的 memory.monoUsedBytes）；"Update Time"（Scripts 类目
+//      只有逐方法采样句柄，无聚合 ⇒ 帧时间口径走 A4/frameTiming）。
+//      ⚠️ 这直接改写 G16/G20 的覆盖面表述，条文改判在 #29 落文。
+//   D. **汇总 "Batches Count" 在 Render 类目不存在**，只有三个分项句柄
+//      （Dynamic/Instanced/Static Batches Count）⇒ 注入侧 batches 与轮询侧
+//      render.batches 不是同名口径；分项已装，但非零对表需真实合批场景
+//      （夹具 SRP 默认不合批 ⇒ 分项恒 0 属合法值，等价性验证记未决，G20 续列）。
+//   E. 定位不到 = **拒绝安装并如实报 skipped**（fail-loud），不再"装了但读 0"。
+//   F. 统一 StartImmediately 构造（UUM-127894 绕法，exp5 实测 Default 构造有
+//      2/60 冷启动零值帧）。
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using Unity.Profiling;
+using Unity.Profiling.LowLevel.Unsafe;
 
 UpiSamplerV3.Main();
 return UpiSamplerV3.LastLine;
@@ -26,31 +46,36 @@ public static class UpiSamplerV3
     static readonly Dictionary<string, ProfilerRecorder> Rec = new Dictionary<string, ProfilerRecorder>();
     static readonly Dictionary<string, List<long>> Samples = new Dictionary<string, List<long>>();
     static readonly List<string> Skipped = new List<string>();
+    static readonly Dictionary<string, int> Shadow = new Dictionary<string, int>();  // 同名他类目遮蔽计数（诊断用）
 
+    // {类目, 句柄注册真名, series 键} —— 全部经 counter_cat_full.txt 逐行核实存在。
+    // 时间类 LastValue 单位 ns（消费方换算 ms 再与 frameTiming 对表）。
     static readonly string[][] Targets = {
-        new[] { "Render", "Draw Calls" }, new[] { "Render", "SetPass Calls" },
-        new[] { "Render", "Batches" },   new[] { "Render", "Frame Time" },
-        new[] { "Memory", "Total Used Memory" }, new[] { "Memory", "Mono Used Memory" },
-        new[] { "Scripts", "Update Time" },
+        new[] { "Render", "Draw Calls Count",           "Render/DrawCalls" },
+        new[] { "Render", "SetPass Calls Count",        "Render/SetPassCalls" },
+        new[] { "Render", "Triangles Count",            "Render/Triangles" },
+        new[] { "Render", "Vertices Count",             "Render/Vertices" },
+        new[] { "Render", "Indices Count",              "Render/Indices" },
+        new[] { "Render", "Dynamic Batches Count",      "Render/DynBatches" },
+        new[] { "Render", "Instanced Batches Count",    "Render/InstBatches" },
+        new[] { "Render", "Static Batches Count",       "Render/StaticBatches" },
+        new[] { "Render", "CPU Main Thread Frame Time", "Render/CpuMainThreadFrameNs" },
+        new[] { "Render", "CPU Total Frame Time",       "Render/CpuTotalFrameNs" },
+        new[] { "Render", "GPU Frame Time",             "Render/GpuFrameNs" },
+        new[] { "Memory", "Total Used Memory",          "Memory/TotalUsedBytes" },
+        new[] { "Memory", "GC Allocated In Frame",      "Memory/GcAllocInFrameBytes" },
+    };
+
+    static readonly string[] WantNames = {
+        "Draw Calls Count", "SetPass Calls Count", "Triangles Count",
+        "Vertices Count", "Indices Count", "Dynamic Batches Count",
+        "Instanced Batches Count", "Static Batches Count",
+        "CPU Main Thread Frame Time", "CPU Total Frame Time", "GPU Frame Time",
+        "Total Used Memory", "GC Allocated In Frame",
     };
 
     static bool _recording, _subscribed;
     static int _windowLen = 300, _written, _lastFrame = -1;
-
-    static ProfilerCategory CatOf(string name)
-    {
-        // 实测：ProfilerCategory 是 struct，不能用 Enum.Parse；用已验证可编译的静态字段
-        switch (name)
-        {
-            case "Render": return ProfilerCategory.Render;
-            case "Memory": return ProfilerCategory.Memory;
-            case "Scripts": return ProfilerCategory.Scripts;
-            case "Loading": return ProfilerCategory.Loading;
-            case "Animation": return ProfilerCategory.Animation;
-            case "Physics": return ProfilerCategory.Physics;
-            default: throw new ArgumentException("未知类目: " + name);
-        }
-    }
 
     static bool Alive()
     {
@@ -70,12 +95,12 @@ public static class UpiSamplerV3
         if (!Alive())
         {
             int built = BuildRecorders();
-            if (built == 0) { LastLine = "install_failed skipped=[" + string.Join(",", Skipped) + "]"; return; }
+            if (built == 0) { LastLine = "install_failed skipped=[" + string.Join(",", Skipped.ToArray()) + "]"; return; }
             EditorApplication.update -= Tick;   // 清掉本程序集可能重复的注册
             EditorApplication.update += Tick;
             _subscribed = true;
             Beat();
-            LastLine = $"installed recorders={built}/{Targets.Length} skipped=[{string.Join(",", Skipped)}]";
+            LastLine = $"installed recorders={built}/{Targets.Length} skipped=[{string.Join(",", Skipped.ToArray())}]";
             return;
         }
         LastLine = $"alive play={Application.isPlaying} frame={Time.frameCount} recording={_recording} written={_written}";
@@ -83,19 +108,66 @@ public static class UpiSamplerV3
 
     static int BuildRecorders()
     {
-        Rec.Clear(); Samples.Clear(); Skipped.Clear(); _written = 0; _recording = false;
+        Rec.Clear(); Samples.Clear(); Skipped.Clear(); Shadow.Clear();
+        _written = 0; _recording = false;
+
+        // ① 全量句柄表按 (真名, 类目) 双条件定位（exp5 R3 已验证写法）
+        var located = new Dictionary<string, ProfilerRecorderHandle>();
+        var handles = new List<ProfilerRecorderHandle>();
+        ProfilerRecorderHandle.GetAvailable(handles);
+        var getDesc = typeof(ProfilerRecorderHandle).GetMethod("GetDescription",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        var dt = getDesc.ReturnType;
+        var nameProp = dt.GetProperty("Name",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var catField = dt.GetField("category",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var catNameProp = catField != null
+            ? catField.FieldType.GetProperty("Name",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            : null;
+
+        foreach (var h in handles)
+        {
+            object d; try { d = getDesc.Invoke(null, new object[] { h }); } catch { continue; }
+            string n; try { n = (string)nameProp.GetValue(d, null); } catch { continue; }
+            string cn = "?";
+            try { cn = (string)catNameProp.GetValue(catField.GetValue(d), null); } catch { }
+            foreach (var w in WantNames)
+            {
+                if (n != w) continue;
+                // 类目按目标表逐条比对：Total Used Memory/GC Allocated In Frame 属 Memory，
+                // 其余属 Render——用"该名字在某目标行里要求的类目"做唯一匹配。
+                foreach (var t in Targets)
+                    if (t[1] == w)
+                    {
+                        if (cn == t[0]) { if (!located.ContainsKey(w)) located[w] = h; }
+                        else { Shadow[w] = (Shadow.ContainsKey(w) ? Shadow[w] : 0) + 1; }
+                        break;
+                    }
+            }
+        }
+
+        // ② 定位到才装；定位不到记 skipped（fail-loud，绝不"装了读 0"）
         foreach (var t in Targets)
         {
-            string key = t[0] + "/" + t[1];
+            string key = t[2];
+            ProfilerRecorderHandle h;
+            if (!located.TryGetValue(t[1], out h)) { Skipped.Add(key + "(未注册)"); continue; }
             try
             {
-                var r = new ProfilerRecorder(CatOf(t[0]), t[1], 3000);
-                r.Start();
+                // StartImmediately：不经 Start()（UUM-127894 绕法，exp5 双构造对照）
+                var r = new ProfilerRecorder(h, 3000, ProfilerRecorderOptions.StartImmediately);
                 Rec[key] = r;
                 Samples[key] = new List<long>();
             }
-            catch (Exception) { Skipped.Add(key); }
+            catch (Exception) { Skipped.Add(key + "(构造失败)"); }
         }
+        if (Rec.Count == 0) return 0;
+        // 遮蔽留档（诊断：UI Toolkit|Draw Calls Count 这类同名他类目计数）
+        var shb = new StringBuilder();
+        foreach (var kv in Shadow) shb.Append(kv.Key).Append("=").Append(kv.Value).Append(" ");
+        SafeWrite(Dir + "/shadow_counts.txt", shb.ToString());
         return Rec.Count;
     }
 

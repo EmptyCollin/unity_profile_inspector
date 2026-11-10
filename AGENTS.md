@@ -2,7 +2,7 @@
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
 > 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护与 `agents/ui.py` 控制台）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
-> 最后更新：2026-11-09（v0.8，真机全链实测后的三处判据修正：**G11 预算护栏改节点感知**（`attempts` 只拦 fix 入口、计数点在 verify 产出判定处，作废崩溃不烧配额）；**§1.5 守护对比分两支**（时间/渲染走窗口中位，记忆体走两侧各自 fresh post-GC，不响应 GC 者记未评估盲区）；**G20 盲区清单补第四项**（记忆体守护实际只剩 `monoUsedBytes` 一项受保护）。同时纳入独立运行形态：常驻守护 + 控制台 UI + 手动开关采样 + 优雅停止（stop 走命令通道而非硬杀）。承前 v0.7：G18/G19/G20 三条门禁、Detect 输出扩为 `Finding[]`、采样三问拆分）
+> 最后更新：2026-11-11（v0.9，**渲染计数数据源改判**（#27/#29，exp5/exp6 实证）：**G16 重写**——"渲染计数唯一源=轮询"作废，根因是句柄名口径错误（真名带 `Count` 后缀）+ UI Toolkit 同名遮蔽；双条件定位后 A2 注入与轮询比值 1.00 ⇒ Draw/SetPass/Triangles/Vertices 改 A2 主源 + 1Hz 轮询哨兵交叉核对（fail-loud），batches/Mono/Update/FrameTime 因句柄不存在仍轮询单源；无头渲染恒 0 与 Play Mode 约束维持。**G19 渲染逐笔 spike detector 解禁**（GPU 发作口径仍 A4、逐笔归因仍人工——未被推翻）。**G20 补第 5 项**（batches 注入等价性）且 item1 封堵"detector 注册=解锁"虚报入口。承前 v0.8：G11 节点感知 / §1.5 守护双分支 / 独立运行形态（常驻守护+控制台 UI+手动开关采样+优雅停止）；v0.7：G18/G19/G20 三条门禁、Detect 输出扩为 `Finding[]`、采样三问拆分）
 
 ---
 
@@ -44,7 +44,7 @@
   - **FP 率必须与检出率成对输出**（同一阈值下的两个数），禁止只报其一。
   - `instrument_distorted`（采样开销超预算）的 bundle 不得用于判定异常。
   - **等级归属（G18）**：`potential` 不得进入修复循环、成功率分母、FP 分母；其唯一升级路径 = T5 压测复现→转 `confirmed`，不复现→撤回。
-  - **发作判定必须有逐帧源（G19）**：判"发作（episode）"只能建在逐帧源（A2/A4/探针）上；A 档秒级抽样只允许判"水位（waterline）"。渲染计数无任何逐帧源 ⇒ **禁止注册 GPU 逐笔 spike detector**；GPU 发作 detector 只能建在 A4 `gpuFrameTime` 上，且 finding 只给"越线事实"，逐笔归因 `attribution_source=human`（宁缺毋假，虚报检出能力按 I1 处理）。
+  - **发作判定必须有逐帧源（G19）**：判"发作（episode）"只能建在逐帧源（A2/A4/探针）上；A 档秒级抽样只允许判"水位（waterline）"。**2026-11-11 exp5/exp6 改判**：渲染计数（Draw/SetPass/Triangles/Vertices）A2 注入逐帧可用（真名带 `Count` 后缀 + 双条件类目定位，与轮询比值 1.00 实证）⇒ **渲染计数的逐笔 spike detector 解禁**；**GPU 侧发作口径仍只建在 A4 `gpuFrameTime`**（GPU Frame Time 是方法级采样计数器，非逐帧渲染时间线），且 **GPU 逐笔归因仍转人工**（FD 程序侧不可解读未被推翻）；finding 只给"越线事实"，`attribution_source` 无自动源填 `human`（宁缺毋假，虚报检出能力按 I1 处理）。
 - **不可以做**：推测根因、给出修复代码、写文件。
 
 ### 1.3 Diagnose Agent（归因）
@@ -248,7 +248,11 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G5 证据链断裂（diff 中有改动无法对应到任何 Evidence）→ 该 attempt 无效。
 - G6 `max_review_rounds`（默认 3）耗尽 → Issue 记 `failed`，禁止继续。审查若判定"本质是感知类改动，不该自动执行"→ 立即 `escalate_human`，**不烧完配额**。
 - G7 **协议指纹一致才可对比**：两次采样的 `scene_guid × replay_script_hash × quality_tier × warmup_samples × window_samples × n_samples × poll_rate × data_tier × editor_mode × scale_factor × graphics_api × environment_fingerprint` 任一不同 → 禁止对比，报错。A 档实测与 C 档静态估算**永远不可互比**；**常态数据（scale_factor=1）与压测档（10×/100×，D15）永远不可互比**；`graphics_api` 为预留字段——EX-1（切 DX11 验证 RenderDoc）若立项，切换前后数值禁止对比靠它兜底。环境漂移（Unity/URP 版本、GPU 驱动、电源计划、散热状态，**以及 `runInBackground`/焦点策略——实测失焦即停出帧**）同样触发本门禁（DESIGN §8.6/§12）。
-- G16 **渲染类计数器唯一源=GUI Editor 的 `diagnostics get_performance` 轮询**（实测 A2/A3 两源均无渲染 counter：A2 静默读 0，A3 为 -1 哨兵——把这两种当"值为 0/负"参与统计即违反 I1）。且必须在 Play Mode 采集（实测，DESIGN §2.2.1 事实 1）：`-batchmode -nographics` 下即使场景含 20 个 renderer 且处于播放模式，`drawCalls/batches/triangles` 仍恒为 0、GPU 设备为 `Null Device`。因此：GPU 与动画链路的 A 档采样**禁止在无头模式进行**；同一指标跨 editor_mode 的数值禁止对比（并入 G7 的 `editor_mode` 字段）。CPU / 加载链路无此限制。
+- G16 **渲染类计数器数据源（2026-11-11 exp5/exp6 改判，此前"唯一源=轮询"为误判）**：v3 探针"注入读渲染计数恒 0"的根因是**句柄名错**（真名带 `Count` 后缀）+ 同名他类目遮蔽（UI Toolkit|Draw Calls Count 等 13 个），不是后端不产数——双条件定位（名字==目标 且 类目==Render）修复后，注入侧 Draw/SetPass/Triangles/Vertices 与轮询侧 F-GPU-01 实测**比值 1.00**（runs/_probe/data.json × exp6_poll.jsonl；句柄全量表 runs/_probe/counter_cat_full.txt 5298 行）。改判后的数据源归属：
+  ① **Draw/SetPass/Triangles/Vertices 等计数类**：A2 注入（逐帧、主源）与 1Hz 轮询（水位、哨兵）均可用，两侧同轮交叉核对——**量级不符或任一计数器注册失败即拒收该 bundle（fail-loud）**；定位不到的计数器必须记 `skipped` 拒装，禁止"装了读 0"冒充合法值（I1；v3 静默零 4 个月无人察觉是本条的直接教训）；
+  ② **batches**：句柄表证实 Render 类目**没有**汇总 `Batches Count`，只有 Dynamic/Instanced/Static 三分项；轮询 `render.batches` 为 SRP 语义的**唯一汇总口径**，注入侧分项**禁止**冒充汇总（两侧同零时零对零无信息量，exp7 翻转裁决无效：`QualitySettings.enableDynamicBatching` 在 Unity 6000 不存在，CS0117 实证）；
+  ③ **必须在 Play Mode 采集**（未被改判）：`-batchmode -nographics` 下渲染计数仍恒 0、GPU 设备 `Null Device`（DESIGN §2.2.1 事实 1）——GPU 与动画链路的采样**禁止在无头模式进行**；同一指标跨 editor_mode 禁止对比（G7 的 `editor_mode` 字段）。
+  ④ 数据源切换（A→A2）即 `data_tier` 变更，**既有标定与 bundle 按 G7 判不可比**，须重新标定后才可判异常（#30 的条文依据）。
 - G8 **编译门禁前置于采样**：EditPlan 落地后先 `recompile` 并过滤 `error CS####`；编译失败 → attempt 直接失败并回滚，**不消耗一整轮采样成本**。
 - G9 **回滚不得依赖 Editor 可达**：改出编译错误时 Editor 会进 Safe Mode，Pipeline 包不加载，`eval`/`command` 全部连不上。回滚路径只允许依赖 git；回滚后再重启 Editor 验证。Detect/Verify 遇到"连不上"必须先跑 `unity pipeline list` 区分 Safe Mode 与真的没有实例，禁止把"连不上"当作"没有编辑器"进而手改场景 YAML。
 - G10 **停止编辑器只按 PID**：禁止按名字批量杀（`taskkill /IM Unity.exe` 等），会连带关闭其他项目的未保存工作。
@@ -259,8 +263,8 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G15 **指标成对展示**：FP 率必须与检出率同轴同屏；成功率必须与 `n_effective` 和置信区间同屏；成本指标必须与质量指标同轴。只报其一的结论视为无效结论。
 - G17 **静止分布门禁**：重复采样的分布退化时禁用相对判据——`unique/n < 0.1` **或 `MAD == 0`**（小样本下 n=4 时比例判据永不触发，`mad==0` 分支即为此补，实测 drawCalls 类离散整数指标必然撞上）→ 标 `degenerate_distribution`，只走 `min_magnitude` 绝对门限；夹具回放必须含动态（DESIGN §2.2.1）。
 - G18 **finding 等级归属门禁**：`potential`（P3 潜在）不得进入修复循环、成功率分母、FP 分母——其断言"规模到 S 才发作"在当前规模下不可证伪，混入即失真（DESIGN §3A）。升级路径只有一条：T5 压测（10×/100×，D15）复现 → 转 `confirmed`；不复现 → 撤回。代码层：Pydantic 构造期拒绝 `kind=potential` 进入 Issue 通道；负例测试必配。
-- G19 **逐帧源与归因源门禁**：判"发作（episode）"的 detector 必须声明逐帧数据源（`data_tier ∈ {A2, A4, probe}`）——A 档秒级抽样判发作 = 漏检 + 把被跳过的异常值当正常（最危险失效）。渲染计数无逐帧源（A2 静默 0 / A3 -1 / FD 程序侧不可解读，实测 ①-⑫）⇒ **禁止注册 GPU 逐笔 spike detector**；GPU 发作只能建在 A4 `gpuFrameTime`（固定 4 帧延迟，环形缓冲向后 ≥14 承接，D17；未回填帧 `gpu=0 且 completeTs=0` 按 -1 哨兵同规则拒收）。episode detector 必须带 `attribution_source` 字段，无自动化归因源时填 `human`——finding 只给"哪帧/哪个指标/越多少"，根因转人工。**虚报检出能力按 I1 处理。**
-- G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前四项：GPU 尖峰逐笔归因→EX-1/B 档；未放大的代码风险→M3.5 C+；感知类退化→M7 T8；**记忆体守护覆盖面窄**——`monoHeapBytes/totalAllocatedBytes/totalReservedBytes/total_used_per_frame` 经实测**不受强制 GC 影响**（Δ≈0），是会话累积量而非净占用，跨会话不可比 ⇒ 已降级为未评估盲区，"修复是否多吃内存"当前**只能靠 `monoUsedBytes` 一个口径回答**；解锁路径=B 档真机/更长隔离的 fresh 采集）。缺该清单的报告无效。
+- G19 **逐帧源与归因源门禁**：判"发作（episode）"的 detector 必须声明逐帧数据源（`data_tier ∈ {A2, A4, probe}`）——A 档秒级抽样判发作 = 漏检 + 把被跳过的异常值当正常（最危险失效）。**2026-11-11 exp5/exp6 改判**：Draw/SetPass/Triangles/Vertices 的 A2 逐帧注入通路已实测可用（正确句柄名 + 双条件类目定位，与轮询比值 1.00）⇒ 这些**渲染计数的逐笔 spike detector 解禁**（"渲染计数无逐帧源"旧前提作废）。但**GPU 侧发作口径仍只建在 A4 `gpuFrameTime`**（固定 4 帧延迟，环形缓冲向后 ≥14 承接，D17；未回填帧 `gpu=0 且 completeTs=0` 按 -1 哨兵同规则拒收）——`GPU Frame Time` 计数器是方法级采样、非逐帧 GPU 时间线，不能替代 A4；**GPU 逐笔归因仍转人工**（FD 程序侧不可解读，实测 ①-⑫ 未被推翻）。episode detector 必须带 `attribution_source` 字段，无自动化归因源时填 `human`——finding 只给"哪帧/哪个指标/越多少"，根因转人工。**虚报检出能力按 I1 处理。**
+- G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前五项：①GPU 尖峰逐笔归因→EX-1/B 档（**2026-11-11 改判后范围收窄**：渲染计数逐帧源已解锁，本项只覆盖"归因到哪一笔"，detector 注册不再算解锁信号）；②未放大的代码风险→M3.5 C+；③感知类退化→M7 T8；④**记忆体守护覆盖面窄**——`monoHeapBytes/totalAllocatedBytes/totalReservedBytes/total_used_per_frame` 经实测**不受强制 GC 影响**（Δ≈0），是会话累积量而非净占用，跨会话不可比 ⇒ 已降级为未评估盲区，"修复是否多吃内存"当前**只能靠 `monoUsedBytes` 一个口径回答**；解锁路径=B 档真机/更长隔离的 fresh 采集；⑤**batches 注入等价性（#27 新列）**——Render 类目结构性无汇总 `Batches Count` 句柄（仅 Dynamic/Instanced/Static 三分项），SRP 常态场景两侧同零 ⇒ 注入与轮询对不了表；`Mono Used Memory`/`Update Time`/`Frame Time` 短名同批证实不存在（口径归属见 G16④）；解锁=真实非零合批场景对表或接受轮询单源标注）。缺该清单的报告无效。
 
 ---
 

@@ -212,7 +212,7 @@ def view2(g: dict) -> str:
     f"<td><details><summary>展开</summary><code>{esc(json.dumps(it['evidence'], ensure_ascii=False, indent=1))}</code></details></td></tr>"
     for i, it in enumerate(blind["items"]))}
 </table>
-<div class="note">上面第 3 项（记忆体守护覆盖面）与视图 5 的"未评估盲区"列是同一事实的
+<div class="note">上面第 4 项（记忆体守护覆盖面）与视图 5 的"未评估盲区"列是同一事实的
 两种呈现：清单说"哪些指标答不了"，热力图说"这轮具体哪几项没测"。
 两者数字必须一致，本文件由同一次 <code>gather()</code> 取数保证。</div>
 """

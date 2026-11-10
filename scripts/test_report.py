@@ -168,8 +168,12 @@ i_v3 = HTML.find("视图 3")
 ok("①报告含不可检出清单", i_blind > 0)
 ok("①清单与检出率同屏（G20：在视图2与视图3之间）",
    0 < i_v2 < i_blind < i_v3, f"v2={i_v2} blind={i_blind} v3={i_v3}")
-ok("①清单四项齐",
-   len(BLIND["items"]) == 4)
+ok("①清单五项齐且 id 集合精确（#29 加 batches 注入等价性项）",
+   len(BLIND["items"]) == 5
+   and {i["id"] for i in BLIND["items"]} == {
+       "gpu_spike_attribution", "unamplified_code_risk", "perception_regression",
+       "memory_guard_coverage", "batches_injection_parity"},
+   str([i["id"] for i in BLIND["items"]]))
 ok("①清单证据取自本 fixture 而非真实库",
    "DET-CPU-GC-FRAMEALLOC" in HTML)
 

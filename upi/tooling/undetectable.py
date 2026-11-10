@@ -31,23 +31,34 @@ def _build_q(c, db: Path | str | None, runs_root: Path | None) -> dict:
     runs = runs_root or AG.RUNS
 
     # ── 1. GPU 尖峰的逐笔归因 ──
-    # 受阻根因：G19——判"发作"必须有逐帧源，而渲染计数器无任何可用逐帧源
-    #（实测 A2 静默读 0、A3 为 -1 哨兵、Frame Debugger 程序侧取不到可解读明细）
-    # ⇒ 禁止注册 GPU 逐笔 spike detector。
+    # 2026-11-11 #29 改判（exp5/exp6 + counter_cat_full.txt 5298 行句柄全量表）：
+    # 旧文本"渲染计数器无任何可用逐帧源 ⇒ 禁止注册逐笔 spike detector"的根因是
+    # 句柄名错（真名带 Count 后缀）+ UI Toolkit 同名遮蔽——双条件定位修复后注入侧
+    # 与轮询侧比值 1.00（G16 新文）。本项范围随之收窄为 **GPU 侧逐笔归因**：
+    # GPU Frame Time 是方法级采样计数器（非逐帧 GPU 时间线，A4 才是发作口径），
+    # 且 FD 程序侧不可解读未被推翻 ⇒ 归因仍转人工。
+    # spike_registered 判据同步改语义：渲染计数 detector 在场是**解禁后的应有状态**
+    # （≠归因解锁）；GPU 归因解锁信号= FD 可解读明细或 B 档真机通路，当前无源
+    # ⇒ 恒 blocked（旧判据"注册即 unlocked"是"虚报检出能力"入口，按 I1 关掉）。
     gpu_detectors = c.execute(
         "SELECT DISTINCT detector FROM detections WHERE detector LIKE '%GPU%'").fetchall()
-    spike_registered = any("SPIKE" in (d[0] or "").upper() for d in gpu_detectors)
+    gpu_attribution_source = None  # 自动归因源探针：FD 程序化明细（EX-1）或 B 档（M8）
     item1 = {
         "id": "gpu_spike_attribution",
         "title": "GPU 尖峰的逐笔归因（哪一笔 draw call 造成这一帧越线）",
-        "blocked_by": "G19 逐帧源门禁：渲染计数器无可用逐帧源"
-                      "（A2 静默读 0 / A3 -1 哨兵 / FD 程序侧不可解读，DESIGN §12 实测 ①-⑫）",
+        "blocked_by": "GPU 侧无可解读逐笔源：FD 程序侧不可解读（DESIGN §12 实测 ①-⑫，"
+                      "未被 exp5 推翻）；GPU Frame Time 计数器是方法级采样，"
+                      "非逐帧 GPU 时间线 ⇒ 发作口径仍只 A4 gpuFrameTime。"
+                      "注意：渲染**计数**的逐帧 spike detector 已随 G16/G19 改判解禁"
+                      "（exp5/exp6 比值 1.00 实证），本项只覆盖'归因到哪一笔'。",
         "unlock": "EX-1（切 DX11 验证 RenderDoc 程序化解析）或 M8 B 档真机采样；"
-                  "期间 GPU 发作 detector 只能建在 A4 gpuFrameTime 上，"
-                  "且 finding 只给越线事实、attribution_source=human",
-        "state": "unlocked" if spike_registered else "blocked",
-        "evidence": {"gpu_detector_registered": [d[0] for d in gpu_detectors],
-                     "spike_detector_present": spike_registered},
+                  "期间 GPU 发作 detector 建在 A4 gpuFrameTime，"
+                  "finding 只给越线事实、attribution_source=human",
+        "state": "unlocked" if gpu_attribution_source else "blocked",
+        "evidence": {"gpu_detector_seen": [d[0] for d in gpu_detectors],
+                     "自动归因源在场": bool(gpu_attribution_source),
+                     "说明": "detector 注册不再作为解锁信号（旧判据会把检出能力"
+                             "冒充归因能力）；解锁只认真实归因源"},
     }
 
     # ── 2. 未放大的代码风险（P3 potential）──
@@ -120,7 +131,45 @@ def _build_q(c, db: Path | str | None, runs_root: Path | None) -> dict:
                      "已知不响应 GC 者": sorted(GC_UNRESPONSIVE_KNOWN)},
     }
 
-    items = [item1, item2, item3, item4]
+    # ── 5. batches 汇总口径无注入通路（#27 exp5/exp6/exp7 实测钉出）──
+    # 句柄全量表证实 Render 类目**没有**汇总 "Batches Count"，只有 Dynamic/
+    # Instanced/Static 三分项 ⇒ 注入侧拿不到与轮询 render.batches 同口径的数；
+    # 两侧同零的 SRP 场景里等价性无从对表（零对零无信息量，exp7 翻转裁决无效：
+    # QualitySettings.enableDynamicBatching 在 Unity 6000 不存在，CS0117 实证）。
+    # 证据现算：本机句柄表在场就数给它看，不在场就如实标未验证（非抄文档）。
+    cat_fp = runs / "_probe" / "counter_cat_full.txt"
+    if cat_fp.exists():
+        try:
+            _lines = cat_fp.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            _lines = []
+        _agg = [x for x in _lines if x == "Render|Batches Count"]
+        _sub = [x for x in _lines if x.startswith("Render|")
+                and x.endswith("Batches Count") and x != "Render|Batches Count"]
+        b5_ev = {"句柄表行数": len(_lines),
+                 "Render|Batches Count(汇总)": _agg or "不存在",
+                 "Render 分项合批句柄": _sub,
+                 "draw_calls_遮蔽样本在场": any(
+                     x.startswith("UI Toolkit|Draw Calls Count") for x in _lines)}
+        b5_state = "blocked" if not _agg else "unlocked"
+    else:
+        b5_ev = {"句柄表": "本机 runs/_probe/counter_cat_full.txt 未在场",
+                 "说明": "本项为结构性结论（DESIGN §12 / exp5~7 落文）；"
+                         "隔离环境无句柄表 ⇒ 如实标未验证，不冒充实测"}
+        b5_state = "blocked"
+    item5 = {
+        "id": "batches_injection_parity",
+        "title": "batches 合批数：注入侧无汇总句柄（仅三分项），逐帧注入与轮询等价性对不了表",
+        "blocked_by": "Render 类目结构性无汇总 Batches Count 句柄；SRP 常态场景"
+                      "两侧同零（零对零无信息量）；dynamic batching 翻转路线在 "
+                      "Unity 6000 无对应 API（CS0117 实证，exp7 作废）",
+        "unlock": "真实非零合批场景（GPU instancing 同材质多实例 / 静态合批 / "
+                  "内置管线对照）上做两侧对表；或接受 batches 仅轮询单源并标注",
+        "state": b5_state,
+        "evidence": b5_ev,
+    }
+
+    items = [item1, item2, item3, item4, item5]
     # 与检出率同屏（G20 的字面要求）：清单和检出率一起返回，报告层不得拆分渲染
     rp = AG._recall_pairs(db or AG.DB)
     return {"items": items,
