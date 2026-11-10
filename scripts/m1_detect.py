@@ -24,8 +24,14 @@ from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
 from upi.core.models import Evidence, Fingerprint, Issue, IssueSignature  # noqa: E402
 from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
 
-BASELINES = ROOT / "baselines"
-CALDIR = ROOT / "calibration"
+# 束目录与阈值目录都由档案给（默认 "calibration" / "baselines"，与旧硬编码
+# 逐字一致 ⇒ 内置档案零行为变化）。两个都必须分：
+#   · 束目录：multiwin 束是**会被覆盖的工作文件**，共用=毁档；
+#   · 阈值目录：夹具专属的 S2 隔离闸（check_fixture_split）扫 baselines/ 下
+#     全部 thresholds_*.json 并要求可回溯至夹具 CLEAN——新工程的阈值混进来
+#     会被报成"手工回调过"（真工程实测 13 条误报）。分目录后各扫各的。
+BASELINES = ROOT / active_profile().baselines_dir_rel
+CALDIR = ROOT / active_profile().cal_dir_rel
 RUNS = ROOT / "runs"
 
 # G7 可比性判据的字段清单（阈值源指纹 × 数据源指纹，逐字段相等才允许拿
@@ -368,6 +374,8 @@ def main() -> int:
     fp_data = fingerprint_from_protocol(mw.get("protocol", {}), mw.get("_path", ""),
                                         env_fp, int(mw.get("windows_target", 4)))
     waterline_dets = []
+    # 本工程不产生、因而无标定可跑的检测器（声明跳过，进产物供报告与盲区）
+    undetected_metrics: list[dict] = []
     if cal is not None:
         fp_th = fingerprint_from_protocol(cal.get("protocol", {}), cal.get("_path", ""),
                                           env_fp, int(mw.get("windows_target", 4)))
@@ -394,11 +402,33 @@ def main() -> int:
         if other_dets:
             print(f"通路分流: {len(other_dets)} 个非水位检测器移交对应通路 "
                   f"{[d.id for d in other_dets]}")
-        n_applied = apply_calibration(waterline_dets, cal)
-        print(f"标定应用: {n_applied}/{len(waterline_dets)} 项阈值来自 {Path(cal['_path']).name}")
-        if n_applied != len(waterline_dets):
-            print("!! 有水位检测器指标不在标定表内（§8.1 要求全量覆盖），中止")
+        # 指标可适用集（选法 1 的真工程前置修复）：注册表是**夹具全机制**的，
+        # 真工程可能根本不产生某指标（无 Animator ⇒ 没有
+        # animator_process_animations_ns，标定表里自然也没有）。旧"全量覆盖
+        # 不齐即中止"在夹具上等价于安全网，接真工程却把"这个工程没这个东西"
+        # 当成错误拦停整轮——用户要的正是让真工程跑得起来。
+        # 判据不猜：以**本工程自己的标定表**是否含该指标为准（标定来自本工程
+        # 实测束，含=能测，不含=这工程没有）。§8.1 的原保护（绝不拿注册表
+        # 未标定初值去判）完整保留——不可适用的指标我们不判，而不是拿旧值判。
+        _cal_th = set((cal.get("thresholds") or {}).keys())
+        applicable = [d for d in waterline_dets if d.metric in _cal_th]
+        skipped = [d for d in waterline_dets if d.metric not in _cal_th]
+        for d in skipped:
+            out_unav = {"subject": d.subject, "metric": d.metric, "detector": d.id,
+                        "why": "本工程标定表无此指标（该工程不产生这类计数）"}
+            undetected_metrics.append(out_unav)
+            print(f"  [指标不可用] {d.metric}（{d.id}）：本工程未采到，跳过而非中止")
+        if not applicable:
+            print("!! 标定表与本注册表无任何交集指标：相对判据本轮无一条可跑，"
+                  "中止（这不是'没问题'，是'这套检测器测不到这工程'）")
             return 1
+        n_applied = apply_calibration(applicable, cal)
+        print(f"标定应用: {n_applied}/{len(applicable)} 项阈值来自 {Path(cal['_path']).name}"
+              + (f"（另 {len(skipped)} 项指标本工程不产生，已声明跳过）" if skipped else ""))
+        if n_applied != len(applicable):
+            print("!! 有可适用的水位检测器未拿到标定（§8.1 要求可适用集全覆盖），中止")
+            return 1
+        waterline_dets = applicable
     else:
         print("无本工程标定：相对判据通路整体跳过（L0），仅评绝对下限")
 
@@ -485,6 +515,7 @@ def main() -> int:
                "noise_basis": basis,               # 阶段 8 A：本轮噪声带来源等级
                "floors": floors,                   # 绝对下限腿（与 results 分区）
                "panel_results": panel_results,     # 跨检筛查行（不进 detector 分母）
+               "undetected_metrics": undetected_metrics,  # 本工程不产生的指标（声明跳过）
                "conflicts": conflicts_all,
                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
         (RUNS / run_id).mkdir(parents=True, exist_ok=True)

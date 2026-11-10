@@ -40,6 +40,30 @@ def args_hash(args: list[str]) -> str:
     return hashlib.sha256(" ".join(args).encode()).hexdigest()[:16]
 
 
+def normalize_envelope(d: Any) -> dict:
+    """把 `unity command` 的返回统一成 {success, data:{result}, errors} 信封。
+
+    ⚠️ 为什么需要（实测，2026-11-10 CLI 1.0.0-beta.17）：新版 CLI 对
+      `unity command <x>` 直接返回**载荷本体**（get_performance →
+      {"render","memory","frameTiming"}；editor status → {"status",...}；
+      script eval → {"output","diagnostics","success","result"}；
+      playmode → 裸字符串），不再裹 {success,data:{result}} 信封。
+      消费方（sync 判稳、采样取 render、fixer 取 recompile）全按旧信封读
+      `data.result` ⇒ 新版下恒拿 {}——表现为"采前同步 240s 超时""渲染值全空"，
+      看着像编辑器没就绪，其实是读错层（真工程验收第一次把它撞出来；
+      夹具下次真采样同样会断）。
+
+    判据（不猜、按结构）：带 success 且（带 data 或带 errors）= 已是信封，
+    原样返回（含失败信封，让上层照读 success/errors）；否则视为裸载荷，
+    包成成功信封。裸载荷自身可能带 success（eval），但它没有 data/errors
+    键，故仍走包装分支——包装后 eval 的内层 result 落在 data.result.result，
+    与旧消费方读法逐字一致。
+    """
+    if isinstance(d, dict) and "success" in d and ("data" in d or "errors" in d):
+        return d
+    return {"success": True, "data": {"result": d}, "errors": []}
+
+
 def run_unity(argv: list[str], timeout_s: int = 60) -> Envelope:
     """执行 unity CLI（自动附加 --format json --no-banner）。永不抛业务异常，失败在 envelope 里。"""
     cmd = ["unity", *argv, "--format", "json", "--no-banner", "--non-interactive"]
@@ -56,21 +80,29 @@ def run_unity(argv: list[str], timeout_s: int = 60) -> Envelope:
         return Envelope(success=(p.returncode == 0), command=argv[0] if argv else "", exit_code=p.returncode,
                         errors=[] if p.returncode == 0 else [UnityError(code="EMPTY_STDOUT",
                                 message="非零退出且 stdout 为空（该命令未迁移到 envelope 输出，属已知 bug 面）")])
+    # 解析顺序（实测教训）：**先解原始 JSON，再归一，最后建模**。
+    # 反过来的话，新版 `script eval` 的裸载荷 {output,diagnostics,success,result}
+    # 会因为自带 success 键而被 Envelope 模型当成"成功但 data=None 的信封"接受，
+    # 归一层根本没机会跑——消费方照旧拿到 None（我第一版就踩在这）。
     try:
-        env = Envelope.model_validate_json(out)
+        raw = json.loads(out)
+    except json.JSONDecodeError:
+        raw = None
+    if raw is not None:
+        env = Envelope.model_validate(normalize_envelope(raw))
         env.exit_code = p.returncode
         return env
-    except Exception:  # noqa: BLE001 — ndjson/多行输出退化路径
-        lines = [ln for ln in out.splitlines() if ln.lstrip().startswith("{")]
-        for ln in reversed(lines):
-            try:
-                env = Envelope.model_validate_json(ln)
-                env.exit_code = p.returncode
-                return env
-            except Exception:  # noqa: BLE001
-                continue
-        return Envelope(success=False, command=argv[0], exit_code=p.returncode,
-                        errors=[UnityError(code="UNPARSABLE_OUTPUT", message=out[:200])])
+    # 非单一 JSON 文档（ndjson/多行输出）：逐行退化
+    lines = [ln for ln in out.splitlines() if ln.lstrip().startswith("{")]
+    for ln in reversed(lines):
+        try:
+            env = Envelope.model_validate(normalize_envelope(json.loads(ln)))
+            env.exit_code = p.returncode
+            return env
+        except Exception:  # noqa: BLE001
+            continue
+    return Envelope(success=False, command=argv[0], exit_code=p.returncode,
+                    errors=[UnityError(code="UNPARSABLE_OUTPUT", message=out[:200])])
 
 
 class Capability(BaseModel):

@@ -107,3 +107,11 @@ runs/m3_rehearsal_*/after/
 # 彩排的终端回显日志（tee 产物，内容与 report.json 重复，不入库）
 runs/*_console.log
 runs/m3_rehearsal_final*.log
+
+# ── 阶段 8 浅验收试验台（选法1 真工程验收用）──
+# 模板可重生成（unity projects create upi-lab --template com.unity.template.urp-blank），
+# 不是管线产物也不是结论证据，整目录不入库。
+testlab/
+
+# 接入工程的档案（绝对路径配置，机器本地态，换机即坏）——同 daemon_conf 判据
+projects/

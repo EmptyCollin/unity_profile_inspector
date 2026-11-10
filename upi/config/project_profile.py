@@ -104,6 +104,22 @@ class ProjectProfile(BaseModel):
     # fail-closed 的理由）。表存在但内容坏 ⇒ 加载侧炸，不静默当空表（防假绿）。
     floor_targets_rel: str = ""
 
+    # 标定束目录（多窗口束与阈值文件的落点）。**相对本仓库根**，默认 "calibration"
+    # 与阶段 7 之前的硬编码逐字一致 ⇒ 内置档案零行为变化。
+    # 为什么归 profile：标定是**工程侧数据**——A 工程的噪声带评不了 B 工程
+    # （G7 的 profile_id 比较已在防这件事，但目录混用会让"最新标定"按 mtime
+    # 跨工程串档，实测于真工程验收）。一个工程一个目录，物理隔离比判据兜底干净。
+    cal_dir_rel: str = "calibration"
+
+    # 阈值文件目录（thresholds_*.json 的落点）。默认 "baselines" 同样逐字兼容。
+    # 为什么也必须分目录（真工程实测证伪了我先前"共用安全"的判断）：
+    #   check_fixture_split 的 S2 是**夹具专属**的过拟合闸，它扫 baselines/ 下
+    #   全部 thresholds_*.json 并要求每项能由夹具 CLEAN 重算。新工程的阈值
+    #   写进同一目录后，S2 直接报 13 条"来源不明"——那是把"B 工程的标定"
+    #   当成"A 工程被手工回调过的阈值"。检测端说可比、隔离闸说违规，
+    #   正是本仓最忌的两份真相打脸，所以目录必须分开，而不是去放松 S2。
+    baselines_dir_rel: str = "baselines"
+
     # 快照/回滚所依赖的 git 仓库根。⚠️ 这不是可选装饰，而是硬边界：
     # snapshot.workdir_state() 用 project_path.relative_to(git_root) 算脏区，
     # 回滚也只在 git_root 里打 tag。所以"与任意 Unity 工程协作"的真实条件是
