@@ -331,9 +331,9 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         # 写"日志尾"而不是"stderr尾"——文件里已经不是分流的两个流了。
         out["blindspot"] = (f"重采失败（rc={rc}）：日志尾={p.stdout_tail}")
         return out
-    # 判据链完全复用 m1_detect（含 G7 协议指纹校验与标定注入），不改一行判据
-    from scripts.m1_detect import (apply_calibration, compare,
-                                   latest_calibration, stats_from_windows)
+    # 判据链完全复用 m1_detect（含 G7 协议指纹校验、标定注入与面板），不改判据
+    from scripts.m1_detect import (apply_calibration, latest_calibration,
+                                   stats_from_windows)
     mw = json.loads(bundle.read_text(encoding="utf-8"))
     fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items()
             if "windows" in v}
@@ -368,34 +368,70 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         if det.metric not in (fixs.get(det.subject) or {}):
             err = str((raw_fx.get(det.subject) or {}).get("error", "无窗口数据"))
             missing.append(f"{det.subject}({det.metric}): {err[:80]}")
+    # 真工程的采集前提（机制级）：上面那圈按"检测器 home 机制"查，真工程的
+    # 机制名不在注册表里 ⇒ 一圈全跳过 ⇒ 整轮没采到东西也照样判"静默"
+    # （B7 禁止的"没采到冒充没有异常"在选法 1 后换了个入口复现）。
+    # 所以按**请求集里的被测机制**逐个查有无统计。
+    _subj_req = requested - {_clean}
+    for _s in sorted(_subj_req):
+        if _s not in fixs:
+            err = str((raw_fx.get(_s) or {}).get("error", "无窗口数据"))
+            missing.append(f"{_s}: {err[:80]}")
     if clean is None and basis_relational(_basis):
         missing.append(f"{_clean} 无有效统计——无噪声基准，禁止相对判定（§8.1）")
     if missing:
         out["blindspot"] = "采样有效前提不成立，水通路本轮未评估：" + "；".join(missing)
         return out
 
+    out["panel_findings"] = []
     if basis_relational(_basis):
-        for det in wln:
-            fx = fixs.get(det.subject)
-            if fx is None or clean is None:
+        # 与 m1_detect 同源：可适用集 + 面板。两处各写一份迟早漂移成
+        # "巡检出结论、状态机拒判"（本轮清点消费面时确认过双份结构）。
+        from scripts.m1_detect import applicable_waterline, waterline_matrix
+        _pf = active_profile()
+        wln_app, wln_skip = applicable_waterline(wln, cal)
+        for d in wln_skip:
+            out.setdefault("undetected_metrics", []).append(
+                {"subject": d.subject, "metric": d.metric, "detector": d.id,
+                 "why": "本工程标定表无此指标（该工程不产生这类计数）"})
+        if not wln_app:
+            # 一条相对判据都跑不了 ≠ 没有异常：整轮按盲区记（B7），
+            # 且不许悄悄退回"只看下限"——那会让人以为相对通路查过了。
+            out["blindspot"] = ("标定表与检测器注册表无交集指标：本轮相对判据"
+                                "未评估（不是'没问题'，是这套检测器测不到本工程）")
+            return out
+        eval_subjects = sorted(set(_pf.subjects)
+                               | {k for k in fixs if k != _clean})
+        home_rows, panel_rows = waterline_matrix(
+            eval_subjects, fixs, clean, wln_app)
+        for sub, r in home_rows.items():
+            if r.get("verdict") != "detected":
                 continue
-            issue, detail = compare(det, fx, clean)
-            if issue:
-                # 量级取 issue.magnitude（compare 的 detail 里同值键名是 delta，
-                # 上一版写 detail.get("magnitude") 会静默拿 None——契约键名错）
-                dr = detail.get("deviation_ratio")
-                undef = isinstance(dr, float) and math.isinf(dr)
-                # 零基线指标（F-ANIM-01，A2 债）ratio=inf：那是"无定义"不是
-                # "无穷偏离"。落 None + 显式标注——Infinity 进 JSONL 是非标准
-                # 扩展（跨工具解析失败），且 None 逼消费方去看标注而不是拿伪数
-                # 当依据（I1）。检出本身仍成立（绝对增量门限，A2 既定修法）。
-                out["findings"].append({
-                    # 键名沿用 fixture（落盘契约），取值换成机制字段
-                    "kind": "issue", "ptype": "waterline", "fixture": det.subject,
-                    "detector": det.id, "metric": det.metric, "basis": "relational",
-                    "magnitude": issue.magnitude,
-                    "deviation_ratio": None if undef else dr,
-                    "ratio_undefined_zero_baseline": undef})
+            dr = r.get("deviation_ratio")
+            undef = isinstance(dr, float) and math.isinf(dr)
+            # 量级取 magnitude（上一版曾错取 detail 里没有的键名 → 静默 None）；
+            # 零基线指标 ratio=inf 是"无定义"不是"无穷偏离"，落 None + 标注
+            # （Infinity 进 JSONL 非标准，且 None 逼消费方去看标注，I1）。
+            out["findings"].append({
+                # 键名沿用 fixture（落盘契约），取值换成机制字段
+                "kind": "issue", "ptype": "waterline", "fixture": sub,
+                "detector": r.get("detector"), "metric": r.get("metric"),
+                "basis": "relational", "home": True,
+                "magnitude": r.get("magnitude"),
+                "deviation_ratio": None if undef else dr,
+                "ratio_undefined_zero_baseline": undef})
+        # 跨检行（机制×非本位指标）：单列，**不进 findings**——
+        # findings 参与唤起与 quiet 判定，混进来会让夹具轮凭空多检出、
+        # 把"筛查事实"当成 detector 战绩（G18 等级归属同型）。
+        for key, r in panel_rows.items():
+            if r.get("verdict") != "detected":
+                continue
+            out["panel_findings"].append({
+                "kind": "panel", "ptype": "waterline", "fixture": r.get("subject"),
+                "detector": r.get("detector"), "metric": r.get("metric"),
+                "basis": "relational_cross", "home": False,
+                "magnitude": r.get("magnitude"),
+                "deviation_ratio": r.get("deviation_ratio")})
     # 绝对下限腿（阶段 8 A，与相对检出正交）：档案配了表才评，L0/L2 都跑。
     # ⚠️ 这类 finding 标记 kind="floor"，patrol_once 的唤起循环会跳过它——
     #    自动修复链在状态机内重跑的是**相对** detect（m1_detect 子进程），
@@ -514,12 +550,20 @@ def patrol_once(cfg_mon: dict) -> dict:
                          # 里算完不往上传 = 算了没人看得见，正是本仓堵的假接线。
                          "noise_basis": wl.get("noise_basis"),
                          "floor_hash": wl.get("floor_hash"),
+                         # 跨检筛查行同样必须落轮记录：它不唤起修复（G18 等级
+                         # 归属），但"这轮有没有筛出东西"是事实，不落盘就等于
+                         # 白算（同一处注释讲过的假接线，别再犯第三遍）。
+                         "panel_findings": wl.get("panel_findings") or [],
+                         "undetected_metrics": wl.get("undetected_metrics") or [],
                          "bundle": wl.get("bundle")},
            "wake": wake,
            # B7 静默语义收紧：静默=采到了且无异常。任一通路未评估时整轮记
            # "未评估"而非"静默"——把采集失败写成绿轮是假安心（G20 同源）。
+           # ⚠️ 跨检筛查命中也算"不静默"：它是筛查级事实、不进检出率，但
+           #    "只筛出问题却没被标静默"是假安心（quiet 判据此刻漏看 panel）。
            "blindspots": blind,
-           "quiet": not (ep["findings"] or wl["findings"]) and not blind}
+           "quiet": not (ep["findings"] or wl["findings"]
+                         or (wl.get("panel_findings") or [])) and not blind}
     with PATROL_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
     return rec
