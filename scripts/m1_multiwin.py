@@ -46,7 +46,11 @@ _PROF = active_profile()
 PROJECT = _PROF.abs_project
 SCENES_DIR = PROJECT / _PROF.scenes_dir
 PROBE = ROOT / "runs/_probe"
-CALDIR = ROOT / "calibration"
+# 标定束目录由档案给（默认 calibration 与旧硬编码逐字一致）。
+# 为什么必须跟档案走：dev 用 --caldir 只是单命令覆盖，检测端（m1_detect）
+# 读的是模块常量 ⇒ 真工程的束根本不会被读到，或更糟——读到夹具的旧束
+# 并拿它的阈值判新工程（串档比缺档危险）。
+CALDIR = ROOT / _PROF.cal_dir_rel
 FULL_SESSION = False
 IDLE_ONLY = False
 
@@ -152,11 +156,20 @@ from scripts.m1_baseline import SAMPLER_SRC  # noqa: E402
 
 
 def unity(*args: str, timeout: int = 150) -> dict:
+    """跑 unity CLI 并把返回**归一成旧信封**（见 unity_cli.normalize_envelope）。
+
+    新版 CLI（beta.17 实测）对 `unity command <x>` 返回裸载荷而非
+    {success,data:{result}} 信封；本文件所有消费方（sync 判稳、get_performance
+    取 render、editor status、playmode）都按旧信封读 data.result，不归一就
+    恒拿 {}——真工程验收第一次撞出（表现为"采前同步 240s 超时"，看着像
+    编辑器没就绪，其实读错层；夹具下次真采样同样会断）。
+    """
+    from upi.tooling.unity_cli import normalize_envelope
     out = subprocess.run(["unity", *args, "--format", "json", "--no-banner", "--non-interactive"],
                          capture_output=True, text=True, timeout=timeout,
                          encoding="utf-8", errors="replace").stdout
     try:
-        return json.loads(out)
+        return normalize_envelope(json.loads(out))
     except json.JSONDecodeError:
         return {"success": False, "errors": [{"message": out[:200]}]}
 
@@ -600,7 +613,12 @@ def do_merge() -> int:
         out["probe_overhead"] = overhead
     blob = json.dumps(out, sort_keys=True).encode()
     h = hashlib.sha256(blob).hexdigest()[:12]
-    dest = ROOT / "baselines" / f"thresholds_{h}.json"
+    # 阈值落**本工程自己的** baselines 目录（默认 "baselines" ⇒ 内置档案行为不变）。
+    # 与夹具混放的后果实测过：夹具专属的 S2 隔离闸会把新工程的阈值报成
+    # "无法由 CLEAN 重算 = 手工回调"（13 条误报），检测端与闸互相打脸。
+    dest_dir = ROOT / _PROF.baselines_dir_rel
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"thresholds_{h}.json"
     dest.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"合并完成 → {dest.name}")

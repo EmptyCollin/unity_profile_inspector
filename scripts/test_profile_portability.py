@@ -144,6 +144,12 @@ def captured_nodes(run_dir: Path):
 
 def main() -> int:
     E.isolate(TMP / "runs")     # 留痕/命令/状态/配置全部指向临时区
+    # 开跑前记 projects/ 的既有档案名：残留判据要比的是"本测试新留下的"，
+    # 不是"目录里有任何 json"。#21 接入真工程后 projects/upi-lab.json 是
+    # **正当注册产物**（该目录的设计职责就是放接入工程的档案），旧的
+    # "必须为空"假设会把真注册当成残留误报（实测撞上）。
+    _proj_before = {x.name for x in (ROOT / "projects").glob("*.json")} \
+        if (ROOT / "projects").is_dir() else set()
     print("== ⑦ 可移植性：不改代码切换到第二个工程 ==")
 
     # ── ⓪ 验收线：内置档案派生值必须与阶段 7 前的硬编码逐字一致 ──
@@ -500,12 +506,15 @@ def main() -> int:
        EF(str(_ip.abs_project), profile_id=_ip.profile_id)
        == EF(str(_ip.abs_project)), "标签改动污染了历史指纹")
 
-    # projects/ 里不许留下临时档案：③ 与体检表那处都用 try/finally 删了，
-    # 但这类"临时文件残留"不会让任何断言变红，只会让仓库多出一个未跟踪文件
+    # projects/ 里不许留下**本测试造的**临时档案：③ 与体检表那处都用 try/finally
+    # 删了，但这类"临时文件残留"不会让任何断言变红，只会让仓库多出一个未跟踪文件
     # （实际发生过：手工探针脚本漏清，git status 一直挂着 projects/*.json）。
-    _left = sorted(x.name for x in (ROOT / "projects").glob("*.json")) \
+    # 基线相对（见 main 开头 _proj_before）：真注册的工程档案（如 #21 的
+    # upi-lab.json）是 projects/ 的设计职责所在，不是残留，旧"必须为空"会误报。
+    _left = sorted(x.name for x in (ROOT / "projects").glob("*.json")
+                   if x.name not in _proj_before) \
         if (ROOT / "projects").is_dir() else []
-    ok("projects/ 无临时档案残留", not _left, str(_left)[:80])
+    ok("projects/ 无本测试新增的档案残留（真注册工程不算残留）", not _left, str(_left)[:80])
 
     _sz1 = _REAL_EVENTS.stat().st_size if _REAL_EVENTS.exists() else 0
     ok("真实事件流零写入（测试噪音不落仓库）", _sz1 == _real_events_size0,
