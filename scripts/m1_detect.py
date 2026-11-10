@@ -251,11 +251,25 @@ def main() -> int:
         print("   检测与标定必须来自同一多窗口数据源，禁止回退旧单窗口基线（G7/§3）")
         return 1
     fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items() if "windows" in v}
-    _clean = active_profile().clean_subject   # 对照机制名来自档案，不写死
-    if _clean not in fixs:
-        print(f"!! 缺对照机制 {_clean}，无法对照（§8.1）")
+    _clean = active_profile().clean_subject   # 噪声基准机制名来自档案，不写死
+    # ── 阶段 8 A：噪声基准缺失分三种处置（设计 §1，判据单点 resolve_noise_basis）。
+    #    patrol 与本文件都调它——历史上"缺 CLEAN 怎么办"两处各写一份，迟早漂移成
+    #    "巡检出结论、状态机拒判"互相打脸。三态：
+    #      incomplete（声明了却没采到）⇒ 采集失败，整轮拒判（B7：没采到≠没有异常）；
+    #      L0（档案有意无同期基准）⇒ 相对显著性不可判，clean_stats={} 让 compare()
+    #        自然落 insufficient_evidence，结论改由绝对下限表（第二腿）承担；
+    #      L2（基准在场）⇒ 现状最强路径，内置档案即此态（行为逐字不变）。
+    from upi.core.floor_check import (basis_relational, load_floor_table,
+                                      resolve_noise_basis)
+    basis = resolve_noise_basis(_clean, _clean in fixs)
+    if basis == "incomplete":
+        print(f"!! 档案声明了噪声基准 {_clean} 但本轮束里没有它 = 采集失败，"
+              "禁止判定（§8.1/B7，与'工程本就无基准'是两回事）")
         return 1
-    clean_stats = fixs[_clean]
+    clean_stats = fixs.get(_clean) or {}
+    if basis == "L0":
+        print("!! 本工程无同期噪声基准（noise_basis=L0）：相对显著性不可判"
+              "（各指标落 insufficient_evidence），仅绝对下限可评、FP 率 not_measurable")
 
     run_id = time.strftime("m1detect_%Y%m%d_%H%M%S")
     # 工程上下文来自档案（阶段 7）。标签位显式传 profile_id：
@@ -340,25 +354,59 @@ def main() -> int:
             m = {k: v["median"] for k, v in st.items()}
             m.update({f"baseline_{k}": v["median"] for k, v in clean_stats.items()})
             cs = run_snapshot(m)
-            # pair 口径：对照=改前、fixture=改后 —— 水位层的组合签名
-            # （F-GPU-01 命中 P1 = 碎描签名与 drawCalls 检出互证）
-            cs += run_pair({k: v["median"] for k, v in clean_stats.items()},
-                           {k: v["median"] for k, v in st.items()})
+            # pair 口径：噪声基准=改前、fixture=改后 —— 水位层的组合签名
+            # （F-GPU-01 命中 P1 = 碎描签名与 drawCalls 检出互证）。
+            # ⚠️ pair 规则只在 L2（同期基准在场）跑：L0 下 clean_stats 为空，
+            #    run_pair({}, st) 会把"没有改前值"喂进成对判据，产出的签名
+            #    无意义。snapshot 规则不吃 clean_stats，L0 下照常跑。
+            if basis_relational(basis):
+                cs += run_pair({k: v["median"] for k, v in clean_stats.items()},
+                               {k: v["median"] for k, v in st.items()})
             if cs:
                 conflicts_all[fid] = [c.model_dump() for c in cs]
 
-        # FP 自检：对照机制对自己跑一遍，任何"检出"都是误报（D6 口径）
+        # FP 自检：噪声基准自比自，任何"检出"都是误报（D6 口径）。
+        # ⚠️ 只有 L2 可测：自比自要有"自"。L0 下若照跑 compare(det,{}, {})
+        #    会得到一串 insufficient_evidence，fp_hits 为空 → 打成"FP=0 下界
+        #    成立"——那是把"没测"冒充"测了且没问题"，正是设计 §1 明令禁止的
+        #    （G15 成对展示）。故 L0 直接落空 dict，报告侧显示 not_measurable。
         fp_check = {}
-        for det in waterline_dets:
-            _, d = compare(det, clean_stats, clean_stats)
-            fp_check[det.id] = d.get("verdict")
+        if basis_relational(basis):
+            for det in waterline_dets:
+                _, d = compare(det, clean_stats, clean_stats)
+                fp_check[det.id] = d.get("verdict")
         fp_hits = [k for k, v in fp_check.items() if v == "detected"]
+
+        # 绝对下限腿（第二判据，与相对检出物理分开）：档案配了表才评。
+        # 表哈希进产物：提标（改表）⇒ 哈希变 ⇒ 与改前的检出不可混比（G7 同源纪律）。
+        floors = {"enabled": False, "breached": [], "evaluated": [],
+                  "unevaluated": [], "floor_hash": None}
+        _fp = active_profile().floor_targets_path
+        if _fp is not None:
+            _tbl = load_floor_table(_fp)
+            if _tbl is None:
+                # 配了路径但文件不在 ⇒ 如实记未启用，不猜一张空表（空表=全通过=假绿）
+                floors["why"] = f"floor_targets_path={_fp} 指向的文件不存在"
+            else:
+                from upi.core.floor_check import check_floors
+                raw_fx_all = mw.get("fixtures", {})
+                for fid, entry in raw_fx_all.items():
+                    if fid == _clean or "windows" not in entry:
+                        continue
+                    r = check_floors(fid, entry, _tbl)
+                    floors["evaluated"] += r["evaluated"]
+                    floors["breached"] += r["breached"]
+                    floors["unevaluated"] += r["unevaluated"]
+                floors.update({"enabled": True, "floor_hash": _tbl.content_hash(),
+                               "source": _tbl.source})
 
         out = {"run_id": run_id, "data_source": mw.get("_path"),
                "thresholds_source": cal.get("_path"),
                "protocol_fingerprint": fp_data.model_dump(),   # G7：本轮判定挂靠的指纹
                "replayable": fp_data.replay_script_hash != "none-v0",  # T2 未建 → False，如实标注
                "band_basis": "between_windows", "fp_selfcheck": fp_check,
+               "noise_basis": basis,               # 阶段 8 A：本轮噪声带来源等级
+               "floors": floors,                   # 绝对下限腿（与 results 分区）
                "conflicts": conflicts_all,
                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "results": results}
         (RUNS / run_id).mkdir(parents=True, exist_ok=True)
@@ -368,14 +416,29 @@ def main() -> int:
         # 块外再赋 ctx 是无效写入（旧版 evidence_refs 恒空的根因）
         ctx["evidence_refs"] = [str(det_fp)]
 
-    print(f"数据源: {Path(mw['_path']).name}（窗口间 σ，与阈值同源）")
+    print(f"数据源: {Path(mw['_path']).name}（窗口间 σ，与阈值同源）  噪声带来源: {basis}")
     detected = sum(1 for r in results.values() if r.get("verdict") == "detected")
     for fid, r in results.items():
         mark = "检出" if r.get("verdict") == "detected" else ("证据不足" if "insufficient" in str(r.get("verdict")) else "未检出")
         print(f"  [{mark:4s}] {fid:10s} {r.get('metric','')} fx={r.get('fixture')} clean={r.get('clean')} "
               f"delta={r.get('delta','')} ratio={r.get('deviation_ratio','')} n窗口={r.get('window_n','')} {r.get('reason','')}")
-    print(f"检出 {detected}/{len(results)}；CLEAN 自检误报 {len(fp_hits)}/{len(fp_check)}"
-          + (f" !!{fp_hits}" if fp_hits else "（FP=0，下界成立）"))
+    # L0 下 fp_check 为空是"没测"不是"零误报"，打印必须区分（G15 成对展示：
+    # 不许只报检出率、把 FP 谎报成 0）。措辞里机制名用档案值，不写死 CLEAN。
+    if basis_relational(basis):
+        print(f"检出 {detected}/{len(results)}；{_clean} 自检误报 {len(fp_hits)}/{len(fp_check)}"
+              + (f" !!{fp_hits}" if fp_hits else "（FP=0，下界成立）"))
+    else:
+        print(f"检出 {detected}/{len(results)}（相对判据，本轮 {basis}）；"
+              "误报率 not_measurable（无同期噪声基准，自检未跑）")
+    if floors.get("enabled"):
+        _br = floors["breached"]
+        print(f"绝对下限: 破线 {len(_br)}/{len(floors['evaluated'])}"
+              f"（未评估 {len(floors['unevaluated'])} 项，表 {floors['floor_hash']}）")
+        for b in _br:
+            print(f"  [越下限] {b['subject']:10s} {b['metric']} {b['op']}{b['line']} "
+                  f"实测={b['stat']}（n窗口={b['n_windows']}）")
+    elif "why" in floors:
+        print(f"绝对下限: 未启用（{floors['why']}）")
     for fid, cs in conflicts_all.items():
         for c in cs:
             print(f"  [矛盾] {fid:10s} {c['rule_id']}: {c['observed'][:88]}")
