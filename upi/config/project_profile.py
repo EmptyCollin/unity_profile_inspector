@@ -324,19 +324,78 @@ def builtin_ids() -> list[str]:
     return sorted(_BUILTIN)
 
 
+def projects_dir() -> Path:
+    """工程档案目录的**唯一**落点（运行期取总线值，不在模块级取快照）。
+
+    注释一直说"与总线 PROJECTS 同源"，但实现写的是 ROOT/"projects"——注释与
+    代码不符的代价实测撞出：测试里 E.isolate() 挪不动档案目录，注册向导一跑
+    就把 projects/.active 写进**真实仓库**（污染由测试自己暴露）。
+    ⚠️ 必须每次现取 E.PROJECTS 而不是 `from ... import PROJECTS`：后者在导入
+      瞬间冻结值，isolate 之后再改就看不见——与阶段 7 "要可切换就不能在模块级
+      取快照"是同一条教训。默认（不 isolate）E.PROJECTS == ROOT/"projects"，
+      所以生产路径逐字不变。
+    """
+    from upi.core import events as E     # 延迟导入：events 层零 upi 依赖，不成环
+    return E.PROJECTS
+
+
 def profile_file(pid: str) -> Path:
-    """自定义档案的落点：projects/<id>.json（ROOT/projects，与总线 PROJECTS 同源）。"""
-    return ROOT / "projects" / f"{pid}.json"
+    """自定义档案的落点：projects/<id>.json（与总线 PROJECTS 同源，可被 isolate 挪走）。"""
+    return projects_dir() / f"{pid}.json"
+
+
+def active_pointer_path() -> Path:
+    """"当前激活工程"的持久指针：<工程档案目录>/.active（一行 profile_id）。
+
+    目录由 projects_dir() 现取（默认 ROOT/projects，E.isolate 后可重定向），
+    所以测试里注册向导不会把指针写进真实仓库——这一点与 profile_file 必须
+    同源，否则会出现"档案写进临时区、指针却落在真仓库"的裂状态。
+
+    为什么需要它：PROFILE_ENV 只在进程启动时读，要求用户
+    `UPI_PROFILE=x python -m upi ui` 就违背了"用户只需知道 UI、不需要知道
+    命令行"这条收口承诺。注册向导写完档案后把 id 落这里，后续进程自动接管。
+    ⚠️ 这不是"回落内置"的破例：指针只决定**默认请求哪个 id**，那个 id 若
+    读不出来照样走 load_profile 的 fail-closed 报错，绝不会偷换成 upi-fixture。
+    指针缺失（全新克隆 / CI）⇒ 内置默认，与加这个文件之前的行为逐字一致。
+    """
+    return projects_dir() / ".active"
+
+
+def get_active_profile_id() -> Optional[str]:
+    """读激活指针；不存在/空 ⇒ None（不是内置 id，交回调用链决定缺省）。"""
+    try:
+        s = active_pointer_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return s or None
+
+
+def set_active_profile_id(pid: str) -> Path:
+    """写激活指针（注册向导成功后调用）。
+
+    走事件层 atomic_write 而不是手写 tmp+replace：那个原语用**唯一临时名**，
+    固定的 `名字.tmp` 在并发下会互相搬走对方的临时文件（实测炸过），
+    并对 Windows 换入瞬间的 WinError 5 做有限次退避重试。同一个落盘模式
+    在仓库里写三份迟早漂移，所以复用唯一入口。
+    """
+    from upi.core import events as E
+    E.atomic_write(active_pointer_path(), pid)
+    return active_pointer_path()
 
 
 def load_profile(pid: Optional[str] = None) -> ProjectProfile:
-    """按 id 取档案。优先级：显式参数 > 环境变量 UPI_PROFILE > 内置默认。
+    """按 id 取档案。优先级：显式参数 > 环境变量 UPI_PROFILE > 激活指针 > 内置默认。
+
+    激活指针（projects/.active）排在环境变量**之后**：env 是调用方在本命令里
+    的一次性显式指定，比"上次注册留下的默认"更近、更强；两者都没说时才用指针。
 
     ⚠️ 磁盘档案存在但读不出来 ⇒ 抛 ProfileError，绝不退回内置档案：
       静默回落的表现是"你以为在跑自己的工程，实际跑的是夹具"，
       所有数字都正常、结论全是错的（危害远大于报错）。
+      指针指向的档案被删掉也走同一条路——宁停不猜。
     """
-    pid = pid or os.environ.get(PROFILE_ENV) or DEFAULT_PROFILE_ID
+    pid = (pid or os.environ.get(PROFILE_ENV)
+           or get_active_profile_id() or DEFAULT_PROFILE_ID)
     if pid in _BUILTIN:
         return _BUILTIN[pid]
     fp = profile_file(pid)

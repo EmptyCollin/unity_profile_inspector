@@ -92,12 +92,15 @@ cases = [
     (UA.AWAITING, {UA.ACT_VIEW_TICKET, UA.ACT_STOP_DAEMON, UA.ACT_DECIDE},
      {UA.ACT_RUN_NOW, UA.ACT_CANCEL, UA.ACT_PAUSE}),
     (UA.PAUSED, {UA.ACT_RESUME}, {UA.ACT_RUN_NOW, UA.ACT_PAUSE}),
-    (UA.UNCALIBRATED, {UA.ACT_SNAPSHOT},
-     {UA.ACT_RUN_NOW, UA.ACT_REGISTER, UA.ACT_CALIBRATE}),
+    (UA.UNCALIBRATED, {UA.ACT_SNAPSHOT, UA.ACT_REGISTER, UA.ACT_FLOOR},
+     {UA.ACT_RUN_NOW, UA.ACT_CALIBRATE}),
 ]
 # ⚠️ 两个期望必须避开"未接线"与"同键去重"这两条实现规则，否则测试与
 #   实现互相矛盾：
-#     · 未接线动作（register/calibrate）在所有态都置灰，不能期待可用；
+#     · 未接线动作（calibrate）在所有态都置灰，不能期待可用；
+#       register/floor 已在阶段 8 接线（本地流程），故 UNCALIBRATED 里
+#       它们进 must_on —— 未标定态恰恰是"注册完还没标定"的状态，注册和
+#       配下限表都该能点，只有标定本身因走守护命令通道仍置灰。
 #     · 同键去重会把已可用键的禁用同态项从菜单里摘掉——"没列出"等于
 #       "没被开启"，must_off 因此要按 .get(n, False) 判。
 for state, must_on, must_off in cases:
@@ -123,9 +126,13 @@ for state, _on, must_off in cases:
     if checked == 0 and must_off:
         ok(f"{state} 至少有一条带原因的禁用项或全被去重", True, "")
 
-# 未接线动作在任何态都不得可用
+# 未接线动作在任何态都不得可用。
+# ⚠️ register_project / edit_floor_table 已从这份名单移除——阶段 8 接成了本地
+#   流程（cmd=None，落盘走 onboarding），不再是"按下去必然失败"的占位。
+#   calibrate 仍在列：标定要占编辑器跑采样，必须走守护命令通道，那是下一批。
+#   这条断言的作用就是"还没接的能力不许偷偷变成可点"。
 print("== ②b 未接线能力一律置灰 ==")
-for name in ("register_project", "calibrate"):
+for name in ("calibrate",):
     bad = [s for s in UA.ALL_STATES
            if any(a["name"] == name and a["enabled"]
                   for a in UA.actions_for(s))]
@@ -621,6 +628,91 @@ _d._consume_decide()
 _dec2 = _store.load_decision(_rid)
 ok("defer 意向经守护生效（驳回/暂缓同样吃码闸）",
    _dec2 is not None and _dec2.decision == "defer", str(_dec2))
+
+
+# ───────── ⑨ 接入向导流程（注册 / 下限表编辑）─────────
+# 矩阵测试只证明"这键此刻可点"，不证明"点下去做了什么"。接线的两个本地流程
+# 必须用按键序列驱动（本仓纪律：写了字段没验证消费者等于没写）。
+# 关键断言是 **sent 为空**：注册与改表都不该发守护命令——守护没有"切工程"
+# 这种命令，发过去只会 command_ignored（界面看起来像功能坏了）。
+print("== ⑨ 接入向导：注册与下限表编辑（本地流程，不发守护命令）==")
+import subprocess as _sp  # noqa: E402
+from upi.config import project_profile as PP  # noqa: E402
+
+_proj = TMP / "game-proj"
+(_proj / "Assets" / "Scenes").mkdir(parents=True, exist_ok=True)
+(_proj / "Assets" / "Scenes" / "Menu.unity").write_text("%YAML 1.1\n", encoding="utf-8")
+# 档案硬要求工程在 git 工作树内（快照/回滚只依赖 git），所以造一个真 git 根
+_sp.run(["git", "init", "-q"], cwd=str(_proj), capture_output=True, timeout=60)
+
+_sent_n0 = len(sent)
+# ⚠️ 必须传 line_reader=spy_line：register_flow / floor_flow 全靠 line_read 收答案，
+#   漏传就退回真实 stdin —— 测试里 stdin 是 EOF，流程一律走"已取消"分支，
+#   于是"注册没成功"被伪装成"功能坏了"（第一版就是这么红的，报错还指向 use_profile）。
+# 首项 "N" 是 step 的通用 token 门（不可逆动作必输），消费完才进 register_flow；
+# 其后依次：profile_id / 工程路径 / scenes_dir / 模板 / 噪声基准 / 下限表 / y 确认
+answers[:] = ["N", "ui-probe", str(_proj), "", "", "", "", "y"]
+lines.clear()
+msg9, _p9, _q9 = U.step(UA.IDLE, st_of(), "n", sender=spy_send, line_reader=spy_line)
+ok("注册流程不发守护命令（本地落盘）", len(sent) == _sent_n0, str(sent[_sent_n0:]))
+ok("注册成功提示里写明当前守护仍服务原工程（不假装已切换）",
+   "仍服务原工程" in msg9, msg9[:120])
+ok("档案落盘在隔离区（不写真实仓库 projects/）",
+   PP.profile_file("ui-probe").exists()
+   and str(PP.projects_dir()).startswith(str(TMP)), str(PP.projects_dir()))
+ok("激活指针指向新工程（下次进程默认接管）",
+   PP.get_active_profile_id() == "ui-probe", PP.get_active_profile_id())
+
+# 取消路径：第一个答案（profile_id）留空 ⇒ 不落任何文件
+_ghost = PP.profile_file("ghost-probe")
+answers[:] = ["N", ""]
+msg9b, _p, _q = U.step(UA.IDLE, st_of(), "n", sender=spy_send, line_reader=spy_line)
+ok("注册可取消：id 留空 ⇒ 不写文件",
+   "取消" in msg9b and not _ghost.exists(), msg9b[:90])
+
+# 下限表：新工程还没表 ⇒ 第一条必须先给出处（§8.1 无出处=手调）
+PP.use_profile("ui-probe")
+try:
+    _floor_fp = PP.active_profile().floor_targets_path
+    answers[:] = ["F", "2", "", "drawCalls", "<=", "50", "", ""]
+    msg9c, _p, _q = U.step(UA.IDLE, st_of(), "f", sender=spy_send, line_reader=spy_line)
+    ok("无出处 ⇒ 下限表拒绝写入（纪律走通到界面）",
+       "未改动" in msg9c and (_floor_fp is None or not _floor_fp.exists()),
+       msg9c[:130])
+
+    answers[:] = ["F", "2", "性能预算 v1", "drawCalls", "<=", "50", "calls", "", "y"]
+    msg9d, _p, _q = U.step(UA.IDLE, st_of(), "f", sender=spy_send, line_reader=spy_line)
+    ok("带出处 ⇒ 第一条下限写入工程侧文件",
+       _floor_fp is not None and _floor_fp.exists() and "1 条目标线" in msg9d,
+       msg9d[:130])
+    if _floor_fp and _floor_fp.exists():
+        import json as _j
+        _tb = _j.loads(_floor_fp.read_text(encoding="utf-8"))
+        ok("写入内容含出处与线值（可被下限腿读回）",
+           _tb["source"] == "性能预算 v1"
+           and _tb["targets"][0]["metric"] == "drawCalls"
+           and _tb["targets"][0]["value"] == 50, _tb)
+    ok("下限表编辑同样不发守护命令", len(sent) == _sent_n0, str(sent[_sent_n0:]))
+finally:
+    PP.reset_profile()
+
+# ───────── ⑩ 键位文档与动作表差集核对 ─────────
+# 阶段 6 立的判据形态：文档命令表与代码清单的差集必须为空，靠人记会漏。
+# 接线状态变化时（本批 n/f 解禁、l 仍未接）文档若不同步，用户按到的就是
+# 一个说明书里没有的键 —— 比功能缺失更难查，因为看起来"文档说它存在"。
+print("== ⑩ 使用说明键位表与动作表对齐 ==")
+import re as _re  # noqa: E402
+_doc = (ROOT / "docs" / "使用说明.md").read_text(encoding="utf-8")
+_doc_keys = set(_re.findall(r"^\| `(.)` \|", _doc, _re.M))
+_code_keys = {a["key"] for a in UA._ALL_ACTIONS}
+ok("代码有而文档无的键 ⇒ 补文档", not (_code_keys - _doc_keys),
+   sorted(_code_keys - _doc_keys))
+ok("文档有而代码无的键 ⇒ 文档写了不存在的键", not (_doc_keys - _code_keys),
+   sorted(_doc_keys - _code_keys))
+_unwired = {a["key"] for a in UA._ALL_ACTIONS if not a.get("wired", True)}
+ok("未接线的键必须在文档里标\"尚未接线\"（不许默默列成可用）",
+   all(f"`{k}`" in _doc and "尚未接线" in _doc for k in _unwired),
+   f"未接线={sorted(_unwired)}")
 
 print(f"\nUI 动作层测试：{len(PASS)} 通过 / {len(FAIL)} 失败")
 for f in FAIL:
