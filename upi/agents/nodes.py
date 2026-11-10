@@ -271,7 +271,10 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             return {"route": "needs_human",
                     "error": "detect 未在当前夹具检出 Issue"
                              f"（detection.json={'缺失' if det_fp is None else det_fp.name}）"}
-        return {"findings": findings, "issue": issue, "route": "proceed"}
+        return {"findings": findings, "issue": issue, "route": "proceed",
+                # detection.json 在独立的 m1detect_* 目录（不在 run_dir 下），
+                # 把真实指针带进 state，供失败总结取"本轮下限画像"——不靠猜路径。
+                "detection_ref": str(det_fp) if det_fp else None}
 
     def diagnose(st: dict) -> dict:
         issue_d = st["issue"]
@@ -534,6 +537,34 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         if not E.write_json(run_dir / "runreport.json", final,
                             what="runreport", strict=False):
             E.emit("runreport_write_failed", run_id=run_dir.name)
+
+        # 失败出口的人读总结（#24）：runreport.json 是给统计层的机器终态，
+        # 这份是给**下一步该干什么**的人看的。
+        # ⚠️ 触发条件必须排除成功路径——escalate 是统一出口，record（成功记账）
+        #    也有一条边指进来。判据用"最后一次判定是否 resolved"而不是
+        #    "有没有 error"：预算拦停会把 error 写进 state，但审批停在半路时
+        #    verdict 可能已经是 resolved（只是没走到 record），那种情况
+        #    出"修复未成"报告就是撒谎。
+        if final.get("verdict_status") != "resolved":
+            _det = None
+            # 读 detect 记下的真实指针（runs/m1detect_*/detection.json），
+            # 不是 run_dir 下的同名文件——那个位置根本不存在，写死路径的
+            # 第一版会让画像永远静默缺失（假接线的又一次现形）。
+            _dr = st.get("detection_ref")
+            try:
+                if _dr and Path(_dr).exists():
+                    _det = json.loads(Path(_dr).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                _det = None       # 画像缺失由报告自己声明，不在这里编数据
+            try:
+                from upi.tooling.failure_report import failure_summary_md
+                # 摘要需要 run_id，而 final 里有；state 本身不带（run_dir 是闭包）
+                E.atomic_write_text(
+                    run_dir / "failure_summary.md",
+                    failure_summary_md({**st, "run_id": run_dir.name}, _det))
+            except Exception as e:  # noqa: BLE001 — 报告失败不许打断记账与回滚
+                E.emit("failure_summary_failed", run_id=run_dir.name,
+                       error=str(e)[:160])
         return {}
 
     return {"detect": detect, "diagnose": diagnose, "plan": plan, "fix": fix,
