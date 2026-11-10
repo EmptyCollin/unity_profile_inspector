@@ -187,7 +187,7 @@ _ALL_ACTIONS = [
     {"key": "n", "name": ACT_REGISTER, "label": "注册新工程",
      "tier": TIER_HARD, "cmd": None},              # 本地流程：落盘走 onboarding
     {"key": "l", "name": ACT_CALIBRATE, "label": "跑标定向导",
-     "tier": TIER_HARD, "cmd": "calibrate", "wired": False, "stage": "阶段 8"},
+     "tier": TIER_HARD, "cmd": "calibrate"},        # 走守护命令通道（抢编辑器）
     {"key": "f", "name": ACT_FLOOR, "label": "改下限目标表",
      "tier": TIER_HARD, "cmd": None},              # 本地流程：写工程侧判据文件
     {"key": "x", "name": ACT_SNAPSHOT, "label": "打快照(只读)",

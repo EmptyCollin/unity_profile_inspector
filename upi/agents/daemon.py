@@ -332,7 +332,7 @@ class Daemon:
         """
         cmd = str(c.get("cmd") or "")
         known = ("enable", "disable", "pause", "resume", "run_now",
-                 "cancel", "set", "quit")
+                 "cancel", "set", "quit", "calibrate")
         t0 = time.perf_counter()
         rc = 0 if cmd in known else 1
         try:
@@ -395,7 +395,7 @@ class Daemon:
     def _dispatch_cmd(self, c: dict):
         cmd, args = c.get("cmd", ""), c.get("args") or {}
         known = ("enable", "disable", "pause", "resume", "run_now",
-                 "cancel", "set", "quit")
+                 "cancel", "set", "quit", "calibrate")
         if cmd not in known:
             E.emit("command_ignored", reason="unknown_cmd", cmd=cmd)
             return
@@ -418,6 +418,15 @@ class Daemon:
                 E.emit("command_ignored", reason="round_busy", cmd=cmd)
             else:
                 self._start_round("manual")
+        elif cmd == "calibrate":
+            # 标定与巡检抢的是同一个编辑器，必须走同一条忙碌闸；否则"刚按 l
+            # 又按 r"会让两个 m1_multiwin 同时进 Play（G7 现场直接污染）。
+            # 单开线程而不就地跑：一轮标定十几分钟，同步执行会把命令循环卡死，
+            # 期间连"取消"都收不到——那等于把一个可中断操作变成不可中断。
+            if self.busy:
+                E.emit("command_ignored", reason="round_busy", cmd=cmd)
+            else:
+                self._start_calibrate()
         elif cmd == "cancel":
             self.stop_requested = True
             self._stop_child("user_cancel")
@@ -478,6 +487,44 @@ class Daemon:
                auto_fix=self.conf.get("auto_fix"))
         threading.Thread(target=self._round, daemon=True).start()
         threading.Thread(target=self._progress_poller, daemon=True).start()
+
+    def _start_calibrate(self):
+        """冷启动标定入口（界面 l）。忙碌簿记与 _start_round 同构——复用同一把
+        self.busy 才意味着"标定期间排期轮/手动轮/r 全都进不来"，G7 现场不被抢。
+        不起 next_round_at 的更新：标定不是巡检轮，不该顺手把下一轮的排期推后。
+        """
+        with self._lock:
+            if self.busy:
+                return
+            self.busy = True
+            self.stop_requested = False
+            self.child_pid = None
+        E.emit("calibrate_started", fixtures=self.conf.get("fixtures"),
+               windows=int(self.conf.get("windows", 4)))
+        threading.Thread(target=self._calibrate, daemon=True).start()
+        threading.Thread(target=self._progress_poller, daemon=True).start()
+
+    def _calibrate(self):
+        from upi.agents.patrol import calibrate_round
+        t0 = time.time()
+        err = None
+        try:
+            res = calibrate_round(dict(self.conf))
+        except Exception as e:  # noqa: BLE001 — 标定炸了不杀守护
+            err = f"{type(e).__name__}: {str(e)[:200]}"
+            res = {"blindspot": err, "thresholds": None}
+        dur = round(time.time() - t0, 1)
+        with self._lock:
+            self.busy = False
+        # 事件名与 round_finished 分开：统计层算"轮次成本/故障配额"的分母
+        # 只应包含巡检轮，标定是一次性接入动作，混进 rounds 会让"接入一个新工程"
+        # 的十几次分钟被算成 N 轮监测（成本轴造假，G13/G15 同源）。
+        E.emit("calibrate_finished", seconds=dur,
+               blindspot=res.get("blindspot"),
+               thresholds=res.get("thresholds"),
+               cancelled=bool(res.get("cancelled")),
+               cancelled_clean=res.get("cancelled_clean"),
+               error=err)
 
     def _adopt_cmd_channel(self) -> int:
         """接管命令通道，返回"已看到的最大 seq"。

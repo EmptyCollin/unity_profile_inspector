@@ -189,46 +189,35 @@ def spawn_resample(cmd: list[str], log_file):
     return subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT,
                             cwd=str(ROOT))
 
-def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
-    """按标定协议重采一轮束并跑 m1_detect 判据链。噪声基准缺失按三态分级处置。"""
-    out = {"channel": "waterline", "findings": [], "blindspot": None}
-    fixtures = cfg_mon.get("fixtures") or []
-    from upi.core.floor_check import basis_relational, resolve_noise_basis
-    _clean = active_profile().clean_subject   # 噪声基准机制名由档案派生（阶段 7）
-    # 阶段 8 A（设计 §1）：旧版"不含基准就整轮拒判"在真实工程里等于自我否决
-    # ——多数工程没有无缺陷场景。三态判据单点在 resolve_noise_basis（与
-    # m1_detect 同源，两处各写一份迟早漂移成互相打脸）：
-    #   L0（档案有意声明无基准，clean_subject 为空）⇒ 继续，相对判据自然缺项，
-    #     结论由绝对下限表承担；
-    #   incomplete（声明了基准却没排进采集清单）⇒ 配置错，拒判。
-    _basis = resolve_noise_basis(_clean, _clean in fixtures)
-    if _basis == "incomplete":
-        out["blindspot"] = (f"巡检夹具不含噪声基准 {_clean}"
-                            "——无同期基准，禁止判定（§8.1）")
-        return out
-    out["noise_basis"] = _basis
+
+def run_resample(cmd: list[str], workdir: Path, timeout_s: int, *,
+                 role: str = "resample", label: str = "水通路") -> dict:
+    """起采样子进程并等到收尾，返回一份**现场结论**（不跑判据）。
+
+    为什么单独成函数：巡检重采与标定重采要的是同一段生命周期——Popen 起进程、
+    登记 pid、轮询取消/超时、先请它自己收尾再硬杀、按退出码区分三种停止原因。
+    两处各写一份迟早漂移（daemon 里 cancel/quit 就是这么漏掉一处，硬杀绕过了
+    finally 清理）。抽出来之后两处共用同一套留痕语义。
+
+    label 只影响一句措辞（"本轮{label}被取消"），因为巡检与标定的现场都是
+    "编辑器可能被留在 Play 态"，处置动作相同，但人看到的必须是自己在跑的事。
+
+    返回键（只带实际触发的，与抽取前的 out 形状逐字一致）：
+      blindspot / bundle / cancelled / cancelled_clean / timed_out / killed / rc
+    ⚠️ 取消与超时必须在 bundle 检查之前判定：半途停下时束文件可能已写出一半，
+      拿残缺束去判据链就是 B7 禁止的"没采到冒充没有异常"。
+    """
+    r: dict = {"blindspot": None, "bundle": workdir / "multiwin_full.json"}
     workdir.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
-           "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
-           "--caldir", str(workdir), "--no-summary"]
-    # 用 Popen 而不是 subprocess.run：后者拿不到子进程 pid（只能等它结束），
-    # 而取消通道必须指名道姓地给那个 pid 立标志。
-    # ⚠️ 输出必须**落文件**而不是 PIPE：PIPE 的缓冲只有 64KB 量级，父进程不
-    #   实时读就会把子进程写阻塞——m1_multiwin 每个窗口都打进度，一轮 full
-    #   会话能打出几十 KB，旧 subprocess.run 靠内部并发读才没出事。自己
-    #   Popen 时忘了读就是死锁，直接落文件最稳，且失败留痕照样取得到。
-    timeout_s = int(cfg_mon.get("waterline_timeout_s", 900))
     log_fp = workdir / "resample.log"
     try:
         log_f = log_fp.open("w", encoding="utf-8", errors="replace")
         proc = spawn_resample(cmd, log_f)
     except OSError as e:
-        out["blindspot"] = f"重采进程无法启动：{type(e).__name__}: {str(e)[:160]}"
-        return out
+        r["blindspot"] = f"重采进程无法启动：{type(e).__name__}: {str(e)[:160]}"
+        return r
     # 立刻登记 pid：守护的 cancel 命令在子进程写下第一份进度之前也必须能停它
-    E.publish_child(proc.pid, role="resample", workdir=str(workdir))
-    # 采前体检（含失焦守卫）：把结论也登记进 child 文件，UI 与统计能直接读，
-    # 不必再去翻子进程日志。拒采时子进程会自己以 RC_PRECONDITION 退出。
+    E.publish_child(proc.pid, role=role, workdir=str(workdir))
     rc = None
     cancelled = False
     timed_out = False
@@ -273,9 +262,10 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     # 情况 (a)（父进程先看到取消标志）break 时子进程仍在跑，直接往下走
     # 就等于丢下一个孤儿继续占编辑器；超时同理。
     if proc.poll() is None:
-        _terminate("user_cancel" if cancelled else "waterline_timeout")
+        _terminate("user_cancel" if cancelled else f"{role}_timeout")
 
     rc = proc.returncode
+    r["rc"] = rc
     E.clear_child()
     # 取消有两种到达方式，都要认，但**只能认这两种**：
     #   (a) 父进程在轮询里看到取消标志（子进程还活着）→ 上面已置 cancelled
@@ -286,22 +276,18 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     #   （超时收尾也走它），那样每个超时轮都会被后置判定误认成"用户取消"。
     # ⚠️ 补判必须让位于超时：超时轮里 _terminate 也会请求取消，子进程若是
     #   照办并以 rc=3 收尾，"退出码=取消"这条补判会把**归因**从"仪器太慢"
-    #   改写成"人不想要了"——两者的处置动作完全不同，这是本轮实测撞出的缺陷。
+    #   改写成"人不想要了"——两者的处置动作完全不同，这是实测撞出的缺陷。
     if rc == E.RC_CANCELLED and not timed_out:
         cancelled = True
     E.clear_cancel(proc.pid)          # 谁立的标志都在这里收尾，不留给下一轮
     p = _ResampleResult(rc=rc, stdout=stdout_txt, stderr="",
                         cancelled=cancelled, timed_out=timed_out)
-    bundle = workdir / "multiwin_full.json"
-    # ⚠️ 取消与超时**必须走在 bundle 检查之前**：半途停下时可能已经写出一个
-    #   窗口数不足的束文件。把它当正常束送去判据链，就是拿残缺数据采集
-    #   下"零检出"的结论——B7 明令禁止的"没采到冒充没有异常"。
     # 超时先判（理由见上：它会借用取消通道，退出码不可用于归因）。
     if timed_out:
-        out["blindspot"] = (f"重采超时（>{timeout_s}s，已请求自行收尾）"
-                            f"，束不完整不判定；日志尾={p.stdout_tail}")
-        out["timed_out"] = True
-        return out
+        r["blindspot"] = (f"重采超时（>{timeout_s}s，已请求自行收尾）"
+                          f"，束不完整不判定；日志尾={p.stdout_tail}")
+        r["timed_out"] = True
+        return r
     if cancelled:
         # rc=3 说明它自己在窗口边界收尾了（退 Play、卸回调都做了）；
         # rc=15 说明宽限期内没停住被硬杀——**现场状态不同**，留痕必须能分开，
@@ -310,27 +296,163 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         tail = ("子进程已在边界自行收尾，现场干净）" if clean
                 else "子进程未在宽限期内自行收尾，已被硬杀；"
                      "编辑器现场可能仍处 Play 态，需人工确认）")
-        out["blindspot"] = f"本轮水通路被取消（rc={rc}；{tail}"
-        out["cancelled"] = True
-        out["cancelled_clean"] = clean
-        return out
+        r["blindspot"] = f"本轮{label}被取消（rc={rc}；{tail}"
+        r["cancelled"] = True
+        r["cancelled_clean"] = clean
+        return r
     # 拿到硬杀码却没人请求过取消：进程被外力终止（外部 taskkill、上一代遗留、
     # 崩溃后被清理）。**不能当普通失败记**——普通失败的现场是干净的，
     # 硬杀的现场可能把编辑器留在 Play 态，下一轮进来就是脏数据。
     # 这里不猜原因，只说"现场状态未知、需人工确认"（I2 证据不足不下结论）。
     if rc == E.RC_HARD_KILL:
-        out["blindspot"] = (f"重采进程异常终止（rc={rc}，非本方请求取消）："
-                            "退出码等同硬杀，编辑器现场状态未知，"
-                            f"需人工确认是否仍处 Play 态；日志尾={p.stdout_tail}")
-        out["killed"] = True
-        return out
-    if not bundle.exists():
+        r["blindspot"] = (f"重采进程异常终止（rc={rc}，非本方请求取消）："
+                          "退出码等同硬杀，编辑器现场状态未知，"
+                          f"需人工确认是否仍处 Play 态；日志尾={p.stdout_tail}")
+        r["killed"] = True
+        return r
+    if not r["bundle"].exists():
         # 失败留痕必须带子进程输出：实测 rc=1 崩溃的 traceback 原本全在 stderr，
         # 只截 stdout 会把真凶记成空串（10:27 轮"重采失败（rc=1）："的成因）。
         # 现在输出合并落同一份日志，所以取 stdout_tail 即可，但措辞要如实
         # 写"日志尾"而不是"stderr尾"——文件里已经不是分流的两个流了。
-        out["blindspot"] = (f"重采失败（rc={rc}）：日志尾={p.stdout_tail}")
+        r["blindspot"] = (f"重采失败（rc={rc}）：日志尾={p.stdout_tail}")
+        return r
+    return r
+
+
+# 合并执行的可注入入口（同 spawn_resample 的道理：真跑要占编辑器十几分钟，
+# 离线测试要断言标定链的分支——缺基准拒标、合并失败留痕、成功回读阈值——
+# 就只能有一个明确命名的挂载点，而不是 mock subprocess 这种"实现换了桩就失效"
+# 的写法（本仓实测栽过：run→Popen 之后一批桩静默不生效，判据集体变红像产品坏了）。
+_MERGE_UNAVAILABLE = None        # run_merge 用它表示"进程根本没跑起来"
+
+
+def run_merge(cmd: list[str]) -> tuple[object, str]:
+    """跑 m1_multiwin --merge，返回 (退出码或 None, 合并输出文本)。"""
+    try:
+        mr = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                            encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return _MERGE_UNAVAILABLE, f"{type(e).__name__}: {str(e)[:160]}"
+    return mr.returncode, ((mr.stdout or "") + (mr.stderr or ""))
+
+
+def calibrate_round(cfg_mon: dict, caldir: Path | None = None,
+                    baselines_dir: Path | None = None) -> dict:
+    """冷启动标定：按档案机制清单采一轮束，再 --merge 生成本工程阈值。
+
+    为什么走这里而不是让人去命令行跑两步：注册向导（界面 n）落地后，
+    "接一个新工程"的完整链路是 注册 → 标定 → 检出。中间这步要占编辑器
+    十几分钟、还带取消/超时/硬杀现场问题，散在命令行里就等于"向导只做完一半"，
+    而界面按 l 会显示未接线——用户看到的仍是"接不进新工程"
+
+    ⚠️ 束落在**本工程的 cal_dir**（档案 cal_dir_rel），不是临时工作目录：
+      检测端 load_multwin 读的就是这个目录里的束（摘要优先）。落到临时区会出现
+      "标定成功、阈值也生成了，但下一轮检测报缺数据源"——那一步最难查，因为
+      看起来标定明明是成功的。caldir 参数只为测试注入。
+    ⚠️ 不加 --no-summary：摘要是 load_multwin 的**首选**数据源（31KB，对
+      stats_from_windows 与原始束逐字段等价）。隔离实验里加它是对的（避免多份
+      摘要扰乱优先级），但标定是要长期供检测用的正路，不落摘要等于少一半产物。
+    ⚠️ L0 工程（档案没配噪声基准）**不能标定**：noise_calibration 的阈值定义就是
+      "基准场景的窗口间抖动"，没有基准就没有可标的量。旧写法会让人跑到
+      do_merge 里撞出一句"full 会话对照机制 X 数据缺失"——那是采集措辞，
+      人以为标定坏了，实际是这台工程压根没有基准场景。这里当场拒并说清出路
+      （配基准，或只用绝对下限腿）。
+    ⚠️ 采集清单**不传 --fixtures**：m1_multiwin 默认取 fixture_universe()
+      （对照在前 + 全部被测机制），与档案同源。写死一份清单就是本仓反复堵的
+      "换工程整批场景不存在"那个失效。
+    """
+    from upi.core.floor_check import resolve_noise_basis
+    prof = active_profile()
+    out = {"channel": "calibrate", "blindspot": None, "thresholds": None}
+    _clean = prof.clean_subject
+    basis = resolve_noise_basis(_clean, bool(_clean))
+    out["fixtures"] = prof.fixture_universe()   # 留痕用：这轮到底采了哪些机制
+    if basis == "L0":
+        out["blindspot"] = ("本工程档案未配噪声基准（clean_subject 为空）："
+                            "噪声标定需要一个低活动的基准场景来量抖动，没有它就没有可标的量。"
+                            "出路二选一：① 给档案配一个基准场景（如主菜单/空场景）；"
+                            "② 不标定，只用绝对下限腿（界面 f 配表）——此时相对检出"
+                            "一律落 insufficient_evidence，误报率 not_measurable")
         return out
+    workdir = caldir or (ROOT / prof.cal_dir_rel)
+    workdir.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
+           "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
+           "--caldir", str(workdir)]
+    # 标定预算独立于巡检：一轮要采完 universe（内置档案 5 个机制 × 4 窗口 ≈ 12 分钟），
+    # 借 waterline_timeout_s（900s）会把正常标定判成超时，那是一条会让人误以为
+    # "标定失败"的假故障。所以单列 calibrate_timeout_s（默认 3600），与巡检分开。
+    r = run_resample(cmd, workdir, int(cfg_mon.get("calibrate_timeout_s", 3600)),
+                     role="calibrate", label="标定")
+    out["blindspot"] = r["blindspot"]
+    for k in ("timed_out", "cancelled", "cancelled_clean", "killed"):
+        if k in r:
+            out[k] = r[k]
+    if out["blindspot"]:
+        return out
+
+    mcmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
+            "--merge", "--caldir", str(workdir)]
+    rc, mtxt = run_merge(mcmd)
+    if rc == _MERGE_UNAVAILABLE:
+        out["blindspot"] = f"阈值合并未能执行：{mtxt}"
+        return out
+    if rc != 0:
+        # do_merge 的失败都是"拿不到可信输入"（缺束、缺基准、标定覆盖不齐），
+        # 措辞原样带出来，不在这里替它解释成因（I2）
+        out["blindspot"] = (f"阈值合并失败（rc={rc}）："
+                            + (mtxt.strip().splitlines() or ["（无输出）"])[-1][:200])
+        return out
+    # 阈值落在本工程目录（do_merge 用 profile.baselines_dir_rel），按 mtime 取最新。
+    # baselines_dir 参数只为离线测试注入：这行是 ROOT/... 不受 E.isolate 影响，
+    # 真跑一次标定测试就会往仓库 baselines/ 里落一份阈值文件（污染 calibration/
+    # baselines/ 这类真相源目录正是本会话反复清的东西）。
+    bdir = baselines_dir or (ROOT / prof.baselines_dir_rel)
+    gens = sorted(bdir.glob("thresholds_*.json"), key=lambda q: q.stat().st_mtime)
+    out["thresholds"] = str(gens[-1]) if gens else None
+    out["merge_output"] = mtxt.strip().splitlines()[-4:]
+    if out["thresholds"] is None:
+        # merge 报成功但找不到文件 = 目录口径不一致，必须说出来而不是静默当成功
+        out["blindspot"] = (f"合并报成功但在 {bdir} 找不到 thresholds_*.json："
+                            "标定目录口径可能不一致，请核对档案 baselines_dir_rel")
+    return out
+
+
+def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
+    """按标定协议重采一轮束并跑 m1_detect 判据链。噪声基准缺失按三态分级处置。"""
+    out = {"channel": "waterline", "findings": [], "blindspot": None}
+    fixtures = cfg_mon.get("fixtures") or []
+    from upi.core.floor_check import basis_relational, resolve_noise_basis
+    _clean = active_profile().clean_subject   # 噪声基准机制名由档案派生（阶段 7）
+    # 阶段 8 A（设计 §1）：旧版"不含基准就整轮拒判"在真实工程里等于自我否决
+    # ——多数工程没有无缺陷场景。三态判据单点在 resolve_noise_basis（与
+    # m1_detect 同源，两处各写一份迟早漂移成互相打脸）：
+    #   L0（档案有意声明无基准，clean_subject 为空）⇒ 继续，相对判据自然缺项，
+    #     结论由绝对下限表承担；
+    #   incomplete（声明了基准却没排进采集清单）⇒ 配置错，拒判。
+    _basis = resolve_noise_basis(_clean, _clean in fixtures)
+    if _basis == "incomplete":
+        out["blindspot"] = (f"巡检夹具不含噪声基准 {_clean}"
+                            "——无同期基准，禁止判定（§8.1）")
+        return out
+    out["noise_basis"] = _basis
+    cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
+           "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
+           "--caldir", str(workdir), "--no-summary"]
+    # 生命周期（起进程 / 取消 / 超时 / 硬杀留痕）与标定共用 run_resample。
+    # 抽之前这里是 120 行内联副本：标定接进来必然要抄第二份，而 daemon 里
+    # cancel/quit 就是"同一意图两处各写一份"漏掉一处的实测教训（quit 分支
+    # 仍 os.kill 硬杀，跳过 finally 清理）。label 传"水通路"以保证留痕措辞
+    # 与抽取前逐字一致 —— 测试钉着"本轮水通路被取消""重采超时"这些文案。
+    r = run_resample(cmd, workdir, int(cfg_mon.get("waterline_timeout_s", 900)),
+                     role="resample", label="水通路")
+    for k in ("blindspot", "timed_out", "cancelled", "cancelled_clean", "killed"):
+        if k in r:
+            out[k] = r[k]
+    if out["blindspot"]:
+        return out
+    bundle = r["bundle"]
     # 判据链完全复用 m1_detect（含 G7 协议指纹校验、标定注入与面板），不改判据
     from scripts.m1_detect import (apply_calibration, latest_calibration,
                                    stats_from_windows)

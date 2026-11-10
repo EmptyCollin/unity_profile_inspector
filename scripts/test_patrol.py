@@ -557,6 +557,101 @@ def main():
         PP.unregister_profile(_l0.profile_id)
         PP.restore_profile(_snap)
 
+    print("== ⑦ 标定向导执行体（calibrate_round）==")
+    # 接线了就必须测执行体，否则"界面能点"只是菜单正确。run_resample/run_merge
+    # 是刻意留出的注入点（真跑占编辑器十几分钟）；断言覆盖四条留痕分支，外加
+    # 两条文档承诺：L0 必须**拒在采样之前**、命令里不得出现 --fixtures/--no-summary。
+    _cal_bdir = TMP / "cal_baselines"
+    _cal_bdir.mkdir(parents=True, exist_ok=True)
+
+    # —— L0：档案没配噪声基准 ⇒ 当场拒标，且一次采样都不起 ——
+    _snap0 = PP.snapshot_profile()
+    _l0b = PP.ProjectProfile(
+        profile_id="upi-cal-l0", project_path=TMP / "calproj",
+        git_root=TMP, subjects=["F-CPU-01"], clean_subject="",
+        fix_subject="", defect_signature="x")
+    PP.register_profile(_l0b, activate=True)
+    _rs_calls = []
+    _real_rs, _real_mg = P.run_resample, P.run_merge
+    P.run_resample = lambda cmd, wd, ts, **k: _rs_calls.append(cmd) or {
+        "blindspot": None, "bundle": wd / "multiwin_full.json"}
+    try:
+        r_l0 = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_l0",
+                                 baselines_dir=_cal_bdir)
+        check("L0 ⇒ 拒标并说清出路（配基准或只用绝对下限）",
+              r_l0["blindspot"] and "噪声基准" in r_l0["blindspot"]
+              and "下限" in r_l0["blindspot"], str(r_l0["blindspot"])[:80])
+        check("L0 拒在采样之前（不起编辑器，省一整轮成本）", _rs_calls == [],
+              str(len(_rs_calls)))
+    finally:
+        PP.unregister_profile(_l0b.profile_id)
+        PP.restore_profile(_snap0)
+
+    # —— L2（内置档案有 CLEAN）成功路径：回读阈值、命令不含 --fixtures ——
+    _th_fp = _cal_bdir / "thresholds_deadbeef.json"
+    _th_fp.write_text("{}", encoding="utf-8")
+    P.run_resample = lambda cmd, wd, ts, **k: _rs_calls.append(cmd) or {
+        "blindspot": None, "bundle": wd / "multiwin_full.json"}
+    P.run_merge = lambda cmd: (0, "合并完成 → thresholds.json\n阈值 17 项\n")
+    r_ok = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_ok",
+                             baselines_dir=_cal_bdir)
+    check("标定成功 ⇒ 回读本工程阈值文件路径",
+          r_ok["blindspot"] is None
+          and r_ok["thresholds"] == str(_th_fp), str(r_ok)[:120])
+    _cmd = _rs_calls[-1]
+    check("采集命令不写死 --fixtures（清单由档案 fixture_universe 给）",
+          "--fixtures" not in _cmd, str(_cmd)[:120])
+    check("标定保留摘要（load_multwin 首选数据源，不能 --no-summary）",
+          "--no-summary" not in _cmd, str(_cmd)[:120])
+    check("标定走 full 会话并带本工程 --caldir",
+          "--session" in _cmd and "full" in _cmd
+          and "--caldir" in _cmd, str(_cmd)[:90])
+
+    # —— 合并 rc≠0 ⇒ 原样带出 do_merge 的措辞，不替它编成因 ——
+    P.run_merge = lambda cmd: (1, "full 会话对照机制 CLEAN 数据缺失\n")
+    r_mg = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_mg",
+                             baselines_dir=_cal_bdir)
+    check("合并失败 ⇒ 盲区带 rc 与原始措辞（I2 不替它解释）",
+          r_mg["blindspot"] and "rc=1" in r_mg["blindspot"]
+          and "数据缺失" in r_mg["blindspot"], str(r_mg["blindspot"])[:90])
+
+    # —— 合并根本没跑起来（OSError/超时）⇒ 另一种留痕，不与 rc 混 ——
+    P.run_merge = lambda cmd: (P._MERGE_UNAVAILABLE, "TimeoutExpired: 180s")
+    r_un = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_un",
+                             baselines_dir=_cal_bdir)
+    check("合并未执行 ⇒ 说\"未能执行\"而非 rc（归因不同）",
+          r_un["blindspot"] and "未能执行" in r_un["blindspot"],
+          str(r_un["blindspot"])[:80])
+
+    # —— 合并报成功但阈值找不到 ⇒ 目录口径不一致，最危险的静默假成功 ——
+    _empty_bdir = TMP / "cal_baselines_empty"
+    _empty_bdir.mkdir(exist_ok=True)
+    P.run_merge = lambda cmd: (0, "合并完成\n")
+    r_ghost = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_ghost",
+                                baselines_dir=_empty_bdir)
+    check("合并成功但无阈值文件 ⇒ 报目录不一致，不静默当成功",
+          r_ghost["blindspot"] and "找不到" in r_ghost["blindspot"]
+          and r_ghost["thresholds"] is None, str(r_ghost["blindspot"])[:90])
+
+    # —— 取消留痕从 run_resample 透传（标定同样能被 c 停）——
+    # ⚠️ 不拿桩文本断言措辞（"标定被取消"是我在桩里写的话，断言它就是测桩
+    #   不测产品——本会话堵过多次的假绿）。改为**捕获产品传进 run_resample 的
+    #   关键字参数**：label/role 是产品自己的选择，这才测到东西。
+    _rs_kw = []
+    P.run_resample = lambda cmd, wd, ts, **k: _rs_kw.append(k) or {
+        "blindspot": "本轮被取消（rc=3）", "bundle": wd / "x.json",
+        "cancelled": True, "cancelled_clean": True}
+    P.run_merge = lambda cmd: (0, "合并完成\n")
+    r_canc = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_canc",
+                               baselines_dir=_cal_bdir)
+    check("标定取消 ⇒ 盲区与 cancelled 原样透传（不谎报成成功）",
+          r_canc.get("cancelled") is True and r_canc["blindspot"]
+          and r_canc["thresholds"] is None, str(r_canc)[:110])
+    check("标定用 label=标定 / role=calibrate（留痕可归因，不与巡检混）",
+          _rs_kw and _rs_kw[-1].get("label") == "标定"
+          and _rs_kw[-1].get("role") == "calibrate", str(_rs_kw[-1:])[:110])
+    P.run_resample, P.run_merge = _real_rs, _real_mg
+
     print("== ④ 配置：缺段不启用 / 非法拒收 ==")
     from upi.config.settings import LlmConfig, MonitorConfig
     check("缺 pipeline 段 ⇒ enabled=False（不猜默认）",
