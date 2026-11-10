@@ -338,13 +338,18 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items()
             if "windows" in v}
     cal = latest_calibration()
+    # 标定闸只在要跑相对判据（L2）时生效——与 m1_detect 同口径（阶段 8 设计
+    # §1：L0 只走绝对门槛，绝对下限不依赖标定。两处判据同源纪律）。
+    if cal is None and basis_relational(_basis):
+        out["blindspot"] = "无本工程标定文件，禁止未标定检测（§8.1）"
+        return out
     if cal is None:
-        out["blindspot"] = "无标定文件，禁止未标定检测（§8.1）"
-        return out
-    wln = [d for d in DEFAULT_REGISTRY if d.thresholds.threshold_source == "noise_calibration"]
-    if apply_calibration(wln, cal) != len(wln):
-        out["blindspot"] = "标定未覆盖全部水位检测器（§8.1 全量覆盖）"
-        return out
+        wln = []          # L0：相对通路整体跳过，只留下限腿
+    else:
+        wln = [d for d in DEFAULT_REGISTRY if d.thresholds.threshold_source == "noise_calibration"]
+        if apply_calibration(wln, cal) != len(wln):
+            out["blindspot"] = "标定未覆盖全部水位检测器（§8.1 全量覆盖）"
+            return out
     clean = fixs.get(_clean)
 
     # ── 采样有效前提闸（实测失焦轮撞出的失效模式）：束里夹具无窗口/判定
