@@ -15,8 +15,9 @@
     "你以为在测自己的工程，实际测的是夹具"，数字全都正常而结论全错。
 
 同时钉住一条验收线：内置档案的派生值与阶段 7 之前的硬编码**逐字一致**
-（"重构不改行为"），以及一条诚实边界：profile_id 尚未进入协议指纹
-（批 2），当前跨工程对比的保护只来自 scene_guid（场景文件内容哈希）。
+（"重构不改行为"）。批 2 已把 profile 归属并入协议指纹与 G7 比较闸（见 ⑥），
+批 4 又把"对照机制名 + 默认采样清单"从写死字面量改为按档案派生（见 ④b，
+那三条断言走子进程 + 直调真实函数，同形表达式的写法已被变异测试证伪）。
 """
 from __future__ import annotations
 
@@ -280,6 +281,71 @@ def main() -> int:
            str(touched)[:90])
         ok("touched_assets 与 diffs 同源（无第二份文件路径）",
            ep.get("touched_assets") == touched, str(ep.get("touched_assets"))[:80])
+
+        # ── 批 4：对照机制名与默认采样清单由档案派生，且**新进程也拿到** ──
+        # 这两处原本写死字面量（ALL_FIXTURES = ["F-CPU-01", ..., "CLEAN"]、
+        # fixs.get("CLEAN")）。写死的失效方式很阴：换工程后清单不跟着变，
+        # 每个场景都判"不存在"、整轮拿 0 数据，而报错写成"场景不存在"——
+        # 看着像新工程没配场景，实际是清单属于旧工程（排查方向指错）。
+        #
+        # ⚠️ 必须起子进程，不能在本进程 import：ALL_FIXTURES 与 CL.CLEAN_ID
+        #   都是**模块导入时**取的档案值，本进程前面已 use_profile 切过好几回，
+        #   直接 import 只会拿到导入那一刻的缓存值，换档案不生效也不会报错。
+        #   守护/巡检正是另起进程跑 m1_multiwin 的，判据要还原这个真实形态。
+        # ⚠️ register_profile(activate=False) 不落盘，所以子进程读不到档案：
+        #   必须像上面那样手写 projects/<id>.json（上面 ③ 同样这么做过）。
+        _b4 = ProjectProfile(
+            profile_id=PID + "-b4", display_name="派生清单探针",
+            project_path=ALT, git_root=ALT,
+            scenes_dir="Scenes", scene_template="Scene-{subject}.unity",
+            assets_root="Runtime", subject_dir_style="hyphen",
+            subjects=["F-ALT-9A", "F-ALT-9B"], clean_subject="CLEAN-99",
+            subject_file="Runtime/F-CPU-01/SkillRunner.cs",
+            fix_subject="F-ALT-9A",
+            defect_signature="var ready = new List<SkillRuntime>();",
+            quality_tier="built-in-medium")
+        PP.register_profile(_b4, activate=False)
+        _pf2 = ROOT / "projects" / f"{PID}-b4.json"
+        _pf2.write_text(json.dumps({
+            "profile_id": _b4.profile_id, "project_path": str(ALT),
+            "git_root": str(ALT), "scenes_dir": _b4.scenes_dir,
+            "scene_template": _b4.scene_template, "assets_root": _b4.assets_root,
+            "subject_dir_style": _b4.subject_dir_style, "subjects": _b4.subjects,
+            "clean_subject": _b4.clean_subject, "subject_file": _b4.subject_file,
+            "fix_subject": _b4.fix_subject,
+            "defect_signature": _b4.defect_signature,
+            "quality_tier": _b4.quality_tier}, ensure_ascii=False), encoding="utf-8")
+        try:
+            # ⚠️ 这里必须调 default_fixture_list()，不能照抄
+            # `MW._PROF.subjects[:2]` 这种同形表达式：抄表达式打印出来的值
+            # 和代码里的表达式一起变，把代码退回写死字面量也照样绿
+            # （上一版就是这么写的，变异测试当场证实它没有牙齿）。
+            _r = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys;sys.path.insert(0,%r);"
+                 "import scripts.m1_multiwin as MW;"
+                 "from upi.tooling import checklist as CL;"
+                 "print('U', MW.default_fixture_list(True));"
+                 "print('Q', MW.default_fixture_list(False));"
+                 "print('C', CL.CLEAN_ID)" % str(ROOT)],
+                capture_output=True, text=True, timeout=180,
+                env=dict(os.environ, UPI_PROFILE=_b4.profile_id),
+                encoding="utf-8", errors="replace")
+            _o, _e = _r.stdout, (_r.stdout + _r.stderr)[:200]
+            ok("批4 新进程默认采样清单来自档案（对照在前、无夹具名残留）",
+               "U ['CLEAN-99', 'F-ALT-9A', 'F-ALT-9B']" in _o, _e)
+            # 快速会话清单旧版写死 ["F-CPU-01","F-GPU-01"]：它取的是**被测机制**，
+            # 不该含对照名（对照只在 full 会话同轮在场时才需要）。
+            ok("批4 新进程快速会话清单来自档案且不含对照名",
+               "Q ['F-ALT-9A', 'F-ALT-9B']" in _o, _e)
+            # CLEAN_ID 不是纯标签：split_of() 用 fid == CLEAN_ID 判第三态。
+            # 写死会让新工程的负样本被错分成 tuning/holdout，混进检出率分母。
+            ok("批4 体检表第三态判据按档案取对照名",
+               "C CLEAN-99" in _o, _e)
+        finally:
+            _pf2.unlink(missing_ok=True)
+            PP.unregister_profile(_b4.profile_id)
+        ok("批4 探针档案已清（不污染 projects/）", not _pf2.exists(), str(_pf2))
 
         # 夹具清单优先级：配置文件显式声明 > 档案缺省（用户意图优先，
         # 与 enabled 同规则）。档案只在没写的时候兜缺省。

@@ -100,8 +100,27 @@ def report_done() -> None:
             os.replace(tmp, PROGRESS_FP)
         except OSError:
             pass
-ALL_FIXTURES = ["F-CPU-01", "F-GPU-01", "F-ANIM-01", "F-LOAD-01", "CLEAN"]
+# 默认机制清单改由档案派生（阶段 7）。此前它写死在这里，换档案后清单不跟着变，
+# 于是每个场景都判"不存在"、整轮拿 0 数据，报错还像"新工程没配场景"。
+# 顺序按 fixture_universe 既有口径（对照在前），与守护缺省清单同排序，
+# 免得"界面显示 5 个、守护实际采 4 个"这种不会被测试发现的少采。
+ALL_FIXTURES = _PROF.fixture_universe()
 WINDOWS_FULL = 4      # 全量会话窗口数（n=4≥3，窗口间 σ 成立）
+
+
+def default_fixture_list(full_session: bool) -> list[str]:
+    """没传 --fixtures 时该采哪些机制（清单的唯一来源，供测试直调）。
+
+    为什么做成函数而不是就地写三元表达式：就地写的快速分支与
+    `_PROF.subjects[:2]` 同形，测试只要照着打印同一个表达式就**测不到它**——
+    把代码改回写死字面量，断言结果不变，是典型的无牙齿断言（本仓反复犯的那类）。
+    抽出来之后测试调的就是这个函数，退回写死当场变红。
+
+    全量会话用 fixture_universe（对照在前，与守护缺省清单同排序）；
+    快速会话只采被测机制、不含对照——subjects 按档案校验规则绝不含对照名
+    （profile 硬拒 clean_subject ∈ subjects），所以这里不需要再去重过滤。
+    """
+    return list(ALL_FIXTURES) if full_session else _PROF.subjects[:2]
 
 # 复用 m1_baseline 的注入源码（采样器已含 gc/mem/anim/graph 四路，文件控制协议+nonce）
 from scripts.m1_baseline import SAMPLER_SRC  # noqa: E402
@@ -356,7 +375,8 @@ def main() -> int:
     # 采前同步闸（00:40 轮实测漏检的根治点）：编辑器内存程序集必须与磁盘代码
     # 一致才能采。回滚/手改文件不触发资产导入，脏内存会让采样测到"盘上不存在"
     # 的代码——这种数据比采不到更有害（漏检伪装成正常）。
-    fixtures = args.fixtures or (ALL_FIXTURES if FULL_SESSION else ["F-CPU-01", "F-GPU-01"])
+    # 清单口径见 default_fixture_list()（抽成函数是为了让测试能直调真实入口）。
+    fixtures = args.fixtures or default_fixture_list(FULL_SESSION)
     report("sync_editor", windows_total=len(fixtures),
            note="编辑器内存程序集与磁盘代码收敛中")
     ok_sync, why_sync = sync_editor_code()
@@ -474,9 +494,9 @@ def do_merge() -> int:
         print("缺 multiwin_full.json")
         return 1
     full = json.loads(fp_full.read_text(encoding="utf-8"))
-    clean = full["fixtures"].get("CLEAN", {})
+    clean = full["fixtures"].get(_PROF.clean_subject, {})
     if "error" in clean or not clean.get("windows"):
-        print("full 会话 CLEAN 数据缺失")
+        print(f"full 会话对照机制 {_PROF.clean_subject} 数据缺失")
         return 1
     bw = between_windows(clean["windows"])
     a2keys = ("gc", "anim", "mem", "graph")
@@ -518,7 +538,11 @@ def do_merge() -> int:
     if fp_idle.exists():
         idle = json.loads(fp_idle.read_text(encoding="utf-8"))
         rows = []
-        for fx in ("F-CPU-01", "F-GPU-01"):
+        # 开销标定取哪两个机制：按档案取前两个被测机制。内置档案实测
+        # subjects[:2] == ["F-CPU-01", "F-GPU-01"]，与旧写死字面逐字同值同序
+        # ⇒ 对现有标定行为不变。换工程时它才拿得到束，否则 overhead 恒为 None，
+        # 表现是"开销没标定"而不说"档案没配"——报错指向错误成因。
+        for fx in _PROF.subjects[:2]:
             wn = None
             fp_none = CALDIR / "multiwin_none.json"
             if fp_none.exists():

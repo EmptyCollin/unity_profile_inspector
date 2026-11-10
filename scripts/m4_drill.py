@@ -82,7 +82,7 @@ def dry_run() -> int:
           f"（{Path(cal['_path']).name}）")
     fixs = {k: stats_from_windows(v) for k, v in mw["fixtures"].items()
             if "windows" in v}
-    issue, detail = compare(det, fixs[FIXTURE], fixs["CLEAN"])
+    issue, detail = compare(det, fixs[FIXTURE], fixs[CLEAN])
     if issue is None:
         print("   !! 当前夹具未检出（detail:", detail.get("verdict"), "）")
         return 1

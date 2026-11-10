@@ -178,10 +178,11 @@ def check_thresholds(sp: dict) -> None:
     if not med:
         fail("S2", f"标定束 {CAL.name} 不存在或解析为空 ⇒ 阈值来源不可追溯")
         return
-    if "CLEAN" not in med:
-        fail("S2", "标定束缺 CLEAN 条目，无法建立阈值的正向来源")
+    _clean = CL.CLEAN_ID   # 对照机制名由档案派生（阶段 7），不写死
+    if _clean not in med:
+        fail("S2", f"标定束缺 {_clean} 条目，无法建立阈值的正向来源")
         return
-    clean_stats = med["CLEAN"]
+    clean_stats = med[_clean]
     hold = {k for k, v in CL.defect_split().items() if v == "holdout"}
     traced = leak = untraceable = 0
     for fp in files:
@@ -190,7 +191,7 @@ def check_thresholds(sp: dict) -> None:
             cm = t.get("clean_median")
             if not isinstance(cm, (int, float)):
                 continue
-            # ── 正向判据：阈值本就只能来自 CLEAN 噪声标定，所以"能由 CLEAN
+            # ── 正向判据：阈值本就只能来自对照机制的噪声标定，所以"能由它
             #   重算出来"才是合规证据。容差按生成侧口径 round(median, 4)
             #   （实测 cpuFrameTimeMs 存 1.3376、重算 1.33755 即此差）。
             from_rounded = (metric in clean_stats
@@ -199,11 +200,11 @@ def check_thresholds(sp: dict) -> None:
                 traced += 1
                 continue
             untraceable += 1
-            fail("S2", f"{fp.name}:{metric} clean_median={cm} **无法由 CLEAN 重算得到**"
-                       f"（CLEAN 同项={clean_stats.get(metric, '缺失')}）"
+            fail("S2", f"{fp.name}:{metric} clean_median={cm} **无法由 {_clean} 重算得到**"
+                       f"（{_clean} 同项={clean_stats.get(metric, '缺失')}）"
                        "⇒ 来源不明：可能是手工回调过，或标定束已换而阈值未重生成"
                        "（§8.1 禁止为检出某缺陷而回调阈值）")
-            # ── 反向判据：只有"等于某夹具中位、且无法由 CLEAN 解释"才算泄漏。
+            # ── 反向判据：只有"等于某夹具中位、且无法由对照解释"才算泄漏。
             #   教训（本轮实测）：最初写成"等于留出夹具中位即违规"，撞上
             #   triangles/vertices/setPassCalls 三项**假阳性**——注入的缺陷
             #   没有改变场景几何与 SetPass 结构，这些量在 CLEAN 与留出夹具上
@@ -214,8 +215,8 @@ def check_thresholds(sp: dict) -> None:
                 if hv is not None and abs(float(hv) - float(cm)) < 1e-9:
                     leak += 1
                     fail("S2", f"{fp.name}:{metric} clean_median={cm} 等于留出夹具 {fx} "
-                               "的中位，且无法由 CLEAN 解释 ⇒ 阈值取自留出实现（§8.1 违规）")
-    INFO.append(f"S2 阈值来源：{len(files)} 份文件，{traced} 项可回溯至 CLEAN，"
+                               f"的中位，且无法由 {_clean} 解释 ⇒ 阈值取自留出实现（§8.1 违规）")
+    INFO.append(f"S2 阈值来源：{len(files)} 份文件，{traced} 项可回溯至 {_clean}，"
                 f"{untraceable} 项来源不明，{leak} 项疑似取自留出夹具")
 
 
