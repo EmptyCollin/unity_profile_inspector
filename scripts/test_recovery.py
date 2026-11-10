@@ -362,13 +362,73 @@ c.close()
 
 
 # ─────────── ⑧ 元断言：自愈不越权 ───────────
+def _threshold_write_calls(text):
+    """守护里"把含 threshold 的字面量当路径去写文件"的调用点。
+
+    为什么用 AST 而不是 `"thresholds" not in src`：本文件 _kill_calls 的注释
+    早就立了这条规矩——字符串计数会把"解释为什么不用它/转发一个叫这名的字段"
+    都算成"在用它"。标定向导接线后守护会 `E.emit(..., thresholds=res.get("thresholds"))`
+    转发一个**事件字段名**（阈值文件仍只由 do_merge 生产），粗扫描就误伤成越权。
+    真正的约束是"守护不许生成阈值文件"，所以只看写原语的**路径实参**里有没有
+    threshold —— 事件名、取值键、注释都不算。
+    """
+    import ast as _ast
+    W = {"write_text", "atomic_write", "atomic_write_text", "replace", "open"}
+    hits = []
+    for n in _ast.walk(_ast.parse(text)):
+        if isinstance(n, _ast.Call):
+            fname = getattr(n.func, "attr", None) or getattr(n.func, "id", "")
+            if fname in W:
+                for c in _ast.walk(n):
+                    if (isinstance(c, _ast.Constant) and isinstance(c.value, str)
+                            and "threshold" in c.value.lower()):
+                        hits.append(f"{fname}:{c.value[:40]}")
+                        break
+    return hits
+
+
+def _calibrate_triggering_methods(text):
+    """Daemon 里哪些方法会**发起**标定（引用 _start_calibrate/_calibrate/
+    calibrate_round）。安全不变量：只有人工命令派发能发起，排期主循环不能。
+
+    这条比"守护不许提标定"强：标定现在是合法的人工功能（界面 l 要输 token），
+    但绝不能被排期器**自动**触发——那等于阈值未经人批准就被反复重写，正是
+    §3 blocked 档要防的。用 AST 找调用图，不靠文本出现。
+    """
+    import ast as _ast
+    tree = _ast.parse(text)
+    cls = [n for n in tree.body
+           if isinstance(n, _ast.ClassDef) and n.name == "Daemon"]
+    if not cls:
+        return {"<no Daemon class>": {"<structure changed>"}}
+    trig = {"_start_calibrate", "_calibrate", "calibrate_round"}
+    out = {}
+    for f in cls[0].body:
+        if isinstance(f, _ast.FunctionDef):
+            names = set()
+            for c in _ast.walk(f):
+                if isinstance(c, _ast.Attribute) and c.attr in trig:
+                    names.add(c.attr)
+                elif isinstance(c, _ast.Name) and c.id in trig:
+                    names.add(c.id)
+            if names:
+                out[f.name] = names
+    return out
+
+
 print("== ⑧ 自愈动作的边界（不许自动做的事） ==")
 src = (ROOT / "upi" / "agents" / "daemon.py").read_text(encoding="utf-8")
 ok("守护不调 git 写操作（回滚属 fix/review 节点，守护只做调度）",
    "git commit" not in src and "reset --hard" not in src)
-ok("守护不写阈值/权重/权限矩阵（AGENTS §3 blocked 档）",
-   "thresholds" not in src.split("class Daemon")[1]
-   and "permission_tier" not in src)
+_twc = _threshold_write_calls(src)
+ok("守护不生成阈值文件（§3 blocked 档：路径实参里无 threshold 写操作）",
+   not _twc, str(_twc)[:120])
+_cal_methods = _calibrate_triggering_methods(src)
+ok("标定只能由人工命令发起（run_forever/_start_round 不引用任何标定触发）",
+   "run_forever" not in _cal_methods and "_start_round" not in _cal_methods,
+   str(_cal_methods)[:140])
+ok("标定确经人工派发路径可达（界面 l 接上了，不是死代码）",
+   "_dispatch_cmd" in _cal_methods, str(_cal_methods)[:140])
 ok("不按进程名批量杀（G10）", "taskkill" not in src
    and "/IM" not in src)
 

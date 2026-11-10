@@ -92,15 +92,16 @@ cases = [
     (UA.AWAITING, {UA.ACT_VIEW_TICKET, UA.ACT_STOP_DAEMON, UA.ACT_DECIDE},
      {UA.ACT_RUN_NOW, UA.ACT_CANCEL, UA.ACT_PAUSE}),
     (UA.PAUSED, {UA.ACT_RESUME}, {UA.ACT_RUN_NOW, UA.ACT_PAUSE}),
-    (UA.UNCALIBRATED, {UA.ACT_SNAPSHOT, UA.ACT_REGISTER, UA.ACT_FLOOR},
-     {UA.ACT_RUN_NOW, UA.ACT_CALIBRATE}),
+    (UA.UNCALIBRATED, {UA.ACT_SNAPSHOT, UA.ACT_REGISTER, UA.ACT_FLOOR,
+                       UA.ACT_CALIBRATE},
+     {UA.ACT_RUN_NOW}),
 ]
 # ⚠️ 两个期望必须避开"未接线"与"同键去重"这两条实现规则，否则测试与
 #   实现互相矛盾：
-#     · 未接线动作（calibrate）在所有态都置灰，不能期待可用；
-#       register/floor 已在阶段 8 接线（本地流程），故 UNCALIBRATED 里
-#       它们进 must_on —— 未标定态恰恰是"注册完还没标定"的状态，注册和
-#       配下限表都该能点，只有标定本身因走守护命令通道仍置灰。
+#     · 接线状态变了（阶段 8 把 register/floor/calibrate 都接上了）期望就要跟着
+#       改：UNCALIBRATED 是"注册完还没标定"的态，标定(l)恰恰是这个态最该能点的
+#       动作，走守护命令通道（calibrate 抢编辑器，与 run_now 互斥）。
+#       NO_DAEMON 下 calibrate 仍置灰——命令通道没人收，这条由 _REASONS 兜。
 #     · 同键去重会把已可用键的禁用同态项从菜单里摘掉——"没列出"等于
 #       "没被开启"，must_off 因此要按 .get(n, False) 判。
 for state, must_on, must_off in cases:
@@ -127,16 +128,22 @@ for state, _on, must_off in cases:
         ok(f"{state} 至少有一条带原因的禁用项或全被去重", True, "")
 
 # 未接线动作在任何态都不得可用。
-# ⚠️ register_project / edit_floor_table 已从这份名单移除——阶段 8 接成了本地
-#   流程（cmd=None，落盘走 onboarding），不再是"按下去必然失败"的占位。
-#   calibrate 仍在列：标定要占编辑器跑采样，必须走守护命令通道，那是下一批。
-#   这条断言的作用就是"还没接的能力不许偷偷变成可点"。
+# 阶段 8 收尾：register/floor/calibrate 都已接线，_unwired_names 现在是空的。
+# 名单空时下面的 for 跑 0 次（既不过也不败），所以守门语义落在**最后那条
+# isdisjoint 断言**上——它现在为真，日后谁把这三个之一重新标回 wired=False
+# 就立刻变红。不要再往这里加 ok(..., True, "") 式的恒真占位（本仓堵过多次：
+# 名字写着测 A、实际不测任何东西）。
 print("== ②b 未接线能力一律置灰 ==")
-for name in ("calibrate",):
+_unwired_names = [a["name"] for a in UA._ALL_ACTIONS if not a.get("wired", True)]
+for name in _unwired_names:
     bad = [s for s in UA.ALL_STATES
            if any(a["name"] == name and a["enabled"]
                   for a in UA.actions_for(s))]
     ok(f"{name} 在所有态均不可用", not bad, str(bad))
+ok("阶段 8 接线完成：register/floor/calibrate 均已不在未接线名单",
+   set(_unwired_names).isdisjoint(
+       {UA.ACT_REGISTER, UA.ACT_FLOOR, UA.ACT_CALIBRATE}),
+   f"仍未接={_unwired_names}")
 
 # 同键去重：一个键只要有可用动作，就不该再列同键的禁用项
 print("== ②c 同键不并排显示 ==")
@@ -698,21 +705,33 @@ finally:
 
 # ───────── ⑩ 键位文档与动作表差集核对 ─────────
 # 阶段 6 立的判据形态：文档命令表与代码清单的差集必须为空，靠人记会漏。
-# 接线状态变化时（本批 n/f 解禁、l 仍未接）文档若不同步，用户按到的就是
-# 一个说明书里没有的键 —— 比功能缺失更难查，因为看起来"文档说它存在"。
+# 接线状态会变（阶段 8 把 n/f/l 陆续接上了），文档不同步就是"说明书里
+# 找不到那个键"或"说它没接其实能点"——后者更坏：用户以为功能缺失，绕去
+# 命令行，而界面本该支持。所以双向核对，不是单向。
 print("== ⑩ 使用说明键位表与动作表对齐 ==")
 import re as _re  # noqa: E402
 _doc = (ROOT / "docs" / "使用说明.md").read_text(encoding="utf-8")
-_doc_keys = set(_re.findall(r"^\| `(.)` \|", _doc, _re.M))
+# 逐行取 (键 → 该行说明文字)：只按全文子串判断会恒真——"尚未接线"四个字
+# 出现在任意一行，所有键都算"标注了"（我上一版就是这么错的）。
+_doc_rows = {m.group(1): m.group(2)
+             for m in _re.finditer(r"^\| `(.)` \|(.*)$", _doc, _re.M)}
+_doc_keys = set(_doc_rows)
 _code_keys = {a["key"] for a in UA._ALL_ACTIONS}
 ok("代码有而文档无的键 ⇒ 补文档", not (_code_keys - _doc_keys),
    sorted(_code_keys - _doc_keys))
 ok("文档有而代码无的键 ⇒ 文档写了不存在的键", not (_doc_keys - _code_keys),
    sorted(_doc_keys - _code_keys))
-_unwired = {a["key"] for a in UA._ALL_ACTIONS if not a.get("wired", True)}
-ok("未接线的键必须在文档里标\"尚未接线\"（不许默默列成可用）",
-   all(f"`{k}`" in _doc and "尚未接线" in _doc for k in _unwired),
-   f"未接线={sorted(_unwired)}")
+# 双向接线核对：未接线的键必须在文档里标出来；**已接线的键不得被标成未接线**
+# （后者是本批真实撞到的：l 接好了、文档两处仍写"尚未接线"，正向断言放行）。
+_wired_map = {a["key"]: bool(a.get("wired", True)) for a in UA._ALL_ACTIONS}
+_stale_unwired = sorted(k for k, wired in _wired_map.items()
+                        if wired and "尚未接线" in _doc_rows.get(k, ""))
+_missing_mark = sorted(k for k, wired in _wired_map.items()
+                       if not wired and "尚未接线" not in _doc_rows.get(k, ""))
+ok("已接线的键不许在文档里仍标\"尚未接线\"（接线后文档必须同步）",
+   not _stale_unwired, _stale_unwired)
+ok("未接线的键必须在文档里标出（不许默默列成可用）",
+   not _missing_mark, _missing_mark)
 
 print(f"\nUI 动作层测试：{len(PASS)} 通过 / {len(FAIL)} 失败")
 for f in FAIL:
