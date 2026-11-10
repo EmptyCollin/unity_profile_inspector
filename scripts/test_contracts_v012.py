@@ -52,7 +52,7 @@ ev_a2 = models.Evidence(tool="probe", value=2e5, unit="B/frame", data_tier="A2")
 sig = models.IssueSignature(dim="m", metric="m", mechanism="mech_x", threshold=1.0)
 
 # ── G19：episode 必须逐帧源；渲染计数禁注 GPU 逐笔 spike ─────────
-DET_BASE = dict(id="DET-T", link="gpu", fixture="F", unit="ms",
+DET_BASE = dict(id="DET-T", link="gpu", subject="F", unit="ms",
                 thresholds=Thresholds(min_magnitude=16.7))
 
 
@@ -72,13 +72,13 @@ def rej_gpu_spike_even_with_tier():
 
 def ok_gpu_a4_episode_human():
     Detector(metric="gpuFrameTimeMs", source_tier="A4", ptype="episode",
-             attribution_source="human", link="gpu", id="DET-T", fixture="F",
+             attribution_source="human", link="gpu", id="DET-T", subject="F",
              unit="ms", thresholds=Thresholds(min_magnitude=16.7))
 
 
 def rej_gpu_a4_episode_auto():
     Detector(metric="gpuFrameTimeMs", source_tier="A4", ptype="episode",
-             attribution_source="auto", link="gpu", id="DET-T", fixture="F",
+             attribution_source="auto", link="gpu", id="DET-T", subject="F",
              unit="ms", thresholds=Thresholds(min_magnitude=16.7))
 
 

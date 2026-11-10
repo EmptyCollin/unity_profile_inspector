@@ -63,13 +63,13 @@ _START_BLOCK = re.compile(r"private\s+void\s+Start\s*\(\)", re.M)
 
 
 def _fixture_dir_of(det: Detector) -> Path | None:
-    """det.fixture（如 F-CPU-01）→ 对应资产目录。CLEAN 变体无目录=无候选，合法。
+    """det.subject（如 F-CPU-01）→ 对应资产目录。CLEAN 变体无目录=无候选，合法。
 
     阶段 7：目录根与"机制编号→目录名"的转换风格都由 profile 给出
     （原写法 FIXTURE_ASSETS / name.replace("-","_") 把工程位置和下划线
     约定一起钉死在代码里；接一个用别的命名风格的工程就得改这里）。
     """
-    d = active_profile().subject_asset_dir(det.fixture)
+    d = active_profile().subject_asset_dir(det.subject)
     return d if d.is_dir() else None
 
 

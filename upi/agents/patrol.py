@@ -156,7 +156,7 @@ def patrol_episode(cfg_mon: dict) -> dict:
     by_fx = {}
     for d in DEFAULT_REGISTRY:
         if d.ptype == "episode":
-            by_fx.setdefault(d.fixture, []).append(d)
+            by_fx.setdefault(d.subject, []).append(d)
     judged_any = []
     for fx, dets in by_fx.items():
         for det in dets:
@@ -344,11 +344,11 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     raw_fx = mw.get("fixtures", {})
     missing = []
     for det in wln:
-        if det.fixture not in requested:
+        if det.subject not in requested:
             continue
-        if det.metric not in (fixs.get(det.fixture) or {}):
-            err = str((raw_fx.get(det.fixture) or {}).get("error", "无窗口数据"))
-            missing.append(f"{det.fixture}({det.metric}): {err[:80]}")
+        if det.metric not in (fixs.get(det.subject) or {}):
+            err = str((raw_fx.get(det.subject) or {}).get("error", "无窗口数据"))
+            missing.append(f"{det.subject}({det.metric}): {err[:80]}")
     if clean is None:
         missing.append("CLEAN 无有效统计——无对照基线，禁止判定（§8.1）")
     if missing:
@@ -356,7 +356,7 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
         return out
 
     for det in wln:
-        fx = fixs.get(det.fixture)
+        fx = fixs.get(det.subject)
         if fx is None or clean is None:
             continue
         issue, detail = compare(det, fx, clean)
@@ -370,7 +370,8 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
             # 扩展（跨工具解析失败），且 None 逼消费方去看标注而不是拿伪数
             # 当依据（I1）。检出本身仍成立（绝对增量门限，A2 既定修法）。
             out["findings"].append({
-                "kind": "issue", "ptype": "waterline", "fixture": det.fixture,
+                # 键名沿用 fixture（落盘契约），取值换成机制字段
+                "kind": "issue", "ptype": "waterline", "fixture": det.subject,
                 "detector": det.id, "metric": det.metric,
                 "magnitude": issue.magnitude,
                 "deviation_ratio": None if undef else dr,
