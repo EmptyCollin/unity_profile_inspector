@@ -443,6 +443,55 @@ def main() -> int:
        and PP.owner_profile_id({"profile": "ext-game"}) == "ext-game",
        "缺键或显式值判错")
 
+    # ── 批 4b：档位从"恒等比较（假闸）"修成真判据 ──
+    # 缺陷成因：采样端从来没把 quality_tier 写进 protocol，检测端读的是
+    # proto.get("quality_tier", "urp-balanced") ⇒ 数据侧与阈值侧都落到同一个
+    # 硬编码缺省，G7_COMPARE_FIELDS 里的 quality_tier 永远相等、换档位拦不住。
+    # 三条判据分别钉"写出/读入/回落"三个环节，且全部直调产品函数：
+    # 测试自己复刻推导等于没测（产品改了清单、复刻副本不会跟着变）。
+    import scripts.m1_multiwin as MW
+    _f = MD.fingerprint_from_protocol
+    _builtin_tier = PP.load_profile(PP.DEFAULT_PROFILE_ID).quality_tier
+
+    # ①写出：protocol_block 必须含档位键（把那一行删掉 ⇒ 本条变红）
+    _pb = MW.protocol_block()
+    ok("批4b 采样端把档位写进 protocol（假闸根因：过去从不写这个键）",
+       "quality_tier" in _pb, str(list(_pb))[:120])
+
+    # ②读入：键存在时按声明值取，不能被硬编码缺省盖掉
+    ok("批4b 检测端读取 protocol 里声明的档位",
+       _f({"quality_tier": "built-in-medium"}, "x", "env", 4).quality_tier
+       == "built-in-medium")
+
+    # ③回落：缺键按【归属档案】取，不是写死缺省。分两半——
+    #   内置档案那半钉"历史不作废"（回落值必须仍逐字等于旧缺省 urp-balanced）；
+    #   非内置档案那半才是真牙齿：旧代码写死 urp-balanced，档案档位不同就会红。
+    _probe = ProjectProfile(
+        profile_id=PID + "-qt", display_name="档位回落探针",
+        project_path=ALT, git_root=ALT, scenes_dir="Scenes",
+        scene_template="Scene-{subject}.unity", assets_root="Runtime",
+        subject_dir_style="hyphen", subjects=["F-QT-01"], clean_subject="QC-0",
+        subject_file="Runtime/F-QT-01/A.cs", fix_subject="F-QT-01",
+        defect_signature="x", quality_tier="high-fidelity-probe")
+    PP.register_profile(_probe, activate=False)
+    try:
+        ok("批4b 缺键回落=内置档案档位，与旧硬编码逐字相同（历史不作废）",
+           _f({"profile": PP.DEFAULT_PROFILE_ID}, "x", "env", 4).quality_tier
+           == _builtin_tier == "urp-balanced")
+        ok("批4b 缺键回落跟随归属档案（旧写死 urp-balanced 时此条变红）",
+           _f({"profile": _probe.profile_id}, "x", "env", 4).quality_tier
+           == "high-fidelity-probe")
+    finally:
+        PP.unregister_profile(_probe.profile_id)
+
+    # ④端到端：新数据写了新档位、阈值缺键回落内置 ⇒ G7 必须报出 quality_tier
+    _mism = MD.g7_mismatches(
+        _f({"quality_tier": "built-in-medium"}, "x", "env", 4),
+        _f({"profile": PP.DEFAULT_PROFILE_ID}, "x", "env", 4))
+    ok("批4b 档位差异被 G7 拦下（恒等比较已变真判据）",
+       "quality_tier" in _mism, str(_mism)[:80])
+
+
     # 环境指纹的标签位：内置档案 id 与工程目录名同值 ⇒ 历史 env_fingerprint
     # 逐字节不变（若这里变了，跨 profile 改造会把旧数据全判成环境漂移）。
     from upi.tooling.trace import environment_fingerprint as EF

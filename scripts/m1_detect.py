@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.config.project_profile import active_profile, owner_profile_id  # noqa: E402
+from upi.config.project_profile import active_profile, load_profile, owner_profile_id  # noqa: E402
 from upi.core.conflicts import run_pair, run_snapshot                    # noqa: E402
 from upi.core.detector import DEFAULT_REGISTRY                    # noqa: E402
 from upi.core.models import Evidence, Fingerprint, Issue, IssueSignature  # noqa: E402
@@ -205,16 +205,33 @@ def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
     内置档案）。这里**不取当前运行档案的值**：指纹要描述"这份数据是怎么
     采出来的"，不是"现在是谁在跑"——取当前值的话，换档案后重跑检测会让
     同一份旧数据的指纹跟着变，历史数据被改写成本源，G7 就失去了可比依据。
+    quality_tier 的缺省回落同理走这条归属链（见下面 _qt），理由与上面一致。
+
+    ⚠️ quality_tier 曾经写成 `proto.get("quality_tier", "urp-balanced")`：
+      而采样端从来没把这个键写进 protocol（实测历史束只有 warmup /
+      window_polls / poll_interval_s），所以数据侧与阈值侧**都落到同一个
+      硬编码缺省**，G7_COMPARE_FIELDS 里的 quality_tier 于是变成恒等比较
+      ——换了档位也不会被拦，看着有保护其实是假闸。现在采样端按档案写出
+      真值，缺键（历史数据）回落到归属档案的档位；归属档案也解析不出来
+      时记 "unknown"：两份都不知 ⇒ 相等放行（历史数据不作废），
+      一知一不知 ⇒ 不等 ⇒ 拦下，方向严格是"更严"而不是放松。
     """
     import hashlib
     try:
         blob = Path(source_path).read_bytes()
     except Exception:  # noqa: BLE001
         blob = source_path.encode("utf-8", "replace")
+    if "quality_tier" in proto:
+        _qt = proto["quality_tier"]
+    else:
+        try:
+            _qt = load_profile(owner_profile_id(proto)).quality_tier
+        except Exception:  # noqa: BLE001  档案解析不出来 ⇒ 不猜一个看着正常的值
+            _qt = "unknown"
     return Fingerprint(
         scene_guid="sha256:" + hashlib.sha256(blob).hexdigest()[:8],
         replay_script_hash="none-v0",              # T2 未建，如实缺省
-        quality_tier=proto.get("quality_tier", "urp-balanced"),
+        quality_tier=_qt,
         warmup_samples=int(proto.get("warmup", 8)),
         window_samples=int(proto.get("window_polls", 20)),
         n_samples=int(windows_target),
