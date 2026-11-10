@@ -122,6 +122,31 @@ def default_fixture_list(full_session: bool) -> list[str]:
     """
     return list(ALL_FIXTURES) if full_session else _PROF.subjects[:2]
 
+
+def protocol_block() -> dict:
+    """写进 bundle 的 protocol 块（G7 指纹的数据侧来源，供测试直调）。
+
+    ⚠️ 抽成函数的原因与 default_fixture_list 同：就地写字面量字典时，
+      测试只能照抄同一个表达式，"少写一个键"这种缺陷测不出来。
+
+    quality_tier 此前**从来没被写进 protocol**。实测现存四份产物
+      （calibration/multiwin_full.json 与其 summary、两份
+      baselines/thresholds_*.json）的 protocol 一律只有
+      warmup / window_polls / poll_interval_s 三键——批 2 加的 profile_id
+      同样只在代码里写、这些历史文件里也没有（所以两份数据的归属都靠
+      owner_profile_id 的"缺键 ⇒ 内置档案"判定）。检测端原先读
+      `proto.get("quality_tier", "urp-balanced")`，数据侧与阈值侧都落到
+      同一个硬编码缺省，于是 G7_COMPARE_FIELDS 里的 quality_tier 是一项
+      **恒等比较（假闸）**：换档位不会被拦，看着有保护其实没有。现在写出真值。
+    历史束缺这个键 ⇒ 检测端回落到**归属档案**（owner_profile_id 指的那个档案，
+      **不是当前运行档案**）的档位——理由同 profile_id 那一段：指纹描述"这份数据
+      怎么采出来的"，取当前值会让同一份旧数据的指纹随运行者漂移。内置档案档位
+      就是 urp-balanced，与旧缺省逐字相同 ⇒ 历史 38 轮次不作废。
+    """
+    return {"warmup": WARMUP, "window_polls": WINDOW,
+            "poll_interval_s": POLL, "profile_id": _PROF.profile_id,
+            "quality_tier": _PROF.quality_tier}
+
 # 复用 m1_baseline 的注入源码（采样器已含 gc/mem/anim/graph 四路，文件控制协议+nonce）
 from scripts.m1_baseline import SAMPLER_SRC  # noqa: E402
 
@@ -386,26 +411,29 @@ def main() -> int:
         report_done()
         return 2
     doc = {"session": args.session, "windows_target": args.windows,
-           # profile_id 写进 protocol 块：它是"这份数据属于哪个工程"的归属标签，
-           # 检测端（m1_detect）从同一个块构造 G7 指纹，两处读同一份才不漂移。
-           # ⚠️ 内置档案的 id 恰好等于工程目录名，已实测两种写法产生的
-           #   environment_fingerprint 摘要逐字节相同 ⇒ 历史 38 轮次不必作废。
-           "protocol": {"warmup": WARMUP, "window_polls": WINDOW,
-                        "poll_interval_s": POLL, "profile_id": _PROF.profile_id},
+           # profile_id 与 quality_tier 都写进 protocol 块（口径见 protocol_block）：
+           # 前者是"这份数据属于哪个工程"的归属标签，后者让 G7 的档位比较
+           # 从恒等比较变成真比较。检测端从同一个块构造指纹，两处读同一份才不漂移。
+           "protocol": protocol_block(),
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "fixtures": {}}
     # 增量补采：同会话/同窗口数/同协议的历史场景保留（补漏采的，不覆盖已采的）
     fp_keep = CALDIR / f"multiwin_{args.session}.json"
     if fp_keep.exists():
         try:
             prev = json.loads(fp_keep.read_text(encoding="utf-8"))
-            # 协议比较**排除 profile_id**，再单独判归属：
+            # 协议比较**排除 profile_id 与 quality_tier**，再单独判归属：
             # ① 若沿用 prev["protocol"] == doc["protocol"] 整字典相等，新加的
-            #    profile_id 键会让所有历史束判成"协议不同"，已采场景全部重采
-            #    ——一个键的引入把增量补采这件事废掉（夹具一轮 12 分钟）；
+            #    键会让所有历史束判成"协议不同"，已采场景全部重采——一个键的
+            #    引入把增量补采这件事废掉（夹具一轮 12 分钟）。quality_tier 与
+            #    profile_id 同属"本轮才补写进 protocol"的键，历史束都没有。
             # ② 归属必须由 owner_profile_id 判（旧束没这个键 ⇒ 归内置档案），
             #    跨工程时绝不能把别人的场景保留进来当同期对照（G7）。
+            # ⚠️ 这里放松档位比较只是补采便利的判断，不是可比性硬闸：
+            #    "能不能拿这批阈值比这批数据"由检测端 G7_COMPARE_FIELDS 判，
+            #    那里 quality_tier 仍逐字段比较（见 m1_detect.g7_mismatches）。
             pp, cp = prev.get("protocol") or {}, doc["protocol"]
-            strip = lambda d: {k: v for k, v in d.items() if k != "profile_id"}
+            _strip_keys = ("profile_id", "quality_tier")
+            strip = lambda d: {k: v for k, v in d.items() if k not in _strip_keys}
             same = (prev.get("session") == args.session
                     and prev.get("windows_target") == args.windows
                     and strip(pp) == strip(cp)
