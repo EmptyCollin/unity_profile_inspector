@@ -81,6 +81,12 @@ calibration/multiwin_full.json
 calibration/multiwin_idle.json
 calibration/multiwin_none.json
 
+# 标定/重采子进程的终端回显日志（tee 产物，内容与摘要/阈值文件重复，
+# 每次真跑都会再生成一份——入库只会让 diff 里永远飘着一坨日志噪音）。
+# 2026-11-11 补：原 runs/*_console.log 专项规则随 runs 细分条目一起删了，
+# 而 run_resample 会把 log 落在 CALDIR（标定正路），本目录此前无对等规则。
+calibration/*.log
+
 # ↑ 以上 runs/ 细分条目（工作束/守护运行态/巡检状态/彩排日志）已被整目录
 #   runs/ 规则覆盖，2026-11-10 一并删除；原先"只忽略束文件、绝不整目录忽略
 #   runs/patrol_*/"的相反原则同时作废，理由见上节。
