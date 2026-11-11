@@ -52,3 +52,25 @@
 - 这是 I9“旧回调无法卸载”的又一次现场复现；需要**重启 Editor**清残留后
   再验证，而不是继续在同一 Editor 里热换。
 - 因此本轮**没有** verified 证据；GC detector 代码已提交，但真实闭环待重启后做。
+
+## 更新（2026-11-12）：GC detector 已跑通，但固定态仍有零散 GC 尖峰
+
+Editor 重启 + 清 stale command 后，`gcthr` 生效（`status` 含 `gcThr`），
+缺陷/修复各跑一次：
+
+| 指标 | 缺陷态 | 修复态 |
+|---|---:|---:|
+| `Memory/GcAllocInFrameBytes` 中位 | 77,519 | 8,943 |
+| `gcthr:100000` breach 数 | **91** | **20** |
+| `gc_alloc_bytes` 中位 | 77,519 | 299,669（尖峰） |
+
+结论：
+
+- GC detector 真实可用；
+- 但修复态仍有 **20 次 >100KB 的 GC 尖峰**（中位 299KB），
+  目标 breach cluster 不会消失，**不能直接 verified**；
+- 需要更高阈值/更严格的目标（如连续窗口、per-frame 分布、排除 GC 尖峰）
+  或把 GC 尖峰当成新的 guard 问题；
+- 不把 91→20 当 verified（不满足“目标消失”）。
+
+证据：`runs/measure_frame_001352.json`。
