@@ -344,4 +344,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I3b-1 完成：`probe_control.py` + Web 探针按钮；install/status/sample/unload 真机通过；卸载后心跳停止。
 - I3b-2a 完成：`unity_exec.py` 把 snapshot/`fixer.execute`/compile/rollback 接进批量执行；成功只 `applied_unverified`；无 plan 的 `/execute` 返回 409。
 - I3b-2b1 完成：`scheduler.py` 后台巡检（事件→聚类→建单、冷却去重、不自动执行）；Web 自动巡检/巡检一轮/停。
-- I3b-2c~I6：真实 plan_provider、端到端真机执行、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
+- I3b-2c1 完成：`plan_provider.py` 对夹具 CPU 产出真实 EditPlan；模板 `permission_tier=blocked` 不被 playbook 映射降级，工单保持 `needs_human`。
+- I3b-2c2~I6：干净工程/逐项批准下的端到端真机写入、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。

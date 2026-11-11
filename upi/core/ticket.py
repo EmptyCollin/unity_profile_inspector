@@ -100,6 +100,13 @@ def _tier(playbook: str) -> Literal["auto", "semi", "blocked"]:
     return "blocked"
 
 
+_RANK = {"auto": 0, "semi": 1, "blocked": 2}
+
+
+def _max_tier(a: str, b: str) -> Literal["auto", "semi", "blocked"]:
+    return a if _RANK.get(a, 2) >= _RANK.get(b, 2) else b  # type: ignore[return-value]
+
+
 def _token(ticket_id: str, items: list[TicketItem]) -> str:
     raw = ticket_id + "|" + "|".join(i.cluster_id for i in items)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:4].upper()
@@ -132,6 +139,13 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
             plan = plan_provider(c, playbook)
             if plan is None:
                 err = "plan_provider returned none"
+            else:
+                # 计划自身的权限档不得被 playbook 映射降级：
+                # blocked 模板即使 playbook 是 auto，也必须 needs_human。
+                tier = _max_tier(tier, plan.permission_tier)
+                playbook = plan.playbook_id or playbook
+                if tier != "auto":
+                    err = f"tier={tier}: plan requires individual approval"
         status: ItemStatus = "pending" if plan is not None and tier == "auto" else "needs_human"
         items.append(TicketItem(
             item_id="it-" + secrets.token_hex(4), cluster_id=c.cluster_id,

@@ -11,6 +11,7 @@ from typing import Optional
 from upi.core import events as E
 from upi.core.cluster import IssueCluster, cluster_events
 from upi.core.fingerprint import FingerprintStore
+from upi.core.plan_provider import default_plan_provider
 from upi.core.probe_events import EventLog
 from upi.core.ticket import (BatchTicket, PlanProvider, TicketStore,
                              build_ticket)
@@ -34,7 +35,8 @@ class ResidentEngine:
     def build_ticket(self, *, plan_provider: Optional[PlanProvider] = None,
                      limit: int = 8) -> BatchTicket:
         cs = self.clusters()
+        provider = plan_provider if plan_provider is not None else default_plan_provider
         t = build_ticket(cs, fp_store=self.fp_store,
-                         plan_provider=plan_provider, mode="resident", limit=limit)
+                         plan_provider=provider, mode="resident", limit=limit)
         self.ticket_store.save(t)
         return t
