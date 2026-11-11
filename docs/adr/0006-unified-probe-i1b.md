@@ -34,6 +34,9 @@ I1a 先把事件格式与消费方统一了，但生产上仍有两个注入件�
 - 进入 Play，`sample:on:60` → `probe_events.jsonl` 出现 sample 事件；Python
   `EventLog` 解析 0 坏行；
 - `thr:2000000` → 出现 breach 事件（value/threshold/ring_after=14/a4_window 有值）；
+- 冒烟留档已归档：`runs/_probe/i1b_smoke_events.jsonl`（约 2.1MB）、
+  `runs/_probe/i1b_smoke_pb_breach.jsonl`；当前 `probe_events.jsonl` 已清空，
+  避免测试数据污染后续会话。
 - 一次 `unload` 后心跳停止（没有重复回调）；旧 `UpiBreachProbe` 在测试时已先
   `unload`，否则两者会争抢 `pb_hb`/事件文件（I9 教训）。
 
