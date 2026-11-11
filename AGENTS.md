@@ -352,4 +352,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I4b2b1 完成：回归 run 采守护指标；失败 verdict 也审计；`RegressionRunner` 注入式 3 次基线；仍无真实 Unity replay 驱动。
 - I4b2b2a 完成：`align_clusters` 时间原点对齐；`SubprocessReplayDriver` 执行 `suite.command` 并读事件；Web 可跑 3 次基线。命令由用户填。
 - I4b2b2b1 完成：回归 HTML 报告（runs/plan/verdict/guards），Web 生成/打开。
-- I4b2b2b2~I6：夹具 Unity 自动适配、全量守护、完整 RunReport、UI 完整化、硬化验收（`docs/迭代计划.md`）。
+- I5a 完成：报告页 + 设置/接入只读页（工程/探针/指纹库/目录 + 首次使用顺序）。
+- I5b~I6：正式审批/时间线/onboarding、夹具 Unity 适配、硬化验收（`docs/迭代计划.md`）。

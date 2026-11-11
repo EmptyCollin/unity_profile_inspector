@@ -149,11 +149,26 @@ def build_status() -> dict:
     rstore = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
     regression_suites = [rstore.summary(s.suite_id)
                          for s in rstore.list_suites()[:10]]
+    try:
+        from upi.config.project_profile import active_profile
+        from upi.tooling import probe_control as PC
+        prof = active_profile()
+        settings = {
+            "profile_id": prof.profile_id,
+            "project": str(prof.abs_project),
+            "fix_subject": prof.fix_subject or "",
+            "probe_file": str(PC.PROBE_FILE),
+            "fingerprint_db": str(fp.path),
+            "ticket_dir": str(tstore.root),
+            "regression_dir": str(rstore.root),
+        }
+    except Exception as e:  # noqa: BLE001
+        settings = {"error": f"{type(e).__name__}: {e}"}
     from upi.core.scheduler import get_scheduler
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I4b", "single_channel": True},
+        "ui": {"shell": "I5a", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
@@ -165,6 +180,7 @@ def build_status() -> dict:
         "fingerprint_records": fp_records,
         "batch_tickets": batch_tickets,
         "regression_suites": regression_suites,
+        "settings": settings,
         "resident_scheduler": get_scheduler().status(),
         "tickets": _open_tickets(),
         "events": _recent_events(),
@@ -276,7 +292,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I4b 回归</span>
+  <span class="tag">I5a 报告/设置</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -334,7 +350,7 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
         <div class="step"><span class="s">05</span><span>常驻：工单/审批/执行/巡检已接；真实 plan 在 I3b-2c</span><span class="pill ok">I3b</span></div>
         <div class="step"><span class="s">06</span><span>回归：套件/3 次基线/计划已接；真实 replay 执行待 I4b2</span><span class="pill ok">I4b</span></div>
-        <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
+        <div class="step"><span class="s">07</span><span>报告/设置已接；正式审批/执行时间线待 I5b</span><span class="pill ok">I5a</span></div>
       </div>
       <div class="foot"><span>本地 127.0.0.1</span><span>所有状态来自 runs/ 与守护进程</span><span>UI 不可用时用 break-glass 停止/回滚</span></div>
     </section>
@@ -388,6 +404,34 @@ _INDEX_HTML = r"""<!doctype html>
           <thead><tr><th>套件</th><th>协议</th><th>基线次数</th><th>稳定 cluster</th><th>计划</th><th>操作</th></tr></thead>
           <tbody id="regBody"><tr><td colspan="6" class="empty">还没有回归套件。</td></tr></tbody>
         </table>
+      </div>
+    </section>
+    <section id="page-reports" style="display:none">
+      <h1>报告</h1>
+      <p class="sub">回归报告只读；只有“同协议 + 目标消失 + 无新 cluster + 守护不劣化”才记 verified。</p>
+      <div class="panel">
+        <h2>回归报告 <span id="reportMeta">—</span></h2>
+        <table>
+          <thead><tr><th>套件</th><th>基线</th><th>verified</th><th>最近 verdict</th><th>操作</th></tr></thead>
+          <tbody id="reportBody"><tr><td colspan="5" class="empty">还没有回归套件。</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="page-settings" style="display:none">
+      <h1>设置 / 接入</h1>
+      <p class="sub">只读展示当前工程、探针、指纹库、回归目录；写入/权限仍走各自页面与审批。</p>
+      <div class="panel">
+        <h2>当前接入</h2>
+        <table><tbody id="settingsBody"><tr><td class="empty">加载中…</td></tr></tbody></table>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>首次使用顺序</h2>
+        <div style="padding:10px 15px;color:var(--muted);font-size:12px;line-height:1.9">
+          1. 首页“安装”统一探针（会先卸旧探针）<br>
+          2. 进 Play 后点“采样开”；首页“巡检一轮”看 cluster<br>
+          3. 工单页建单/批准；需要单条时在明细里再批准<br>
+          4. 回归页新建套件，记录/跑 3 次基线，修后第 4 次验证并生成报告
+        </div>
       </div>
     </section>
     <section id="page-other" style="display:none">
@@ -471,6 +515,29 @@ async function recordRun(sid){
     alert(`已记录第 ${sm.runs} 次；计划：${(sm.plan || {}).status || "—"}`);
     await refresh();
   }catch(e){ alert("记录失败：" + e.message); }
+}
+function renderReports(s){
+  const rs = s.regression_suites || [];
+  $("reportMeta").textContent = `${rs.length} 个套件`;
+  $("reportBody").innerHTML = rs.length ? rs.map(x => {
+    const v = x.last_verdict || {};
+    return `<tr><td>${esc(x.name || x.suite_id)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(x.suite_id)}</div></td>` +
+      `<td>${esc(x.runs)} / ${esc(x.min_runs || 3)}</td><td>${esc(x.verified_count || 0)}</td>` +
+      `<td>${esc(v.status || "—")}${v.verification_status ? " (" + esc(v.verification_status) + ")" : ""}</td>` +
+      `<td><button class="gbtn" data-gid="${esc(x.suite_id)}">生成/打开报告</button></td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="empty">还没有回归套件。</td></tr>`;
+}
+function renderSettings(s){
+  const st = s.settings || {};
+  const rows = [
+    ["profile", st.profile_id], ["project", st.project],
+    ["fix_subject", st.fix_subject || "—"], ["probe_file", st.probe_file],
+    ["fingerprint_db", st.fingerprint_db], ["ticket_dir", st.ticket_dir],
+    ["regression_dir", st.regression_dir], ["error", st.error],
+  ].filter(([, v]) => v != null && v !== "");
+  $("settingsBody").innerHTML = rows.length
+    ? rows.map(([k, v]) => `<tr><th style="width:160px">${esc(k)}</th><td class="mono small">${esc(v)}</td></tr>`).join("")
+    : `<tr><td class="empty">无设置数据。</td></tr>`;
 }
 async function verifyLast(sid){
   try{
@@ -654,6 +721,8 @@ function render(s){
 
   renderTickets(s);
   renderRegression(s);
+  renderReports(s);
+  renderSettings(s);
 }
 
 async function refresh(){
@@ -669,15 +738,15 @@ async function refresh(){
 function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
   const home = $("page-home"), issues = $("page-issues"), library = $("page-library"),
-        tickets = $("page-tickets"), regression = $("page-regression"), other = $("page-other");
-  const pages = {home, issues, library, tickets, regression};
+        tickets = $("page-tickets"), regression = $("page-regression"),
+        reports = $("page-reports"), settings = $("page-settings"), other = $("page-other");
+  const pages = {home, issues, library, tickets, regression, reports, settings};
   Object.values(pages).forEach(p => { if(p) p.style.display = "none"; });
   if(other) other.style.display = "none";
   if(pages[page]){ pages[page].style.display = ""; return; }
   if(other) other.style.display = "";
-  const titles = {reports:"报告", settings:"设置 / 接入"};
-  $("otherTitle").textContent = titles[page] || "此页待接入";
-  $("otherHint").textContent = "I5 逐项接入；I4b 已交付回归基线记录/计划。";
+  $("otherTitle").textContent = "此页待接入";
+  $("otherHint").textContent = "I5 逐项接入中；当前已交付问题/指纹/工单/回归/报告/设置。";
 }
 
 document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev => {
