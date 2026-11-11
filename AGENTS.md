@@ -1,7 +1,7 @@
 # AGENTS.md — AI 性能优化管线 · Agent 角色契约
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
-> 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护、`agents/webui.py` Web 控制台、`agents/ui.py` 迁移期 TUI）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
+> 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护、`agents/webui.py` Web 控制台）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
 > 最后更新：2026-11-11（**v1.0 方向重排**：工具分**常驻/回归**两形态；**探针是唯一数据源**，1Hz 只做哨兵；**cluster 是修复/验证单位**；**批量工单、串行落地**；**UI 是唯一人机通道**（本地 Web，旧 ANSI TUI → `upi dev tui`）；常驻结论只 `unverified`，回归才 `verified`。v1.0 新增 G21~G23 与 §8，冲突时以 §8 为准。承前 v0.9：G16 渲染计数 A2 主源 + 轮询哨兵；G19 渲染逐笔 spike 解禁但 GPU 发作仍 A4、逐笔归因仍人工；G20 五项盲区）
 
 ---
@@ -359,4 +359,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I6b1 完成：`acceptance.py` 6 项验收落盘；Web 增加 nosniff/no-referrer/DENY。
 - I6b2a 完成：`e2e_smoke.py` Web/API 全链路 10/10（不碰 Unity）。
 - I6b2b1 完成：`release_check.py` 发布审计 6/6（1 warning：fixture 脏区）；`docs/发布检查.md` 列明阻断与口径。
+- I6c 完成：删除 TUI 模块/动作层/测试；30 套离线测试通过。
 - I6b2b2：真实工程/夹具 Unity E2E、迁移/发布审计、发布（`docs/迭代计划.md`）。

@@ -28,7 +28,7 @@ def run(cmd: list[str], timeout: int = 600) -> tuple[int, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--with-tests", action="store_true",
-                    help="同时跑 31 套离线测试（较慢）")
+                    help="同时跑 30 套离线测试（较慢）")
     args = ap.parse_args()
     checks: list[dict] = []
 
@@ -49,7 +49,7 @@ def main() -> int:
 
     # 3. 测试文件数量
     tests = sorted((ROOT / "scripts").glob("test_*.py"))
-    add("offline suites >= 31", len(tests) >= 31, f"{len(tests)} suites")
+    add("offline suites >= 30", len(tests) >= 30, f"{len(tests)} suites")
 
     # 4. UI --check
     rc, out = run([sys.executable, "-m", "upi", "ui", "--check", "--port", "0"], 120)
@@ -71,7 +71,7 @@ def main() -> int:
     # 6. 可选全量测试
     if args.with_tests:
         rc, out = run([sys.executable, "scripts/run_tests.py"], 1800)
-        add("run_tests 31/31", rc == 0 and "31 套通过" in out, out[-400:])
+        add("run_tests 30/30", rc == 0 and "30 套通过" in out, out[-400:])
 
     ok = all(c["ok"] for c in checks)
     ts = time.strftime("%Y%m%d_%H%M%S")

@@ -319,9 +319,6 @@ d._refresh_status()
 st = E.read_status() or {}
 ok("告警进 status.alerts", bool(st.get("alerts")),
    json.dumps(st.get("alerts"), ensure_ascii=False)[:140])
-import upi.agents.ui as U
-ok("UI 帧里画得出来（否则告警仍进黑洞）",
-   "需要注意" in U.snapshot())
 
 
 # ─────────── ⑥ 回滚目标必须是管线自己的 tag（自愈第 7 项） ───────────

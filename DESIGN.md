@@ -749,4 +749,5 @@ trace: run_id
 - **I6b2a 完成**：`e2e_smoke.py` Web/API 全链路 10/10（不碰 Unity）。
 - **I6b2b1 完成**：`release_check.py` 发布审计 6/6（1 warning：fixture 脏区）；
   `docs/发布检查.md` 列明阻断与口径。
+- **I6c 完成**：删除 TUI 模块/动作层/测试；30 套离线测试通过。
 - **I6b2b2**：真实工程/夹具 Unity E2E、迁移/发布审计、发布。

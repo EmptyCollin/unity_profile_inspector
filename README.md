@@ -64,7 +64,7 @@ I5b 之后。迁移期编辑 `projects/<id>.json`。回放准入见
 upi/          管线代码（探针控制、事件/聚类/指纹、工单/执行、回归、Web）
 probe/        注入编辑器的采样片段（经 unity CLI，非自建插件）
 fixtures/     内置演示工程（含故意植入的性能缺陷）
-scripts/      测试套件与校验脚本（31 套离线；统一入口 run_tests.py）
+scripts/      测试套件与校验脚本（30 套离线；统一入口 run_tests.py）
 knowledge/    特征库（症状→根因→动作→实测效果）
 docs/         使用说明、迭代计划、UI 设计、ADR、认知债
 runs/         运行留痕（本地独立 git 仓库，不进 GitHub）
@@ -89,7 +89,7 @@ DESIGN.md     详细设计（§14 为两形态权威）
 ## 验证
 
 ```powershell
-python scripts/run_tests.py             # 31 套离线测试（自动 UTF-8）
+python scripts/run_tests.py             # 30 套离线测试（自动 UTF-8）
 python scripts/check_fixture_split.py   # 夹具隔离闸
 python scripts/acceptance.py            # 6 项验收，落 runs/acceptance_*.json
 python scripts/e2e_smoke.py             # Web/API 全链路 10 项，落 runs/e2e_smoke_*.json

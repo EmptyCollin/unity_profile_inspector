@@ -253,28 +253,8 @@ def main():
     pg2 = json.loads((TMP / "prog.json").read_text(encoding="utf-8"))
     check("report_done 置 alive=false（区分结束/卡住）", pg2["alive"] is False)
 
-    print("== ⑤ UI snapshot 渲染三态不崩 ==")
-    import upi.agents.ui as U
-    U.E = E   # UI 用同一临时区
-    st_none = U.snapshot()
-    check("无守护态可渲染", "未启动" in st_none or "已停止" in st_none)
-    E.write_status({"pid": os.getpid(), "updated_at": E.now(),
-                    "sampling_enabled": True, "phase": "round_running",
-                    "open_tickets": [], "counters": {"rounds": 1}})
-    E.PID.write_text(str(os.getpid()))
-    st_run = U.snapshot()
-    check("运行态显示采样开", "运行中" in st_run)
-    E.write_status({"pid": os.getpid(), "updated_at": E.now(),
-                    "sampling_enabled": True, "phase": "idle_waiting",
-                    "open_tickets": ["runs/x/request.md"],
-                    "counters": {"rounds": 1}})
-    st_tk = U.snapshot()
-    check("有待批工单被醒目提示", "待你决定" in st_tk or "待批工单 1" in st_tk)
-
-    print("== ⑤b 告警链路：事件 → status.alerts → UI 常驻可见 ==")
-    # 只测"生产者存在"是不够的：alerts 必须在 status 里，UI 必须画出来。
-    # 这条链断在任何一环，落盘失败就仍然等于没发生。
-    import upi.agents.ui as U
+    print("== ⑤b 告警链路：事件 → status.alerts ==")
+    # 只测"生产者存在"是不够的：alerts 必须落进 status，否则 Web/报告看不到。
     d5 = _mk_daemon_state({"enabled": True, "interval_s": 1800,
                            "cooldown_s": 0, "auto_fix": {}, "fixtures": []})
     E.emit("state_write_failed", stage="verify", run_id="patrol_demo")
@@ -287,10 +267,7 @@ def main():
           "state_write_failed" in kinds and "ticket_state_unreadable" in kinds,
           str(kinds))
     check("degraded 布尔位随告警置真", st_al.get("degraded") is True)
-    frame_al = U.snapshot()
-    check("UI 帧里出现告警条", "需要注意" in frame_al and "state_write_failed" in frame_al,
-          frame_al[frame_al.find("需要注意"):][:120] if "需要注意" in frame_al else "无告警条")
-    # 无告警时不该画空条（否则用户分不清"没告警"和"告警没采到"）
+    # 无告警时不该留空条（否则用户分不清"没告警"和"告警没采到"）
     E.emit("daemon_started", pid=os.getpid())
     d5._refresh_status()
     check("alerts 上限 6 条（防长事件流撑爆 status）",
