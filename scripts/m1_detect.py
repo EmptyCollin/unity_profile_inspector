@@ -219,13 +219,21 @@ def latest_calibration(profile_id: str | None = None) -> dict | None:
     return None
 
 
-def stats_from_windows(fx: dict) -> dict:
+def stats_from_windows(fx: dict, render_tier: str = "A") -> dict:
     """多窗口数据 → compare() 所需的统计形状。
 
-    clean 与缺陷夹具**必须走同一个函数**，否则两相对照就是跨协议比较。
-    窗口间 σ 才是 §3 定义的噪声带（旧单窗口 MAD 度量的是窗口内抖动）。
+    clean 与缺陷夹具**必须走同一个函数、传同一个 render_tier**，否则两相对照
+    就是跨协议比较。窗口间 σ 才是 §3 定义的噪声带（旧单窗口 MAD 度量的是窗口内抖动）。
+
+    ⚠️ render_tier 是**整束**渲染数据档（upi/core/render_source.bundle_render_tier
+    从整个 fixtures 现算一个值，调用方对束里每个机制都传这同一个值）。它绝不能
+    逐机制各算——"clean 过哨兵取 A2、某缺陷没取"就是跨源，正是 G16④ 拦的那种。
+    缺省 "A"（轮询）是**保守安全**默认：调用方漏传就回落到永远存在的轮询口径，
+    不会误采可疑 A2；真实调用点都必须显式传 bundle_render_tier 的结果。
     """
     import statistics as st
+    from upi.core.render_source import RENDER_A2MAP
+    use_a2_render = render_tier == "A2"
     wins = fx.get("windows", [])
     out: dict[str, list[float]] = {}
     for w in wins:
@@ -239,13 +247,8 @@ def stats_from_windows(fx: dict) -> dict:
     # 直接退化成"证据不足"（A 级自欺，被回归当场抓住）。
     A2MAP = {"gc": "gc_alloc_per_frame", "anim": "animator_process_animations_ns",
              "graph": "animator_process_graph_ns", "mem": "total_used_per_frame"}
-    # 渲染计数主源=A2 逐帧（#36 改判：真名带 Count 后缀 + 双条件定位，exp6 与
-    # 轮询同数量级实证）。A2 在场时**覆盖**上面 metrics 里的轮询值；缺席（构造
-    # 失败/未采 full 会话）时 out 保留轮询值 = 自动回落，不降级成"无数据"。
-    # ⚠️ 返回值被调用方当"指标名→统计"字典遍历，故这里不塞 source 留痕键
-    #    （会被误读成一个指标）；哨兵对表在采集层 one_window 做，那里同时握着
-    #    轮询值与 A2 序列。
-    RENDER_A2MAP = {"draw": "drawCalls", "setpass": "setPassCalls", "tris": "triangles"}
+    # 渲染三项主源由整束 render_tier 决定（#30）：A2 ⇒ 覆盖 metrics 里的轮询值；
+    # A ⇒ 保留轮询值（= 改判前行为，逐字不变）。
     for src, kname in {**A2MAP, **RENDER_A2MAP}.items():
         vals = []
         for w in wins:
@@ -255,19 +258,9 @@ def stats_from_windows(fx: dict) -> dict:
                 vals.append(float(st.median(seq)))
             elif isinstance(a2.get(src + "_median"), (int, float)):
                 vals.append(float(a2[src + "_median"]))
-        # 渲染三项走"哨兵全窗通过才采用 A2"这道门（G16① fail-loud 的落地）：
-        # 采集层 one_window 已把 A2×轮询对表结果写进每窗 sentinel[src]。
-        # ⚠️ 采用是**按指标整束 all-or-nothing**，不是逐窗混采——一个 bundle 的
-        #    data_tier 必须整束一致（G16④"数据源切换即 data_tier 变更"），
-        #    2 窗取 A2 + 2 窗取轮询 = 同一指标的序列跨源，正是 G7 要拦的。
-        # 有 a2 序列但哨兵非 ok 的窗 ⇒ 整个指标回退轮询（out 里 metrics 的值）。
-        # 哨兵没跑（idle-only / 旧束无此字段）⇒ 不假装通过：非 ok 即回退。
-        if src in RENDER_A2MAP and vals:
-            passed = all((w.get("sentinel") or {}).get(src) == "ok"
-                         for w in wins if (w.get("a2") or {}).get(src)
-                         or (w.get("a2") or {}).get(src + "_median") is not None)
-            if not passed:
-                continue
+        if src in RENDER_A2MAP and not use_a2_render:
+            # 整束渲染档=A（轮询）⇒ 不覆盖 metrics 里已有的轮询值（不降级成无数据）。
+            continue
         if vals:
             out[kname] = vals
 
@@ -281,6 +274,21 @@ def stats_from_windows(fx: dict) -> dict:
         stats[k] = {"n": len(vals), "median": med, "noise_band_mad": mad, "unique": uniq,
                     "degenerate_distribution": uniq / len(vals) < 0.1 or mad == 0.0}
     return stats
+
+
+def stats_by_fixture(mw: dict) -> dict:
+    """整束渲染数据档现算一次，喂给每个机制的统计（#30，G16④）。
+
+    抽成函数的原因与本仓反复立的纪律同：clean 与缺陷必须传**同一个** render_tier，
+    否则同一次 compare() 两相对照就是跨源。若在 detect/patrol/drill 三处各写
+    "算 tier + 逐个 stats"的循环，早晚会漂移成其中一处漏传、退回默认的 "A"，而那
+    种漂移**数值上几乎看不出来**（exp6 实测两源比值 1.00）。收敛到一个入口后，
+    调用方要么用它、要么显式传参，不存在"忘了算 tier"这种中间态。
+    """
+    from upi.core.render_source import bundle_render_tier
+    fixtures = mw.get("fixtures", {}) or {}
+    tier = bundle_render_tier(fixtures)
+    return {k: stats_from_windows(v, tier) for k, v in fixtures.items() if "windows" in v}
 
 
 def load_multwin() -> dict | None:
@@ -343,7 +351,12 @@ def fingerprint_from_protocol(proto: dict, source_path: str, env_fp: str,
         window_samples=int(proto.get("window_polls", 20)),
         n_samples=int(windows_target),
         poll_rate=float(proto.get("poll_interval_s", 1.0)),
-        data_tier="A",                              # 本文件主源=A 轮询；A2 序列同源同窗
+        # data_tier 读 protocol 声明的真实渲染主源（#30 把 G16④ 从纸面闸变真闸）。
+        # 旧代码硬编码 "A" ⇒ 新 A2 束与旧轮询束同标可比，"换仪器即作废旧基线"拦不住。
+        # 历史束缺这个键 ⇒ 回落 "A"：那批数据本来就是纯轮询采的，回落值与其实情
+        # 一致（不像 quality_tier 需要回落归属档案——data_tier 是数据自身属性，
+        # 旧束没有 A2 渲染序列，标 A 是唯一诚实的值）。
+        data_tier=proto.get("data_tier", "A"),
         editor_mode="gui",                          # G16：渲染值只在 GUI 有效
         environment_fingerprint=env_fp,
         scale_factor=float(proto.get("scale_factor", 1.0)),
@@ -357,7 +370,7 @@ def main() -> int:
         print("!! 缺 calibration/multiwin_full_summary.json / multiwin_full.json（先跑 m1_multiwin --session full）")
         print("   检测与标定必须来自同一多窗口数据源，禁止回退旧单窗口基线（G7/§3）")
         return 1
-    fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items() if "windows" in v}
+    fixs = stats_by_fixture(mw)   # 整束渲染档现算一次，clean 与缺陷同参数（#30）
     _clean = active_profile().clean_subject   # 噪声基准机制名来自档案，不写死
     # ── 阶段 8 A：噪声基准缺失分三种处置（设计 §1，判据单点 resolve_noise_basis）。
     #    patrol 与本文件都调它——历史上"缺 CLEAN 怎么办"两处各写一份，迟早漂移成

@@ -127,7 +127,7 @@ def default_fixture_list(full_session: bool) -> list[str]:
     return list(ALL_FIXTURES) if full_session else _PROF.subjects[:2]
 
 
-def protocol_block() -> dict:
+def protocol_block(full_session: bool = False) -> dict:
     """写进 bundle 的 protocol 块（G7 指纹的数据侧来源，供测试直调）。
 
     ⚠️ 抽成函数的原因与 default_fixture_list 同：就地写字面量字典时，
@@ -147,9 +147,16 @@ def protocol_block() -> dict:
       怎么采出来的"，取当前值会让同一份旧数据的指纹随运行者漂移。内置档案档位
       就是 urp-balanced，与旧缺省逐字相同 ⇒ 历史 38 轮次不作废。
     """
+    # data_tier 初始盖章："A2" if full_session else "A"（#30）。full 会话才注入
+    # A2 采样器 ⇒ 有渲染序列可采。这只是**上界**：采集循环结束后若任窗哨兵对表
+    # 没过，主循环会把标签降级为 "A"（bundle_render_tier 只降不升——标签绝不能
+    # 比实际采用的源更激进，否则 G16④ 形同虚设）。旧代码从不写这个键、检测端硬
+    # 编码回 "A" ⇒ 新 A2 束与旧轮询束在 G7 眼里同档可比，"换仪器作废旧基线"根本
+    # 拦不住——重标定的诚实前提就是这里。
     return {"warmup": WARMUP, "window_polls": WINDOW,
             "poll_interval_s": POLL, "profile_id": _PROF.profile_id,
-            "quality_tier": _PROF.quality_tier}
+            "quality_tier": _PROF.quality_tier,
+            "data_tier": "A2" if full_session else "A"}
 
 # 复用 m1_baseline 的注入源码（采样器已含 gc/mem/anim/graph 四路，文件控制协议+nonce）
 from scripts.m1_baseline import SAMPLER_SRC  # noqa: E402
@@ -452,10 +459,11 @@ def main() -> int:
         report_done()
         return 2
     doc = {"session": args.session, "windows_target": args.windows,
-           # profile_id 与 quality_tier 都写进 protocol 块（口径见 protocol_block）：
-           # 前者是"这份数据属于哪个工程"的归属标签，后者让 G7 的档位比较
-           # 从恒等比较变成真比较。检测端从同一个块构造指纹，两处读同一份才不漂移。
-           "protocol": protocol_block(),
+           # profile_id / quality_tier / data_tier 都写进 protocol 块（口径见
+           # protocol_block）：前两者是归属与画质档位标签，data_tier 声明渲染主源
+           #（full 会话=A2，否则=A）。检测端从同一个块构造指纹，两处读同一份才不
+           # 漂移——G16④"换仪器即作废旧基线"靠的就是这个键真实写进束与阈值文件。
+           "protocol": protocol_block(FULL_SESSION),
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "fixtures": {}}
     # 增量补采：同会话/同窗口数/同协议的历史场景保留（补漏采的，不覆盖已采的）
     fp_keep = CALDIR / f"multiwin_{args.session}.json"
@@ -500,6 +508,14 @@ def main() -> int:
         doc["fixtures"][fx] = res
         if res.get("cancelled"):
             cancelled = True
+        # 数据档标签按**实测哨兵**重盖（#30）：protocol_block 里的静态盖章只是上界
+        #（full 会话=倾向 A2），真值要等每窗 sentinel 对表结果。这里用整束现算
+        # 覆盖，保证标签**永远不比实际采用的源更激进**——full 会话但某窗哨兵没过
+        # 时，stats_from_windows/do_merge 实际都回退轮询，标签必须跟着落回 "A"。
+        # 谎称 A2 的后果是这条链最隐蔽的失效：新数据被 G7 判成"与旧轮询阈值同档
+        # 可比"，跨源比较数值上看不出来（exp6 比值 1.00）却结论失真。
+        from upi.core.render_source import bundle_render_tier
+        doc["protocol"]["data_tier"] = bundle_render_tier(doc["fixtures"])
         fp = CALDIR / f"multiwin_{args.session}.json"
         fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
         done_n = sum(1 for v in doc["fixtures"].values() if "windows" in v)
@@ -568,7 +584,6 @@ def do_merge() -> int:
         print(f"full 会话对照机制 {_PROF.clean_subject} 数据缺失")
         return 1
     bw = between_windows(clean["windows"])
-    a2keys = ("gc", "anim", "mem", "graph")
 
     # A2 逐帧指标：窗口 med 序列的 MAD（窗口内样本 ~7800 帧，中位数稳定）
     a2_bw = {}
@@ -582,6 +597,26 @@ def do_merge() -> int:
                 vals.append(float(statistics.median(seq)))
         if len(vals) >= 3:
             a2_bw[name] = robust(vals)
+
+    # 渲染三项的阈值带与检测端**同源**（#30）：整束渲染档 = A2 才把带子建在 A2
+    # 逐帧中位的窗口间 σ 上；= A 则维持轮询（bw 里已有）。判据来自
+    # render_source.bundle_render_tier，与检测选源、束标签读的是同一份计算。
+    # 两处各选各的 = "阈值来自轮询、检测值来自 A2"的跨源比较（G16④），而 exp6
+    # 实测两源比值 1.00 —— 跨源后果数值上几乎看不出来，恰是最危险的静默失真。
+    from upi.core.render_source import RENDER_A2MAP, bundle_render_tier
+    _tier = bundle_render_tier(full["fixtures"])
+    if _tier == "A2":
+        for src, kname in RENDER_A2MAP.items():
+            vals = []
+            for w in clean.get("windows", []):
+                a2 = w.get("a2") or {}
+                seq = a2.get(src, [])
+                if len(seq) >= 50:
+                    vals.append(float(statistics.median(seq)))
+                elif isinstance(a2.get(src + "_median"), (int, float)):
+                    vals.append(float(a2[src + "_median"]))
+            if len(vals) >= 3:
+                a2_bw[kname] = robust(vals)
 
     FLOORS = {"gc_alloc_per_frame": 20_000, "animator_process_animations_ns": 50_000,
               "animator_process_graph_ns": 50_000, "drawCalls": 10, "setPassCalls": 8,

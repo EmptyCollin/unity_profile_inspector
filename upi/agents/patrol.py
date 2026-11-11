@@ -463,10 +463,9 @@ def patrol_waterline(cfg_mon: dict, workdir: Path) -> dict:
     bundle = r["bundle"]
     # 判据链完全复用 m1_detect（含 G7 协议指纹校验、标定注入与面板），不改判据
     from scripts.m1_detect import (apply_calibration, latest_calibration,
-                                   stats_from_windows)
+                                   stats_by_fixture)
     mw = json.loads(bundle.read_text(encoding="utf-8"))
-    fixs = {k: stats_from_windows(v) for k, v in mw.get("fixtures", {}).items()
-            if "windows" in v}
+    fixs = stats_by_fixture(mw)   # 整束渲染档现算一次，clean 与缺陷同参数（#30）
     cal = latest_calibration()
     # 标定闸只在要跑相对判据（L2）时生效——与 m1_detect 同口径（阶段 8 设计
     # §1：L0 只走绝对门槛，绝对下限不依赖标定。两处判据同源纪律）。

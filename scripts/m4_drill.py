@@ -62,7 +62,7 @@ def dry_run() -> int:
     # 干跑工单的证据也走判据链（compare 只搬已采数据）：dry-run 不产数值，
     # 不冒充归因——hypothesis 置信度如实填 0 并注明占位（I1/§5）
     from scripts.m1_detect import (apply_calibration, latest_calibration,
-                                   load_multwin, stats_from_windows, compare)
+                                   load_multwin, stats_by_fixture, compare)
     mw = load_multwin()
     if mw is None:
         print("   !! 无标定束")
@@ -80,8 +80,7 @@ def dry_run() -> int:
         return 1
     print(f"   标定注入：min_magnitude={det.thresholds.min_magnitude:g}"
           f"（{Path(cal['_path']).name}）")
-    fixs = {k: stats_from_windows(v) for k, v in mw["fixtures"].items()
-            if "windows" in v}
+    fixs = stats_by_fixture(mw)   # 整束渲染档现算一次，clean 与缺陷同参数（#30）
     issue, detail = compare(det, fixs[FIXTURE], fixs[CLEAN])
     if issue is None:
         print("   !! 当前夹具未检出（detail:", detail.get("verdict"), "）")

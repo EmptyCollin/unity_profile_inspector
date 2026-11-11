@@ -221,7 +221,10 @@ def resample(fixture: str, tag: str, windows: int = 4, timeout_s: int = 1500) ->
 
 def bundle_stats(doc: dict, fixture: str) -> dict:
     fx = doc["fixtures"][fixture]
-    return stats_from_windows(fx)
+    # 整束渲染档现算一次（#30，与 detect/patrol/drill 同判据）：改前/改后两束
+    # 各自按本束哨兵定档，渲染选源不跨束混用。
+    from upi.core.render_source import bundle_render_tier
+    return stats_from_windows(fx, bundle_render_tier(doc.get("fixtures", {})))
 
 
 def verdict_from_bundles(det_id: str, fixture: str,

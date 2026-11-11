@@ -186,6 +186,72 @@ same, diffs = fp1.same_for_compare(fp2)
 assert not same and any("scale_factor" in d for d in diffs) and any("graphics_api" in d for d in diffs)
 PASS.append("D15/G7 scale_factor 与 graphics_api 入指纹后常态≠压测不可比")
 
+# ── #30 整束渲染数据档：G16④ 从纸面闸变真闸的判据与选源一致性 ─────
+from upi.core.render_source import bundle_render_tier
+from scripts.m1_detect import stats_by_fixture, stats_from_windows
+
+
+def _rw(draw=None, sent=None, poll=10.0, median_form=False):
+    """构造一窗：poll=轮询 drawCalls 中位，draw=A2 渲染序列（或摘要 *_median 形）。"""
+    a2 = {}
+    if median_form:
+        if draw is not None:
+            a2 = {"draw_median": draw, "draw_n": 60,
+                  "setpass_median": 5.0, "setpass_n": 60, "tris_median": 9.0, "tris_n": 60}
+    elif draw is not None:
+        a2 = {"draw": [draw] * 60, "setpass": [5.0] * 60, "tris": [9.0] * 60}
+    w = {"metrics": {"drawCalls": {"median": poll}}, "a2": a2}
+    if sent is not None:
+        w["sentinel"] = sent
+    return w
+
+
+_OK = {"draw": "ok", "setpass": "ok", "tris": "ok"}
+
+
+def _mk(wins):
+    return {"F": {"windows": wins}}
+
+
+# ① 旧束/none/idle（无渲染 A2 序列）⇒ A，检测逐字回退轮询（不作废历史）
+_t = bundle_render_tier(_mk([_rw(poll=10.0) for _ in range(4)]))
+_v = stats_by_fixture({"fixtures": _mk([_rw(poll=10.0) for _ in range(4)])})["F"]["drawCalls"]["median"]
+assert _t == "A" and _v == 10.0, f"旧束应标 A 且用轮询值，实得 {_t}/{_v}"
+PASS.append("#30 旧束无渲染A2序列⇒标A且检测用轮询（历史不作废）")
+
+# ② 全窗哨兵 ok ⇒ A2，检测采用 A2 逐帧中位（100≠轮询10，可分辨）
+_t = bundle_render_tier(_mk([_rw(draw=100.0, sent=_OK) for _ in range(4)]))
+_v = stats_by_fixture({"fixtures": _mk([_rw(draw=100.0, sent=_OK) for _ in range(4)])})["F"]["drawCalls"]["median"]
+assert _t == "A2" and _v == 100.0, f"哨兵全过应标A2且用A2值，实得 {_t}/{_v}"
+PASS.append("#30 哨兵全过⇒标A2且检测采用A2逐帧值")
+
+# ③ 任一窗哨兵没过 ⇒ 整束标 A，检测回退轮询（fail-loud 的选源侧落地）
+_mixed = [_rw(draw=100.0, sent=_OK), _rw(draw=100.0, sent=_OK),
+          _rw(draw=0.0, sent={"draw": "a2_zero poll=10.0", "setpass": "ok", "tris": "ok"}),
+          _rw(draw=100.0, sent=_OK)]
+_t = bundle_render_tier(_mk(_mixed))
+_v = stats_by_fixture({"fixtures": _mk(_mixed)})["F"]["drawCalls"]["median"]
+assert _t == "A" and _v == 10.0, f"一窗没过应整束降A并回退轮询，实得 {_t}/{_v}"
+PASS.append("#30 任一窗哨兵没过⇒整束标A并回退轮询（all-or-nothing）")
+
+# ④ 跨机制不一致（clean 全过、某缺陷一窗没过）⇒ 整束 A：杜绝"clean走A2、缺陷走轮询"跨源
+_cross = {
+    "CLEAN": {"windows": [_rw(draw=100.0, sent=_OK) for _ in range(4)]},
+    "F-GPU-01": {"windows": [_rw(draw=100.0, sent=_OK),
+                              _rw(draw=0.0, sent={"draw": "ratio_out", "setpass": "ok", "tris": "ok"}),
+                              _rw(draw=100.0, sent=_OK), _rw(draw=100.0, sent=_OK)]}}
+assert bundle_render_tier(_cross) == "A", "跨机制有一窗没过必须整束降 A"
+PASS.append("#30 clean全过但缺陷一窗没过⇒整束降A（同一次compare不可能跨源）")
+
+# ⑤ 序列在场但 sentinel 字段缺失（idle-only 没跑对表）⇒ 不假装通过，A
+assert bundle_render_tier(_mk([_rw(draw=100.0, sent=None) for _ in range(4)])) == "A"
+PASS.append("#30 有A2序列但无sentinel字段⇒不假装通过判A（对不了表就不采用）")
+
+# ⑥ 标签只降不升的接缝验证：stats_from_windows 显式传 "A" 时绝不采 A2（缺省安全）
+_v = stats_from_windows({"windows": [_rw(draw=100.0, sent=_OK) for _ in range(4)]}, "A")["drawCalls"]["median"]
+assert _v == 10.0, f"render_tier=A 必须用轮询，实得 {_v}"
+PASS.append("#30 stats_from_windows 缺省A⇒漏传调用方也不会误采可疑A2")
+
 # ── 结果 ─────────────────────────────────────────────────────────
 print(f"通过 {len(PASS)} 项：")
 for x in PASS:
