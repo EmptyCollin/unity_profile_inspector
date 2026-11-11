@@ -109,6 +109,9 @@
 | `POST /api/probe/install` | I3b-1 | 安装统一探针（先卸旧探针） |
 | `POST /api/probe/sample` | I3b-1 | `{on,window}` 采样开关 |
 | `POST /api/probe/unload` | I3b-1 | 卸载探针 |
+| `POST /api/resident/start` | I3b-2b1 | 启动后台巡检（`interval` 秒） |
+| `POST /api/resident/tick` | I3b-2b1 | 手动巡检一轮 |
+| `POST /api/resident/stop` | I3b-2b1 | 停止后台巡检 |
 | `POST /api/regression/run` | I4 | 跑基线/回归 |
 | `GET /api/reports` | I5 | verified/unverified 两本账 |
 
@@ -116,11 +119,11 @@
 
 - 已接入：首页、状态 API、SSE、探针事件摘要、token/cookie、CP936 不崩；
   **问题页（cluster 表）**、**指纹库页**、**工单页（建单/明细/批准/驳回/执行）**、
-  **首页探针按钮（安装/采样开/采样关/卸载）**。
+  **首页探针按钮（安装/采样开/采样关/卸载）**、**自动巡检/巡检一轮/停**。
 - 工单执行已接 `snapshot/fixer/compile/rollback`；没有可执行 plan 时返回 409，
-  不盲改。
+  不盲改；巡检只建单，不自动执行。
 - 未接入：回归、设置/接入；执行时间线/回归矩阵/正式审批表单在 I4/I5。
-- `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b-2b 补。
+- `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b-2c 补。
 - `README`/`使用说明` 仍是旧 TUI 口径，I5 统一重写。
 
 ## 8. 验收

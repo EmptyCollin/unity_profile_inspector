@@ -145,10 +145,11 @@ def build_status() -> dict:
     from upi.core.ticket import TicketStore
     tstore = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
     batch_tickets = [t.summary() for t in tstore.list(10)]
+    from upi.core.scheduler import get_scheduler
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I3b-2a", "single_channel": True},
+        "ui": {"shell": "I3b-2b", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
@@ -159,6 +160,7 @@ def build_status() -> dict:
         "fingerprints": fp_stats,
         "fingerprint_records": fp_records,
         "batch_tickets": batch_tickets,
+        "resident_scheduler": get_scheduler().status(),
         "tickets": _open_tickets(),
         "events": _recent_events(),
     }
@@ -288,6 +290,12 @@ _INDEX_HTML = r"""<!doctype html>
             <button class="pbtn" data-pact="sample-off">采样关</button>
             <button class="pbtn" data-pact="unload">卸载</button>
           </div>
+          <div style="margin-top:8px" id="schedActions">
+            <button class="pbtn" data-pact="resident-start">自动巡检</button>
+            <button class="pbtn" data-pact="resident-tick">巡检一轮</button>
+            <button class="pbtn" data-pact="resident-stop">停</button>
+          </div>
+          <div class="meta" id="schedMeta">巡检：—</div>
         </div>
         <div class="card"><div class="lab">待批工单</div><div class="val" id="ticketVal">—</div><div class="meta" id="ticketMeta"></div></div>
       </div>
@@ -307,7 +315,7 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">02</span><span>统一事件总线：breach / sample + 1Hz 哨兵</span><span class="pill ok">已接入</span></div>
         <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
         <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
-        <div class="step"><span class="s">05</span><span>常驻：批量工单/审批/执行已接；plan 与调度在 I3b-2b</span><span class="pill ok">I3b</span></div>
+        <div class="step"><span class="s">05</span><span>常驻：工单/审批/执行/巡检已接；真实 plan 在 I3b-2c</span><span class="pill ok">I3b</span></div>
         <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
         <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
@@ -409,14 +417,20 @@ function showTicketDetail(t){
 }
 async function probeAction(act){
   try{
-    let path = "/api/probe/" + (act.startsWith("sample") ? "sample" : act);
-    let body = act === "sample-on" ? {on:true, window:300}
-             : act === "sample-off" ? {on:false}
-             : {};
+    let path, body = {};
+    if(act.startsWith("resident-")){
+      path = "/api/resident/" + act.slice("resident-".length);
+      body = {interval: 60};
+    }else{
+      path = "/api/probe/" + (act.startsWith("sample") ? "sample" : act);
+      body = act === "sample-on" ? {on:true, window:300}
+           : act === "sample-off" ? {on:false}
+           : {};
+    }
     const r = await post(path, body);
     alert((r.detail || r.error || "完成"));
     await refresh();
-  }catch(e){ alert("探针操作失败：" + e.message); }
+  }catch(e){ alert("操作失败：" + e.message); }
 }
 async function ticketAction(tid, act){
   if(act === "execute"){
@@ -464,6 +478,9 @@ function render(s){
     ? "未安装/未运行探针（I1 接单探针）" : `心跳 ${pr.heartbeat_age_s}s 前 · ${pr.heartbeat}`)
     + ` · 事件 ${pr.events_total || 0}（breach ${(pr.by_kind||{}).breach || 0} / sample ${(pr.by_kind||{}).sample || 0}）`;
   $("probeTop").textContent = pr.state === "alive" ? "在线" : "离线";
+  const rs = s.resident_scheduler || {};
+  $("schedMeta").textContent = `巡检：${rs.running ? "开" : "关"} · tick ${rs.tick_count || 0}` +
+    ` · 最近 ${rs.last_ticket || "—"}` + (rs.last_error ? ` · 错误 ${rs.last_error}` : "");
   $("ticketVal").textContent = tk.length ? (tk.length + " 张") : "0";
   $("ticketVal").className = "val " + (tk.length ? "warn" : "ok");
   $("ticketMeta").textContent = tk.length ? "在「工单」页逐项批准（I3 接入）" : "没有待批工单";
@@ -682,6 +699,25 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 t = eng.build_ticket(plan_provider=None, limit=8)
                 self._send_json(200, {"ok": True, "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        if parsed.path in ("/api/resident/start", "/api/resident/stop",
+                           "/api/resident/tick"):
+            try:
+                from upi.core.scheduler import get_scheduler
+                sch = get_scheduler()
+                if parsed.path.endswith("/start"):
+                    res = sch.start(float(body.get("interval", 60) or 60))
+                    self._send_json(200, {"ok": True, "scheduler": res})
+                elif parsed.path.endswith("/stop"):
+                    res = sch.stop()
+                    self._send_json(200, {"ok": True, "scheduler": res})
+                else:
+                    t = sch.tick()
+                    self._send_json(200, {"ok": True, "scheduler": sch.status(),
+                                          "ticket": t.model_dump() if t else None})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

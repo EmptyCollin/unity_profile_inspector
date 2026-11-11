@@ -98,6 +98,7 @@ try:
        {"metric", "shape", "count", "data_tier"} <= set((data.get("clusters") or [{}])[0]))
     ok("状态含指纹库", data.get("fingerprints", {}).get("total") == 6
        and len(data.get("fingerprint_records") or []) == 6)
+    ok("状态含巡检调度", "resident_scheduler" in data)
 
     code, _hdr, _body = get(base + "/api/status")
     ok("无 token 访问 API 被拒", code == 403, f"code={code}")
@@ -156,6 +157,9 @@ try:
     ok("POST 采样开", code == 200 and "sample=on" in r.get("detail", ""))
     code, r = post_json(base + "/api/probe/unload?token=test-token", {})
     ok("POST 探针卸载", code == 200 and r.get("ok") is True)
+
+    code, r = post_json(base + "/api/resident/tick?token=test-token", {})
+    ok("POST 巡检一轮", code == 200 and r.get("scheduler", {}).get("tick_count", 0) >= 1)
 finally:
     ui.stop()
     th.join(timeout=2)
