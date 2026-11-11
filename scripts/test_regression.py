@@ -15,7 +15,8 @@ from upi.core.probe_events import EventLog, ProbeEvent   # noqa: E402
 from upi.core.replay_driver import (ReplayDriverError,  # noqa: E402
                                     SubprocessReplayDriver, UnityReplayDriver,
                                     driver_for)
-from upi.core.regression_report import build_report, write_report  # noqa: E402
+from upi.core.regression_report import (build_report, write_json_report,  # noqa: E402
+                                        write_report)
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
                                  RegressionRun, RegressionRunner,
                                  RegressionStore, ReplaySuite, verify_after)
@@ -136,8 +137,15 @@ ok("verified 账本落盘", len(st3.list_verdicts("s3")) == 1)
 ok("summary 带 last_verdict", st3.summary("s3")["last_verdict"]["status"] == "verified")
 rep = build_report(st3, "s3")
 ok("报告含 plan/verdict", rep["plan"] is not None and rep["verified_count"] == 1)
+ok("报告带形态/验证等级", rep["mode"] == "regression"
+   and rep["verification_status"] == "verified")
+ok("报告带不可检出清单（G20）", len(rep["blind_spots"]) == 5)
 rp = write_report(st3, "s3")
-ok("报告落盘", rp.exists() and "回归报告" in rp.read_text(encoding="utf-8"))
+txt = rp.read_text(encoding="utf-8")
+ok("报告落盘", rp.exists() and "回归报告" in txt)
+ok("HTML 含 G20 清单", "不可检出清单" in txt and "gpu_attribution" in txt)
+jp = write_json_report(st3, "s3")
+ok("JSON 报告落盘", jp.exists() and jp.read_text(encoding="utf-8").find('"mode": "regression"') >= 0)
 
 st4 = RegressionStore(TMP / "reg4")
 after_bad = RegressionRun(run_id="v3", suite_id="s4", run_index=3,
