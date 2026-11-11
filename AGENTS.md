@@ -358,4 +358,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I6a 完成：README/使用说明重写为 v2 Web 单通道，删 TUI 用法，测试口径 31 套。
 - I6b1 完成：`acceptance.py` 6 项验收落盘；Web 增加 nosniff/no-referrer/DENY。
 - I6b2a 完成：`e2e_smoke.py` Web/API 全链路 10/10（不碰 Unity）。
-- I6b2b：真实工程/夹具 Unity E2E、迁移/发布审计（`docs/迭代计划.md`）。
+- I6b2b1 完成：`release_check.py` 发布审计 6/6（1 warning：fixture 脏区）；`docs/发布检查.md` 列明阻断与口径。
+- I6b2b2：真实工程/夹具 Unity E2E、迁移/发布审计、发布（`docs/迭代计划.md`）。

@@ -84,6 +84,7 @@ DESIGN.md     详细设计（§14 为两形态权威）
 | 为什么这样设计 | [DESIGN.md](DESIGN.md) §14 + [docs/adr](docs/adr) |
 | 行为边界与门禁 | [AGENTS.md](AGENTS.md) §8 |
 | 当前认知债/盲区 | [docs/现状与认知债.md](docs/现状与认知债.md) §0 |
+| 发布前检查 | [docs/发布检查.md](docs/发布检查.md) |
 
 ## 验证
 
@@ -92,5 +93,6 @@ python scripts/run_tests.py             # 31 套离线测试（自动 UTF-8）
 python scripts/check_fixture_split.py   # 夹具隔离闸
 python scripts/acceptance.py            # 6 项验收，落 runs/acceptance_*.json
 python scripts/e2e_smoke.py             # Web/API 全链路 10 项，落 runs/e2e_smoke_*.json
+python scripts/release_check.py         # 发布前审计，落 runs/release_*.json
 python -m upi ui --check                # Web 状态自检（ASCII JSON）
 ```
