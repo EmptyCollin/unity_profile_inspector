@@ -12,8 +12,8 @@ from upi.core import events as E                       # noqa: E402
 from upi.core.cluster import cluster_events            # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent   # noqa: E402
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
-                                 RegressionRun, RegressionStore,
-                                 ReplaySuite, verify_after)
+                                 RegressionRun, RegressionRunner,
+                                 RegressionStore, ReplaySuite, verify_after)
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_reg_"))
@@ -104,6 +104,18 @@ ok("3 次后计划 ready", sm["plan"]["status"] == "ready"
    and len(sm["plan"]["items"]) == 1)
 ok("套件列表", any(x.suite_id == "s2" for x in st2.list_suites()))
 
+# 可注入 replay runner：3 次基线 + 守护
+st5 = RegressionStore(TMP / "reg5")
+suite5 = ReplaySuite(suite_id="s5", protocol_fingerprint="fp-run")
+def run_once(_suite):
+    return "fp-run", [ProbeEvent(kind="sample", metric="gc_alloc_per_frame",
+                                 rel_frame=10, series=[1000.0] * 20, data_tier="A2")]
+runner = RegressionRunner(suite5, st5, run_once)
+m5 = runner.collect_baseline(3)
+ok("runner 采 3 次", len(m5.runs) == 3)
+ok("runner 采守护", m5.runs[0].guards.get("gc_alloc_per_frame") == 1000.0)
+ok("runner 计划 ready", RegressionPlan.from_matrix(m5).status == "ready")
+
 # 第 4 次（修复后）→ verified 账本
 st3 = RegressionStore(TMP / "reg3")
 base_runs = [RegressionRun(run_id=f"v{i}", suite_id="s3", run_index=i,
@@ -128,7 +140,9 @@ st4.save_matrix(BaselineMatrix(suite_id="s4", runs=[
 res2 = st4.verify_last("s4")
 ok("目标仍在→不 verified", res2["ok"] and not res2["verified"]
    and res2["record"]["verdict"]["status"] == "target_present"
-   and st4.list_verdicts("s4") == [])
+   and len(st4.list_verdicts("s4")) == 1)
+ok("失败 verdict 也审计", st4.list_verdicts("s4")[0].verdict.verification_status
+   == "unverified")
 
 
 print()

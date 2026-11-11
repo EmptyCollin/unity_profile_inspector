@@ -11,9 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import statistics
 import time
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -45,9 +46,27 @@ class RegressionRun(BaseModel):
     run_index: int
     protocol_fingerprint: str
     clusters: list[IssueCluster] = Field(default_factory=list)
+    guards: dict = Field(default_factory=dict)
     event_count: int = 0
     status: Literal["collected", "failed"] = "collected"
     collected_at: str = ""
+
+
+def guards_from_events(events: list) -> dict:
+    """同 run 各指标的窗口中位；只用于 guard 对比，不当 finding。"""
+    by: dict[str, list[float]] = {}
+    for e in events:
+        try:
+            if getattr(e, "kind", "") == "sample" and getattr(e, "series", None):
+                v = statistics.median(float(x) for x in e.series if x is not None)
+            elif getattr(e, "kind", "") == "breach" and getattr(e, "value", None) is not None:
+                v = float(e.value)
+            else:
+                continue
+        except (TypeError, ValueError, statistics.StatisticsError):
+            continue
+        by.setdefault(str(getattr(e, "metric", "")), []).append(v)
+    return {k: round(statistics.median(v), 4) for k, v in by.items() if v}
 
 
 def _norm_protocol(s: str) -> str:
@@ -76,6 +95,33 @@ class BaselineMatrix(BaseModel):
 
     def stable_matches(self) -> list[ClusterMatch]:
         return [m for m in self.matches() if m.is_stable and not m.cluster.ambiguous]
+
+
+class RegressionRunner:
+    """可注入的 replay 执行器：真正的 Unity 驱动在 I4b2b2 接。
+    run_once(suite) -> (protocol_fingerprint, events)
+    """
+    def __init__(self, suite: ReplaySuite, store: "RegressionStore",
+                 run_once: Callable[[ReplaySuite], tuple[str, list]]):
+        self.suite = suite
+        self.store = store
+        self.run_once = run_once
+
+    def collect_baseline(self, n: int = 3) -> BaselineMatrix:
+        if n < 3:
+            raise ValueError("baseline 至少 3 次")
+        m = BaselineMatrix(suite_id=self.suite.suite_id, min_runs=n)
+        for i in range(n):
+            proto, events = self.run_once(self.suite)
+            cs = cluster_events(events, merge_gap=30)
+            m.runs.append(RegressionRun(
+                run_id=f"{self.suite.suite_id}-r{i}", suite_id=self.suite.suite_id,
+                run_index=i,
+                protocol_fingerprint=proto or self.suite.protocol_fingerprint,
+                clusters=cs, guards=guards_from_events(events),
+                event_count=len(events), collected_at=E.now()))
+        self.store.save_matrix(m)
+        return m
 
 
 class RegressionPlanItem(BaseModel):
@@ -276,7 +322,8 @@ class RegressionStore:
         r = RegressionRun(
             run_id=f"{sid}-r{idx}", suite_id=sid, run_index=idx,
             protocol_fingerprint=(protocol or suite.protocol_fingerprint or "unspecified"),
-            clusters=cs, event_count=len(events), collected_at=E.now())
+            clusters=cs, guards=guards_from_events(events),
+            event_count=len(events), collected_at=E.now())
         m.runs.append(r)
         self.save_matrix(m)
         return r
@@ -299,16 +346,23 @@ class RegressionStore:
         if target is None:
             return {"ok": False, "error": "目标 cluster 不在基线中"}
         after = m.runs[-1]
+        guards_before = {}
+        for r in base_runs:
+            for k, v in (r.guards or {}).items():
+                guards_before.setdefault(k, []).append(float(v))
+        guards_before = {k: statistics.median(v) for k, v in guards_before.items() if v}
         v = verify_after(base, target, after.clusters,
-                         after_protocol=after.protocol_fingerprint)
+                         after_protocol=after.protocol_fingerprint,
+                         guards_before=guards_before,
+                         guards_after=after.guards or {})
         rec = VerifiedRecord(
             record_id="vr-" + hashlib.sha256(
                 f"{sid}|{plan.plan_id}|{after.run_id}".encode()).hexdigest()[:10],
             suite_id=sid, plan_id=plan.plan_id,
             target_cluster_id=target.cluster_id, verdict=v, created_at=E.now())
-        if v.verification_status == "verified":
-            self.save_verdict(rec)
-        return {"ok": True, "record": rec.model_dump(), "verified": v.verification_status == "verified"}
+        self.save_verdict(rec)
+        return {"ok": True, "record": rec.model_dump(),
+                "verified": v.verification_status == "verified"}
 
     def save_verdict(self, rec: VerifiedRecord) -> Path:
         p = self.verdicts / f"{rec.record_id}.json"
@@ -341,4 +395,6 @@ class RegressionStore:
             "stable_clusters": len(m.stable_matches()),
             "plan": plan.model_dump(),
             "last_verdict": (vs[0].verdict.model_dump() if vs else None),
+            "verified_count": sum(1 for x in vs
+                                  if x.verdict.verification_status == "verified"),
         }

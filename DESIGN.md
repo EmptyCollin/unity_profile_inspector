@@ -736,4 +736,6 @@ trace: run_id
   只消费当前探针事件。
 - **I4b2a 完成**：`verify_last` 用前 3 次基线 + 第 4 次 after 做四条件判定；
   只有 verified 落账；Web 增加“验证最后一次”。
-- **I4b2b~I6**：真实 replay/时间对齐、守护采集、失败审计/报告、UI 完整化、硬化验收。
+- **I4b2b1 完成**：回归 run 采守护指标；失败 verdict 也审计；
+  `RegressionRunner` 注入式 3 次基线；仍无真实 Unity replay 驱动。
+- **I4b2b2~I6**：真实 replay/时间对齐、全量守护、报告、UI 完整化、硬化验收。
