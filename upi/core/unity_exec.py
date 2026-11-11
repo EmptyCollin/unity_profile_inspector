@@ -104,7 +104,7 @@ class UnityTicketExecutor:
                 item.status = "needs_human"
                 item.error = "no plan"
                 continue
-            if item.permission_tier != "auto":
+            if item.permission_tier != "auto" and not item.human_approved:
                 item.status = "needs_human"
                 item.error = f"tier={item.permission_tier} requires individual approval"
                 continue

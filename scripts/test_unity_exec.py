@@ -13,7 +13,8 @@ from upi.core.cluster import cluster_events                # noqa: E402
 from upi.core.fingerprint import FingerprintStore          # noqa: E402
 from upi.core.models import EditPlan                       # noqa: E402
 from upi.core.probe_events import ProbeEvent               # noqa: E402
-from upi.core.ticket import TicketStore, approve, build_ticket  # noqa: E402
+from upi.core.ticket import (TicketStore, approve, approve_item,  # noqa: E402
+                             build_ticket)
 from upi.core.unity_exec import UnityTicketExecutor        # noqa: E402
 
 PASS, FAIL = [], []
@@ -128,6 +129,21 @@ t6 = build_ticket(cs, fp_store=fp, plan_provider=None)
 approved(t6)
 out6 = UnityTicketExecutor(store, scene=TMP / "s.tscene", project=TMP).execute(t6)
 ok("无 plan 不执行", all(i.status == "needs_human" for i in out6.items))
+
+# blocked plan：单条批准后 Unity 适配才执行
+def blocked():
+    return EditPlan(playbook_id="PB-FULL-REUSE", diffs=[{"file": "x.cs"}],
+                    side_effect="none", permission_tier="blocked")
+
+
+tb = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: blocked(), limit=8)
+approve(tb, approver="我", note="批", token=tb.approve_token)
+itb = tb.items[0]
+ok("blocked 初始不执行", itb.status == "needs_human")
+approve_item(tb, itb.item_id, approver="我", note="已读", token=itb.item_approve_token)
+outb = UnityTicketExecutor(store, snapshot_fn=snap, execute_fn=ex, observe_fn=obs,
+                            project=TMP, scene=TMP / "s.tscene").execute(tb)
+ok("单条批准后 Unity 适配执行", outb.items[0].status == "applied_unverified")
 
 print()
 if FAIL:

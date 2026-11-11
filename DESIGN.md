@@ -728,4 +728,6 @@ trace: run_id
   不自动执行）；Web 自动巡检/巡检一轮/停。
 - **I3b-2c1 完成**：`plan_provider.py` 对夹具 CPU 产出真实 EditPlan；
   模板 `permission_tier=blocked` 不被 playbook 映射降级，工单保持 `needs_human`。
-- **I3b-2c2~I6**：干净工程/逐项批准下的端到端真机写入、回归、UI 完整化、硬化验收。
+- **I3b-2c2a 完成**：逐项批准闸（人+批语+4 位码）；blocked/semi 只有
+  `human_approved` 后才放行，批量批准不替代。
+- **I3b-2c2b~I6**：干净工作区/工程下的真机写闭环、回归、UI 完整化、硬化验收。

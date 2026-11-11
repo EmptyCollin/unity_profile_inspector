@@ -52,6 +52,10 @@ class TicketItem(BaseModel):
     status: ItemStatus = "pending"
     observation: dict = Field(default_factory=dict)
     error: str = ""
+    item_approve_token: str = ""
+    human_approved: bool = False
+    approver: str = ""
+    approval_note: str = ""
 
     def edit_plan(self) -> Optional[EditPlan]:
         return EditPlan(**self.plan) if self.plan else None
@@ -81,9 +85,17 @@ class BatchTicket(BaseModel):
             "approve_token": self.approve_token if self.status == "awaiting_approval" else "",
             "approver": self.approver,
             "item_list": [{
+                "item_id": i.item_id,
                 "metric": i.metric, "shape": i.shape, "status": i.status,
                 "playbook_id": i.playbook_id, "tier": i.permission_tier,
                 "fingerprint_hit": i.fingerprint_hit, "error": i.error,
+                "has_plan": i.plan is not None,
+                "plan_files": sorted({str(d.get("file", ""))
+                                      for d in (i.plan or {}).get("diffs", [])}),
+                "diff_count": len((i.plan or {}).get("diffs", [])),
+                "human_approved": i.human_approved,
+                "approve_token": (i.item_approve_token
+                                  if i.status == "needs_human" and i.plan else ""),
             } for i in self.items[:8]],
         }
 
@@ -110,6 +122,10 @@ def _max_tier(a: str, b: str) -> Literal["auto", "semi", "blocked"]:
 def _token(ticket_id: str, items: list[TicketItem]) -> str:
     raw = ticket_id + "|" + "|".join(i.cluster_id for i in items)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:4].upper()
+
+
+def _item_token(ticket_id: str, item_id: str) -> str:
+    return hashlib.sha256(f"{ticket_id}|{item_id}".encode("utf-8")).hexdigest()[:4].upper()
 
 
 PlanProvider = Callable[[IssueCluster, str], Optional[EditPlan]]
@@ -147,8 +163,9 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
                 if tier != "auto":
                     err = f"tier={tier}: plan requires individual approval"
         status: ItemStatus = "pending" if plan is not None and tier == "auto" else "needs_human"
+        iid = "it-" + secrets.token_hex(4)
         items.append(TicketItem(
-            item_id="it-" + secrets.token_hex(4), cluster_id=c.cluster_id,
+            item_id=iid, cluster_id=c.cluster_id,
             metric=c.metric, shape=c.shape, kind=c.kind, count=c.count,
             first_rel=c.first_rel,
             fingerprint_hit=bool(hit and hit.hit),
@@ -156,6 +173,7 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
             playbook_id=playbook, permission_tier=tier,
             plan=(plan.model_dump() if plan is not None else None),
             status=status, error=err,
+            item_approve_token=_item_token(tid, iid),
         ))
     return BatchTicket(ticket_id=tid, mode=mode, created_at=E.now(),
                        status="awaiting_approval", items=items,
@@ -220,6 +238,32 @@ def reject(ticket: BatchTicket, *, approver: str, note: str) -> tuple[bool, str]
     return True, "rejected"
 
 
+def approve_item(ticket: BatchTicket, item_id: str, *, approver: str,
+                 note: str, token: str) -> tuple[bool, str]:
+    """单条批准 blocked/semi patch；批量批准不替代这一步。"""
+    if ticket.status not in ("approved", "executing", "done"):
+        return False, f"工单状态 {ticket.status} 不接受单条批准"
+    if not approver.strip() or not note.strip():
+        return False, "批准人和批语必填"
+    item = next((i for i in ticket.items if i.item_id == item_id), None)
+    if item is None:
+        return False, "item not found"
+    if item.plan is None:
+        return False, "该候选没有 plan，不能批准执行"
+    if item.status not in ("needs_human", "pending"):
+        return False, f"item 状态 {item.status} 不接受批准"
+    if not secrets.compare_digest((token or "").strip().upper(),
+                                  item.item_approve_token):
+        return False, "单条校验码不匹配"
+    item.human_approved = True
+    item.approver = approver.strip()
+    item.approval_note = note.strip()
+    if item.status == "needs_human":
+        item.status = "pending"
+        item.error = ""
+    return True, "item approved"
+
+
 class TicketExecutor:
     """串行执行器；所有外部动作注入，便于离线测试与后续接 Unity。"""
 
@@ -255,7 +299,7 @@ class TicketExecutor:
                 item.status = "needs_human"
                 item.error = "no plan"
                 continue
-            if item.permission_tier != "auto":
+            if item.permission_tier != "auto" and not item.human_approved:
                 item.status = "needs_human"
                 item.error = f"tier={item.permission_tier} requires individual approval"
                 continue

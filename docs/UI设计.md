@@ -123,7 +123,7 @@
 - 工单执行已接 `snapshot/fixer/compile/rollback`；没有可执行 plan 时返回 409，
   不盲改；巡检只建单，不自动执行。
 - 夹具 CPU 已能生成真实 plan，但目标 scripts=blocked，工单显示 `needs_human`，
-  不会因批量批准而降级执行。
+  不会因批量批准而降级执行；明细里可对**单条** patch 再批准（人+批语+4 位码）。
 - 未接入：回归、设置/接入；执行时间线/回归矩阵/正式审批表单在 I4/I5。
 - `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b-2c 补。
 - `README`/`使用说明` 仍是旧 TUI 口径，I5 统一重写。

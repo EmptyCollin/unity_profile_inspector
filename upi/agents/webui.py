@@ -409,10 +409,17 @@ function showTicketDetail(t){
   const items = (t.item_list || t.items || []).map(i => ({...i, tier: i.tier || i.permission_tier}));
   $("batchDetail").innerHTML = `<div style="padding:10px 15px;color:var(--muted);font-size:12px">` +
     `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b></div>` +
-    (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>原因</th></tr></thead><tbody>` +
-      items.map(i => `<tr><td class="mono">${esc(i.metric)}</td><td>${esc(i.shape)}</td>` +
+    (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>计划</th><th>单条批准</th><th>原因</th></tr></thead><tbody>` +
+      items.map(i => {
+        const files = (i.plan_files || []).join(", ");
+        const ap = i.human_approved ? "已单批"
+          : (i.approve_token ? `<button class="itemBtn" data-tid="${esc(t.ticket_id)}" data-iid="${esc(i.item_id)}">批准 ${esc(i.approve_token)}</button>` : "—");
+        return `<tr><td class="mono">${esc(i.metric)}</td><td>${esc(i.shape)}</td>` +
         `<td>${i.fingerprint_hit ? "命中" : "未命中"}</td><td class="mono">${esc(i.playbook_id || "—")}</td>` +
-        `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td><td class="small">${esc(i.error || "—")}</td></tr>`).join("") +
+        `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td>` +
+        `<td class="small">${esc(files || "—")}${i.diff_count ? " (" + i.diff_count + ")" : ""}</td>` +
+        `<td>${ap}</td><td class="small">${esc(i.error || "—")}</td></tr>`;
+      }).join("") +
       `</tbody></table>` : `<div class="empty">无候选。</div>`);
 }
 async function probeAction(act){
@@ -432,7 +439,22 @@ async function probeAction(act){
     await refresh();
   }catch(e){ alert("操作失败：" + e.message); }
 }
-async function ticketAction(tid, act){
+async function ticketAction(tid, act, iid){
+  if(act === "item-approve"){
+    const approver = prompt("单条批准人姓名：");
+    if(!approver) return;
+    const note = prompt("单条批语（说明你已读计划/文件）：");
+    if(!note) return;
+    const token = prompt("单条校验码（明细里的 4 位）：");
+    if(token === null) return;
+    try{
+      const r = await post(`/api/tickets/${encodeURIComponent(tid)}/items/${encodeURIComponent(iid)}/approve`,
+                           {approver, note, token});
+      if(r.ticket) showTicketDetail(r.ticket);
+      await refresh();
+    }catch(e){ alert("单条批准失败：" + e.message); }
+    return;
+  }
   if(act === "execute"){
     try{
       const r = await post(`/api/tickets/${encodeURIComponent(tid)}/execute`, {});
@@ -571,6 +593,8 @@ if(buildBtn) buildBtn.addEventListener("click", buildTicket);
 document.addEventListener("click", (ev) => {
   const pb = ev.target.closest && ev.target.closest(".pbtn");
   if(pb){ probeAction(pb.dataset.pact); return; }
+  const ib = ev.target.closest && ev.target.closest(".itemBtn");
+  if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
   if(!b) return;
   const tid = b.dataset.tid, act = b.dataset.act;
@@ -764,6 +788,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
 
+        m = re.match(r"^/api/tickets/(bt-[A-Za-z0-9_\-]+)/items/"
+                     r"(it-[A-Za-z0-9_\-]+)/approve$", parsed.path)
+        if m:
+            tid, iid = m.group(1), m.group(2)
+            try:
+                from upi.core.ticket import TicketStore, approve_item
+                store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+                t = store.load(tid)
+                if t is None:
+                    self._send_json(404, {"ok": False, "error": "ticket not found"})
+                    return
+                ok, msg = approve_item(
+                    t, iid, approver=str(body.get("approver", "")),
+                    note=str(body.get("note", "")), token=str(body.get("token", "")))
+                if ok:
+                    store.save(t)
+                self._send_json(200 if ok else 400, {"ok": ok, "message": msg,
+                                                     "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
         if re.match(r"^/api/tickets/bt-[A-Za-z0-9_\-]+/execute$", parsed.path):
             try:
                 from upi.core.ticket import TicketStore
@@ -779,7 +825,8 @@ class _Handler(BaseHTTPRequestHandler):
                                           "error": f"未批准（{t.status}）"})
                     return
                 runnable = [i for i in t.items
-                            if i.status == "pending" and i.plan and i.permission_tier == "auto"]
+                            if i.status == "pending" and i.plan
+                            and (i.permission_tier == "auto" or i.human_approved)]
                 if not runnable:
                     self._send_json(409, {
                         "ok": False,

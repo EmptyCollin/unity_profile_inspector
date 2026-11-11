@@ -15,7 +15,7 @@ from upi.core.models import EditPlan                   # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
 from upi.core.resident import ResidentEngine           # noqa: E402
 from upi.core.ticket import (TicketExecutor, TicketStore, approve,  # noqa: E402
-                             build_ticket, reject)
+                             approve_item, build_ticket, reject)
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_ticket_"))
@@ -95,6 +95,30 @@ ok("semi 不自动执行", t4.items[0].status == "needs_human"
 # 驳回
 t5 = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: plan())
 ok("驳回", reject(t5, approver="我", note="不修")[0] and t5.status == "rejected")
+
+# blocked plan：批量批准不够，必须单条批准
+def blocked_plan():
+    return EditPlan(playbook_id="PB-FULL-REUSE", diffs=[{"file": "x.cs"}],
+                    side_effect="none", permission_tier="blocked")
+
+
+t7 = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: blocked_plan())
+it = t7.items[0]
+ok("blocked plan 初始 needs_human", it.status == "needs_human"
+   and it.permission_tier == "blocked" and it.plan is not None)
+approve(t7, approver="我", note="批工单", token=t7.approve_token)
+ok("批量批准不自动执行 blocked", it.status == "needs_human")
+ok("错单条码被拒", not approve_item(t7, it.item_id, approver="我", note="已读",
+                                  token="0000")[0])
+ok("单条批准通过", approve_item(t7, it.item_id, approver="我", note="已读计划",
+                              token=it.item_approve_token)[0]
+   and it.status == "pending" and it.human_approved)
+applied7 = []
+out7 = TicketExecutor(store, apply=lambda p: applied7.append(p.playbook_id),
+                      compile_ok=lambda: True, observe=lambda: {},
+                      rollback=lambda: None).execute(t7)
+ok("单条批准后可执行", out7.items[0].status == "applied_unverified"
+   and applied7 == ["PB-FULL-REUSE"])
 
 # 持久化 + ResidentEngine 装配
 store.save(t5)
