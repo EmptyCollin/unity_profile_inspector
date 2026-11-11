@@ -1,0 +1,95 @@
+"""I0 Web 控制台骨架测试（离线、零编辑器）。
+
+覆盖：首页壳、状态 API、token 门禁、SSE 首帧、隔离目录不写真实 runs/。
+"""
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from upi.agents.webui import WebUI                     # noqa: E402
+from upi.core import events as E                       # noqa: E402
+
+PASS, FAIL = [], []
+TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
+E.isolate(TMP / "runs")
+(E.RUNS / "_probe").mkdir(parents=True, exist_ok=True)
+(E.RUNS / "_probe" / "pb_hb.txt").write_text("1", encoding="utf-8")
+(E.RUNS / "daemon_status.json").write_text(json.dumps({
+    "pid": 4242, "phase": "idle", "sampling_enabled": True,
+    "sampling_mode": "steady", "updated_at": "2026-11-11T22:00:00",
+}), encoding="utf-8")
+
+
+def ok(name: str, cond: bool, detail: str = ""):
+    (PASS if cond else FAIL).append(name)
+    print(f"  [{'ok' if cond else 'FAIL'}] {name}" + ("" if cond else f"  -> {detail}"))
+
+
+def get(url: str):
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
+ui = WebUI(port=0, token="test-token").start()
+th = threading.Thread(target=ui.serve_forever, daemon=True)
+th.start()
+time.sleep(0.15)          # 让 serve_forever 就绪（端口已 bind，连接本可立即成功）
+base = f"http://127.0.0.1:{ui.port}"
+
+try:
+    code, hdr, body = get(base + "/?token=test-token")
+    html = body.decode("utf-8", "replace")
+    ok("首页 200", code == 200, f"code={code}")
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I0 骨架" in html)
+    ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
+    ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
+    ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
+
+    code, hdr, body = get(base + "/api/status?token=test-token")
+    data = json.loads(body.decode("utf-8"))
+    ok("状态 API 200 + JSON", code == 200 and isinstance(data, dict))
+    ok("状态含单通道标记", data.get("ui", {}).get("single_channel") is True)
+    ok("状态含两形态字段", data.get("mode") in ("resident", "regression"))
+    for k in ("daemon", "project", "probe", "tickets", "events"):
+        ok(f"状态含 {k}", k in data)
+    ok("探针心跳读到（隔离目录）", data.get("probe", {}).get("heartbeat_age_s") is not None)
+    ok("守护状态读到隔离 status", data.get("daemon", {}).get("sampling") == "steady")
+
+    code, _hdr, _body = get(base + "/api/status")
+    ok("无 token 访问 API 被拒", code == 403, f"code={code}")
+
+    # SSE 是长连接，不能 read() 到底；只读首帧即关。
+    with urllib.request.urlopen(base + "/api/events?token=test-token", timeout=5) as r:
+        sse_code, sse_hdr = r.status, r.headers
+        first = r.readline().decode("utf-8", "replace")
+    ok("SSE 200 + 事件流 content-type",
+       sse_code == 200 and "text/event-stream" in (sse_hdr.get("Content-Type") or ""))
+    ok("SSE 首帧是 data: JSON", first.startswith("data: ") and
+       isinstance(json.loads(first[6:]), dict))
+
+    code, _hdr, _body = get(base + "/nope?token=test-token")
+    ok("未知路径 404", code == 404, f"code={code}")
+finally:
+    ui.stop()
+    th.join(timeout=2)
+
+print()
+if FAIL:
+    print(f"==== Web 控制台骨架测试: {len(PASS)} 通过, {len(FAIL)} 失败")
+    for f in FAIL:
+        print("  -", f)
+    sys.exit(1)
+print(f"==== Web 控制台骨架测试: {len(PASS)} 通过, 0 失败")
