@@ -283,9 +283,37 @@ def one_window(fixture: str, nonce: str) -> dict | None:
         if a2 is None:
             print("      !! A2 窗口数据缺失（nonce 不匹配或超时）")
 
+    # 哨兵对表（G16①）：渲染三项 A2 逐帧中位 × 同窗轮询中位，比值须同数量级
+    #（0.2~5）。这里只**记录** sentinel（ok / missing / a2_zero / poll_zero /
+    # ratio_out_of_band）；真正"不用可疑 A2 值"的门设在共享消费函数
+    # m1_detect.stats_from_windows——它是 detect/verify/patrol/drill 的唯一入口，
+    # 闸放在这里任何消费方都漏不掉（放采集层返回 None 会让上层分不清"哨兵没过"
+    # 和"没采到"，反而制造新盲区）。
+    # 为什么值得多这一道：v3 时代"注入读渲染恒 0"静默跑了 4 个月没人发现——
+    # 单信 A2 等于"仪器自己给自己作证"，监工必须是另一条独立通路。
+    skipped = (a2 or {}).get("skipped") or []
+    sentinel: dict[str, str] = {}
+    if a2 is not None and not IDLE_ONLY:
+        for a2k, pk in (("draw", "drawCalls"), ("setpass", "setPassCalls"), ("tris", "triangles")):
+            seq = a2.get(a2k) or []
+            pol = samples.get(pk) or []
+            if len(seq) < 50 or len(pol) < 3:
+                sentinel[a2k] = "missing"          # 无法对表：标未评，不默认放行
+                continue
+            m_a2 = statistics.median(float(x) for x in seq)
+            m_poll = statistics.median(pol)
+            if m_a2 == 0 and m_poll > 0:
+                sentinel[a2k] = f"a2_zero poll={m_poll}"     # 典型挂错句柄
+            elif m_poll == 0 and m_a2 > 0:
+                sentinel[a2k] = "poll_zero"
+            elif m_poll > 0 and m_a2 > 0 and not (0.2 <= m_a2 / m_poll <= 5.0):
+                sentinel[a2k] = f"ratio_out_of_band a2={m_a2} poll={m_poll}"
+            else:
+                sentinel[a2k] = "ok"
+
     return {"wall_s": round(time.time() - t, 2), "poll_n": len(samples.get("drawCalls", [])),
             "metrics": {k: robust(v) for k, v in samples.items() if len(v) >= 5},
-            "a2": a2}
+            "a2": a2, "skipped": skipped, "sentinel": sentinel}
 
 
 def sample_scene(fixture: str, windows: int) -> dict:

@@ -64,10 +64,34 @@ def rej_episode_on_c():
     Detector(metric="someStatic", source_tier="C", ptype="episode", **DET_BASE)
 
 
-def rej_gpu_spike_even_with_tier():
-    # 渲染计数即使谎称 A4 也不存在该 counter（G16 实证），一律拒
+def rej_drawcalls_a4():
+    # #36 改判：渲染合法源是 {A, A2}，A4 不在其中（FrameTimingManager 不产渲染计数）
+    # ⇒ 谎称 A4 仍拒，但拒因从旧条文的"渲染无逐帧源"换成"A4 非渲染合法源"。
     Detector(metric="drawCalls", source_tier="A4", ptype="episode",
              attribution_source="human", **DET_BASE)
+
+
+def ok_render_a2_episode_human():
+    # 解禁的正向证据（exp5/exp6：真名带 Count 后缀 + 双条件定位，A2 逐帧与轮询同数量级）
+    # ⇒ 渲染计数 spike detector 现在合法，但归因必须 human（FD 程序侧不可解读未被推翻）
+    Detector(**{**DET_BASE, "metric": "drawCalls", "source_tier": "A2",
+                "ptype": "episode", "attribution_source": "human"})
+
+
+def rej_render_a2_episode_auto():
+    # 检出事实 ≠ 归因能力：渲染 spike 无程序化逐笔归因源，auto 即虚报检出能力（I1）
+    Detector(**{**DET_BASE, "metric": "drawCalls", "source_tier": "A2",
+                "ptype": "episode", "attribution_source": "auto"})
+
+
+def rej_batches_a2_waterline():
+    # G16②：Render 类目无汇总 "Batches Count"（只 Dynamic/Instanced/Static 三分项）
+    # ⇒ batches 唯一口径是轮询 A，注入侧分项禁止冒充汇总
+    Detector(**{**DET_BASE, "metric": "batches", "source_tier": "A2"})
+
+
+def ok_batches_a_waterline():
+    Detector(**{**DET_BASE, "metric": "batches", "source_tier": "A"})
 
 
 def ok_gpu_a4_episode_human():
@@ -84,10 +108,14 @@ def rej_gpu_a4_episode_auto():
 
 for nm, f in [("G19 episode-on-A 拒收", rej_episode_on_a),
               ("G19 episode-on-C 拒收", rej_episode_on_c),
-              ("G19 GPU 逐笔 spike 禁注（谎称源也拒）", rej_gpu_spike_even_with_tier),
+              ("G16① drawCalls 谎称 A4 拒收（合法源仅 A/A2）", rej_drawcalls_a4),
+              ("G16② batches A2 水位拒收（无汇总句柄）", rej_batches_a2_waterline),
+              ("#36 渲染 A2 发作 auto 归因拒收（无源必须 human）", rej_render_a2_episode_auto),
               ("G19 GPU episode 自动归因拒收（无源必须 human）", rej_gpu_a4_episode_auto)]:
     expect_reject(nm, f)
 expect_accept("G19 GPU-A4 发作 detector(human 归因) 放行", ok_gpu_a4_episode_human)
+expect_accept("#36 渲染 A2 发作 detector(human 归因) 放行（spike 解禁）", ok_render_a2_episode_human)
+expect_accept("#36 batches A 水位放行（轮询唯一口径）", ok_batches_a_waterline)
 
 # ── G18：finding 等级归属 ─────────────────────────────────────────
 pot = models.PotentialFinding(

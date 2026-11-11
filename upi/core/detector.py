@@ -76,10 +76,17 @@ class Detector(BaseModel):
 
     @model_validator(mode="after")
     def _tier_consistency(self):
-        # 渲染计数只允许 A 档来源；GC/分配只允许 A2/A3（§3.6 指标归属制）
-        render_metrics = {"drawCalls", "setPassCalls", "batches", "triangles", "vertices"}
-        if self.metric in render_metrics and self.source_tier != "A":
-            raise ValueError(f"渲染指标 {self.metric} 的数据源只能是 A（G16：A2 静默0 / A3 -1 哨兵均非法）")
+        # 渲染计数数据源归属（#36 改判，G16①）：有 " Count" 句柄的四项
+        # （draw/setpass/triangles/vertices）A（轮询）与 A2（逐帧注入）都合法——
+        # 旧条文"只能 A"源于句柄名口径误判，exp6 已实证注入与轮询同数量级。
+        # ⚠️ batches 例外：句柄全量表证实 Render 类目**没有**汇总 "Batches Count"
+        #    （只有 Dynamic/Instanced/Static 三分项）⇒ 仍只允许 A（轮询唯一口径，
+        #    注入侧分项禁止冒充汇总）。A3 的 -1 哨兵对渲染一律非法。
+        render_a2_ok = {"drawCalls", "setPassCalls", "triangles", "vertices"}
+        if self.metric in render_a2_ok and self.source_tier not in {"A", "A2"}:
+            raise ValueError(f"渲染指标 {self.metric} 的数据源只能是 A/A2（G16①：A3 -1 哨兵非法）")
+        if self.metric == "batches" and self.source_tier != "A":
+            raise ValueError("batches 无汇总 Count 句柄，唯一口径是轮询 A（G16②：注入侧分项不得冒充汇总）")
         if self.metric in {"gc_alloc_per_frame"} and self.source_tier not in {"A2", "A3"}:
             raise ValueError("逐帧 GC 分配必须来自 A2/A3，A 档（轮询）无此量")
         for p in self.playbooks:
@@ -96,13 +103,23 @@ class Detector(BaseModel):
             raise ValueError(
                 f"{self.id}: ptype=episode 但 source_tier={self.source_tier} 不是逐帧源"
                 "（G19：A 秒级判发作=漏检+把异常当正常；禁止注册）")
-        # G19：渲染计数无任何逐帧源（A2 静默0 / A3 -1 / FD 程序侧不可解读）
-        # ⇒ GPU 逐笔 spike detector 物理上不存在，禁止注册（虚报检出能力按 I1 处理）
-        render_metrics = {"drawCalls", "setPassCalls", "batches", "triangles", "vertices"}
-        if self.metric in render_metrics and self.ptype == "episode":
+        # G19（2026-11-11 exp5/exp6 改判）：渲染计数 Draw/SetPass/Triangles/Vertices
+        # 的 A2 逐帧注入已实测可用（真名带 Count 后缀 + 双条件定位，与轮询同数量级）
+        # ⇒ 这些指标的 spike detector **解锁**（旧禁令的前提"注入恒 0"已被推翻）。
+        # 仍禁的是 batches：Render 类目没有汇总 "Batches Count" 句柄（G16②），
+        # 注入侧无此口径 ⇒ 拿不到逐帧序列，谎称 A2 也造不出合法 detector。
+        # ⚠️ 检出≠归因：渲染 spike 的"哪一笔画多了"仍无程序化源（FD 程序侧不可
+        #    解读，DESIGN §12 ①-⑫ 未被推翻）⇒ 强制 attribution_source=human，
+        #    finding 只给越线事实。缺这条会把"能发现尖峰"冒充成"能定位尖峰"（I1）。
+        if self.metric == "batches" and self.ptype == "episode":
             raise ValueError(
-                f"{self.id}: 渲染计数 {self.metric} 无逐帧源，禁止注册 GPU 逐笔 spike detector"
-                "（G19/DESIGN §12 ①-⑫；GPU 发作 detector 只能建在 A4 gpuFrameTime 上）")
+                f"{self.id}: batches 无汇总 Count 句柄（注入侧无此口径），禁止注册发作 detector"
+                "（G16②/G19；水位腿仍可用 A 档轮询）")
+        render_a2 = {"drawCalls", "setPassCalls", "triangles", "vertices"}
+        if self.metric in render_a2 and self.ptype == "episode" and self.attribution_source != "human":
+            raise ValueError(
+                f"{self.id}: 渲染计数 spike 的逐笔归因无程序化源（FD 不可解读），"
+                "必须 attribution_source=human——检出事实≠归因能力（G19）")
         return self
 
     @model_validator(mode="after")

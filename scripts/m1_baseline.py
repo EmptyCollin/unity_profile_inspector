@@ -1,9 +1,14 @@
 """M1 核心：双源采样执行器（DESIGN §2.1 A+A2 / §3 统计 / G17 退化检查）。
 
-数据源分工（实验4 定论）：
-  A  = diagnostics get_performance 轮询（~1Hz，渲染计数唯一源）
-  A2 = 注入常驻采样器 ProfilerRecorder(handle) 逐帧 GC Alloc / Memory（probe/sampler_v3 复用思路）
-  ⚠️ A2 读不到渲染 counter（体系里不存在）；静默 0 与 -1 哨兵必须拒绝而非当 0（G16/I1）。
+数据源分工（2026-11-11 exp5/exp6/#36 改判后；旧"渲染计数唯一源=轮询"系句柄名口径误判）：
+  A2 = 注入常驻采样器 ProfilerRecorder(handle) 逐帧：GC Alloc / Memory /
+       渲染计数三项（Draw/SetPass/Triangles——真名带 " Count" 后缀，
+       名字+类目双条件定位，exp5 R3 验证写法）。
+  A  = diagnostics get_performance 轮询（~1Hz）：时间类与 batches 的唯一口径
+       （句柄全量表证实无聚合 "Frame Time"/"Batches Count"）；渲染三项在场时
+       仅作哨兵与 A2 对表（G16①量级不符即拒收 bundle）。
+  ⚠️ 静默 0 教训（v3 时代全零事故的根因）：按不存在的短名构造**不抛异常**、
+     LastValue 恒 0。本版定位不到 = 记 skipped 拒装（fail-loud），绝不"装了读 0"。
 
 流程（每个场景）：
   开场景(域重载) → 进 Play → 注入采样器 → 预热丢样本 → 双源窗口 → 停 Play
@@ -81,11 +86,15 @@ public static class UpiSampler5 {
   const string CTL = DIR + "/a2_cmd.txt";
   const string HB = DIR + "/a2_hb.txt";
   class W { public ProfilerRecorder rec; public bool ok; }
-  static W _gc, _mem, _anim, _graph;
+  static W _gc, _mem, _anim, _graph, _draw, _setpass, _tris;
   static readonly List<long> Gc = new List<long>();
   static readonly List<long> Mem = new List<long>();
   static readonly List<long> Anim = new List<long>();
   static readonly List<long> Graph = new List<long>();
+  static readonly List<long> Draw = new List<long>();
+  static readonly List<long> SetPass = new List<long>();
+  static readonly List<long> Tris = new List<long>();
+  static readonly List<string> Skipped = new List<string>();   // fail-loud 留痕
   static int _lastFrame = -1; static bool _rec; static string _nonce = "";
   static DateTime _lastCtl = DateTime.MinValue; static DateTime _lastBeat = DateTime.MinValue;
 
@@ -95,29 +104,54 @@ public static class UpiSampler5 {
       return age < 3.0; } catch (Exception) { return false; }
   }
 
-  static W Make(string name) {
+  // 双条件定位（exp5 R3 验证写法）：名字==真名 且 类目==要求类目。
+  // 教训A：渲染计数真名带 " Count" 后缀，短名不在句柄表 ⇒ 构造"成功"但恒 0。
+  // 教训B：同名句柄有多个（如 UI Toolkit|Draw Calls Count 先注册遮蔽），
+  //        只按名字匹配会挂错句柄读数恒 0。
+  // StartImmediately：不经 Start()（UUM-127894 绕法，exp5 双构造对照）。
+  // ⚠️ 实测回退（真机验证抓到）：anim/graph 这类"方法级采样"句柄用
+  //    StartImmediately 构造抛异常 ⇒ 见下方构造行，统一 Default+Start()。
+  static W Make(string name, string cat, string tag) {
     var w = new W();
     var hs = new List<ProfilerRecorderHandle>(); ProfilerRecorderHandle.GetAvailable(hs);
     var dt = typeof(ProfilerRecorderHandle).GetMethod("GetDescription", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static).ReturnType;
     var np = dt.GetProperty("Name", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+    var cf = dt.GetField("category", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+    PropertyInfo cnp = null;
+    if (cf != null) cnp = cf.FieldType.GetProperty("Name", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
     foreach (var h in hs) {
       object d; try { d = ProfilerRecorderHandle.GetDescription(h); } catch (Exception) { continue; }
       string n; try { n = (string)np.GetValue(d, null); } catch (Exception) { continue; }
-      if (n == name) { try { w.rec = new ProfilerRecorder(h, 8000, ProfilerRecorderOptions.Default); w.rec.Start(); w.ok = true; } catch (Exception) {} return w; }
+      if (n != name) continue;
+      string cn = ""; try { cn = (string)cnp.GetValue(cf.GetValue(d), null); } catch (Exception) {}
+      if (cn != cat) continue;
+      // Default+Start（非 StartImmediately）：动画"方法级采样"句柄用 StartImmediately
+      // 构造实测抛异常（anim/graph 退化，真机验证抓到）。Default 的 2/60 冷启动零帧
+      // 在 n≈4000 的中位数里不挪结果，两害相权取 Default。
+      try { w.rec = new ProfilerRecorder(h, 8000, ProfilerRecorderOptions.Default); w.rec.Start(); w.ok = true; } catch (Exception) {}
+      if (!w.ok) Skipped.Add(tag + "(构造失败)");
+      return w;
     }
+    Skipped.Add(tag + "(未注册)");   // 定位不到=拒装并留痕，绝不"装了读 0"冒充合法值
     return w;
   }
 
   public static void Main() {
     Directory.CreateDirectory(DIR);
     if (Alive()) { Line = "alive hb_fresh"; return; }
-    if (_gc == null) _gc = Make("GC Allocated In Frame");
-    if (_mem == null) _mem = Make("Total Used Memory");
-    if (_anim == null) _anim = Make("Animator.ProcessAnimations");   // 实测存在（exp5）
-    if (_graph == null) _graph = Make("Animator.ProcessGraph");
+    if (_gc == null) _gc = Make("GC Allocated In Frame", "Memory", "gc");
+    if (_mem == null) _mem = Make("Total Used Memory", "Memory", "mem");
+    if (_anim == null) _anim = Make("Animator.ProcessAnimations", "Animation", "anim");   // 实测存在（exp5）
+    if (_graph == null) _graph = Make("Animator.ProcessGraph", "Animation", "graph");
+    if (_draw == null) _draw = Make("Draw Calls Count", "Render", "draw");          // 真名带 Count（exp5）
+    if (_setpass == null) _setpass = Make("SetPass Calls Count", "Render", "setpass");
+    if (_tris == null) _tris = Make("Triangles Count", "Render", "tris");
     EditorApplication.update -= Tick; EditorApplication.update += Tick;
     Line = "ready gc=" + ((_gc != null && _gc.ok) ? "1" : "0") + " mem=" + ((_mem != null && _mem.ok) ? "1" : "0")
-           + " anim=" + ((_anim != null && _anim.ok) ? "1" : "0") + " graph=" + ((_graph != null && _graph.ok) ? "1" : "0");
+           + " anim=" + ((_anim != null && _anim.ok) ? "1" : "0") + " graph=" + ((_graph != null && _graph.ok) ? "1" : "0")
+           + " draw=" + ((_draw != null && _draw.ok) ? "1" : "0") + " setpass=" + ((_setpass != null && _setpass.ok) ? "1" : "0")
+           + " tris=" + ((_tris != null && _tris.ok) ? "1" : "0")
+           + " skipped=[" + string.Join(",", Skipped.ToArray()) + "]";
   }
 
   static void Tick() {
@@ -131,7 +165,7 @@ public static class UpiSampler5 {
       _lastCtl = now;
       string ctl = "";
       try { if (File.Exists(CTL)) { ctl = File.ReadAllText(CTL).Trim(); File.Delete(CTL); } } catch (Exception) {}
-      if (ctl.Length > 6 && ctl.Substring(0, 5) == "start") { Gc.Clear(); Mem.Clear(); Anim.Clear(); Graph.Clear(); _nonce = ctl.Substring(6); _rec = true; }
+      if (ctl.Length > 6 && ctl.Substring(0, 5) == "start") { Gc.Clear(); Mem.Clear(); Anim.Clear(); Graph.Clear(); Draw.Clear(); SetPass.Clear(); Tris.Clear(); _nonce = ctl.Substring(6); _rec = true; }
       else if (ctl.Length > 5 && ctl.Substring(0, 4) == "stop" && _rec) { _rec = false; Dump(); }
     }
     if ((now - _lastBeat).TotalSeconds >= 1.0) {
@@ -143,6 +177,9 @@ public static class UpiSampler5 {
       if (_mem != null && _mem.ok) Mem.Add((long)_mem.rec.LastValue);
       if (_anim != null && _anim.ok) Anim.Add((long)_anim.rec.LastValue);
       if (_graph != null && _graph.ok) Graph.Add((long)_graph.rec.LastValue);
+      if (_draw != null && _draw.ok) Draw.Add((long)_draw.rec.LastValue);
+      if (_setpass != null && _setpass.ok) SetPass.Add((long)_setpass.rec.LastValue);
+      if (_tris != null && _tris.ok) Tris.Add((long)_tris.rec.LastValue);
     }
   }
 
@@ -158,10 +195,19 @@ public static class UpiSampler5 {
     var sb = new StringBuilder();
     sb.Append((char)123);
     AppendKey(sb, "nonce"); sb.Append((char)34).Append(_nonce).Append((char)34); sb.Append((char)44);
+    AppendKey(sb, "skipped"); sb.Append((char)91);
+    for (int i = 0; i < Skipped.Count; i++) {
+      if (i > 0) sb.Append((char)44);
+      sb.Append((char)34).Append(Skipped[i]).Append((char)34);
+    }
+    sb.Append((char)93).Append((char)44);
     AppendArr(sb, "gc", Gc); sb.Append((char)44);
     AppendArr(sb, "mem", Mem); sb.Append((char)44);
     AppendArr(sb, "anim", Anim); sb.Append((char)44);
-    AppendArr(sb, "graph", Graph);
+    AppendArr(sb, "graph", Graph); sb.Append((char)44);
+    AppendArr(sb, "draw", Draw); sb.Append((char)44);
+    AppendArr(sb, "setpass", SetPass); sb.Append((char)44);
+    AppendArr(sb, "tris", Tris);
     sb.Append((char)125);
     try { File.WriteAllText(OUT + ".tmp", sb.ToString()); if (File.Exists(OUT)) File.Delete(OUT); File.Move(OUT + ".tmp", OUT); } catch (Exception) {}
   }
@@ -239,11 +285,16 @@ def sample_scene(fixture_id: str) -> dict:
         time.sleep(0.5)
     if a2_data:
         gc_n, mem_n = len(a2_data.get("gc", [])), len(a2_data.get("mem", []))
-        print(f"    A2 逐帧样本: gc={gc_n} mem={mem_n}")
+        print(f"    A2 逐帧样本: gc={gc_n} mem={mem_n} draw={len(a2_data.get('draw', []))}"
+              f" setpass={len(a2_data.get('setpass', []))} tris={len(a2_data.get('tris', []))}"
+              f" skipped={a2_data.get('skipped')}")
     a2_frames = {"gc_alloc_per_frame": robust([float(x) for x in a2_data.get("gc", [])]) if len(a2_data.get("gc", [])) >= 5 else None,
                  "total_used_per_frame": robust([float(x) for x in a2_data.get("mem", [])]) if len(a2_data.get("mem", [])) >= 5 else None,
                  "animator_process_animations_ns": robust([float(x) for x in a2_data.get("anim", [])]) if len(a2_data.get("anim", [])) >= 5 else None,
-                 "animator_process_graph_ns": robust([float(x) for x in a2_data.get("graph", [])]) if len(a2_data.get("graph", [])) >= 5 else None}
+                 "animator_process_graph_ns": robust([float(x) for x in a2_data.get("graph", [])]) if len(a2_data.get("graph", [])) >= 5 else None,
+                 "drawCalls": robust([float(x) for x in a2_data.get("draw", [])]) if len(a2_data.get("draw", [])) >= 5 else None,
+                 "setPassCalls": robust([float(x) for x in a2_data.get("setpass", [])]) if len(a2_data.get("setpass", [])) >= 5 else None,
+                 "triangles": robust([float(x) for x in a2_data.get("tris", [])]) if len(a2_data.get("tris", [])) >= 5 else None}
 
     cmd("editor.playmode stop")
     time.sleep(5)

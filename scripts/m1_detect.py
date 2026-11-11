@@ -239,7 +239,14 @@ def stats_from_windows(fx: dict) -> dict:
     # 直接退化成"证据不足"（A 级自欺，被回归当场抓住）。
     A2MAP = {"gc": "gc_alloc_per_frame", "anim": "animator_process_animations_ns",
              "graph": "animator_process_graph_ns", "mem": "total_used_per_frame"}
-    for src, kname in A2MAP.items():
+    # 渲染计数主源=A2 逐帧（#36 改判：真名带 Count 后缀 + 双条件定位，exp6 与
+    # 轮询同数量级实证）。A2 在场时**覆盖**上面 metrics 里的轮询值；缺席（构造
+    # 失败/未采 full 会话）时 out 保留轮询值 = 自动回落，不降级成"无数据"。
+    # ⚠️ 返回值被调用方当"指标名→统计"字典遍历，故这里不塞 source 留痕键
+    #    （会被误读成一个指标）；哨兵对表在采集层 one_window 做，那里同时握着
+    #    轮询值与 A2 序列。
+    RENDER_A2MAP = {"draw": "drawCalls", "setpass": "setPassCalls", "tris": "triangles"}
+    for src, kname in {**A2MAP, **RENDER_A2MAP}.items():
         vals = []
         for w in wins:
             a2 = w.get("a2") or {}
@@ -248,6 +255,19 @@ def stats_from_windows(fx: dict) -> dict:
                 vals.append(float(st.median(seq)))
             elif isinstance(a2.get(src + "_median"), (int, float)):
                 vals.append(float(a2[src + "_median"]))
+        # 渲染三项走"哨兵全窗通过才采用 A2"这道门（G16① fail-loud 的落地）：
+        # 采集层 one_window 已把 A2×轮询对表结果写进每窗 sentinel[src]。
+        # ⚠️ 采用是**按指标整束 all-or-nothing**，不是逐窗混采——一个 bundle 的
+        #    data_tier 必须整束一致（G16④"数据源切换即 data_tier 变更"），
+        #    2 窗取 A2 + 2 窗取轮询 = 同一指标的序列跨源，正是 G7 要拦的。
+        # 有 a2 序列但哨兵非 ok 的窗 ⇒ 整个指标回退轮询（out 里 metrics 的值）。
+        # 哨兵没跑（idle-only / 旧束无此字段）⇒ 不假装通过：非 ok 即回退。
+        if src in RENDER_A2MAP and vals:
+            passed = all((w.get("sentinel") or {}).get(src) == "ok"
+                         for w in wins if (w.get("a2") or {}).get(src)
+                         or (w.get("a2") or {}).get(src + "_median") is not None)
+            if not passed:
+                continue
         if vals:
             out[kname] = vals
 
