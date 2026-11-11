@@ -59,9 +59,9 @@ I5b 之后。迁移期编辑 `projects/<id>.json`。回放准入见
   修复态 HEAD 可被再套一遍：产品 plan 的 find 段来自缺陷参照，当前 HEAD
   已修复，直接套用会 `diff_rejected`；
 - **回归真实 replay**：已能用 Unity CLI 自动 `scene open → Play → 探针采样 →
-  Stop`，并跑 3 次基线；但**verified 闭环仍缺目标**：缺陷/修复的 GC 分配
-  可分（77.5KB vs 8.9KB），frame-time 不可分（2.37 vs 2.76ms），现有
-  frame-time breach 不能当 verified 目标；需要 GC 分配 detector；
+  Stop`；夹具缺陷态 3 次基线 + 修复后 3 次 replay 已 **verified**（目标 GC
+  breach 消失、GC 77.5KB→572B、CPU 守护正常）。`Memory/TotalUsedBytes` 按
+  G20 标为未评估盲区，不能对外说“内存不劣化”；
 - **GPU 逐笔归因**仍转人工；“量大了以后会炸”类潜在风险暂测不到；
 - 完整盲区与解锁路径见[使用说明](docs/使用说明.md)，报告模板会强制附带。
 

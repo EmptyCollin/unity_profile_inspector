@@ -758,8 +758,8 @@ trace: run_id
 - **I4b2b2b2b1 完成**：完整回归报告（形态/验证等级/全量守护/G20/HTML+JSON）。
 - **I4b2b2b2a2 完成**：回归计划只收 breach；sample 只做守护，无 breach 时
   计划 `no_stable_cluster`。
-- **verified 诊断（ADR-0033/0034）**：窗口化 GC detector 让缺陷 50 次 breach、
-  修复 0；目标消失，但 `Memory/TotalUsedBytes` +2.0%、`CpuTotalFrameNs`
-  +8.9%，判 `guard_regressed`，不能 verified。
+- **verified 完成（ADR-0034）**：缺陷态 3 基线 + 修复后 3 次，13/13 通过；
+  目标 breach 消失、无新 cluster、CPU 守护正常；GC 77.5KB→572B；
+  `Memory/TotalUsedBytes` 按 G20 标 unassessed。
 - **I6c 完成**：删除 TUI 模块/动作层/测试；30 套离线测试通过。
-- **I4b2b2b2b2 / I6b2b2c**：解释/消除守护回归；真实用户工程。
+- **I6b2b2c**：真实用户工程接入、产品 plan 写入/回滚、发布。

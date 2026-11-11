@@ -73,6 +73,7 @@ def render_html(data: dict) -> str:
         f"<tr><td>{_esc(v.get('record_id'))}</td>"
         f"<td>{_esc((v.get('verdict') or {}).get('status'))}</td>"
         f"<td>{_esc((v.get('verdict') or {}).get('verification_status'))}</td>"
+        f"<td>{_esc(', '.join((v.get('verdict') or {}).get('unassessed_guards') or []))}</td>"
         f"<td>{_esc((v.get('verdict') or {}).get('reason'))}</td></tr>"
         for v in verdicts)
     g = []
@@ -104,8 +105,8 @@ th{{background:#f3f6fa}} code{{font-family:Consolas,monospace}}
 <table><thead><tr><th>指标</th><th>波形</th><th>复现率</th><th>first_rel</th><th>状态</th></tr></thead>
 <tbody>{items or '<tr><td colspan="5">无可执行计划</td></tr>'}</tbody></table>
 <h2>verdict 审计（含失败）</h2>
-<table><thead><tr><th>record</th><th>status</th><th>verification</th><th>原因</th></tr></thead>
-<tbody>{vrows or '<tr><td colspan="4">尚无 verdict</td></tr>'}</tbody></table>
+<table><thead><tr><th>record</th><th>status</th><th>verification</th><th>未评估守护</th><th>原因</th></tr></thead>
+<tbody>{vrows or '<tr><td colspan="5">尚无 verdict</td></tr>'}</tbody></table>
 <h2>守护指标</h2>
 <table><thead><tr><th>run</th><th>metric</th><th>中位</th></tr></thead>
 <tbody>{guards}</tbody></table>

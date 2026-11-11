@@ -364,6 +364,6 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I4b2b2b2a 完成：夹具 Unity 自动 replay（scene/Play/探针/Stop/新增事件）；3 次真实基线通过。
 - I4b2b2b2b1 完成：完整回归报告（形态/验证等级/全量守护/G20/HTML+JSON）。
 - I4b2b2b2a2 完成：回归计划只收 breach；sample 只做守护，无 breach 时 `no_stable_cluster`。
-- verified 近失（ADR-0034）：窗口化 GC detector 缺陷 50 次/修复 0，目标消失；但 Memory/TotalUsedBytes +2.0%、CpuTotalFrameNs +8.9%，guard_regressed。
+- I4b2b2b2b2 完成：缺陷态 3 基线 + 修复后 3 次，13/13 verified；GC 77.5KB→572B；Memory 窗口 unassessed。
 - I6c 完成：删除 TUI 模块/动作层/测试；30 套离线测试通过。
-- I4b2b2b2b2 / I6b2b2c：解释/消除守护回归；真实用户工程（`docs/迭代计划.md`）。
+- I6b2b2c：真实用户工程接入、产品 plan 写入/回滚、发布（`docs/迭代计划.md`）。
