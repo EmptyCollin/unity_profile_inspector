@@ -13,6 +13,7 @@ I0 只交付骨架：状态 API、SSE 事件流、首页壳、导航占位。真
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import time
@@ -112,8 +113,13 @@ def _recent_events(n: int = 12) -> list[dict]:
 
 def build_status() -> dict:
     plog = EventLog()
-    pstats = plog.stats(compat=True)
-    tail = plog.tail(8, compat=True)
+    all_events, bad = plog.read_all(compat=True)
+    by_kind: dict[str, int] = {}
+    for e in all_events:
+        by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
+    pstats = {"total": len(all_events), "by_kind": by_kind, "bad_lines": bad,
+              "last_ts": all_events[-1].ts if all_events else None}
+    tail = all_events[-8:]
     pevents = [e.model_dump(exclude={"series", "ring_before", "ring_after", "a4_window"})
                for e in tail]
     for e, src in zip(pevents, tail):
@@ -124,15 +130,29 @@ def build_status() -> dict:
     probe.update({"events_total": pstats["total"], "by_kind": pstats["by_kind"],
                   "bad_lines": pstats["bad_lines"],
                   "last_event_ts": pstats["last_ts"]})
+
+    from upi.core.cluster import cluster_events
+    clusters = cluster_events(all_events, merge_gap=30)
+
+    from upi.core.fingerprint import FingerprintStore
+    fp_path = os.environ.get("UPI_FINGERPRINT_DB") or None
+    fp = FingerprintStore(fp_path)
+    fp.ensure_seed()
+    fp_stats = fp.stats()
+    fp_records = [r.model_dump(exclude={"features"}) for r in fp.all()[:20]]
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I1a", "single_channel": True},
+        "ui": {"shell": "I2", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
         "probe": probe,
         "probe_events": pevents,
+        "clusters": [c.summary() for c in clusters[:20]],
+        "cluster_total": len(clusters),
+        "fingerprints": fp_stats,
+        "fingerprint_records": fp_records,
         "tickets": _open_tickets(),
         "events": _recent_events(),
     }
@@ -200,6 +220,15 @@ _INDEX_HTML = r"""<!doctype html>
   .ticket{padding:10px 15px;border-bottom:1px solid #182333;display:flex;justify-content:space-between;gap:10px}
   .ticket .id{font-family:var(--mono);font-size:11.5px;color:var(--amber)}
   .empty{padding:18px 15px;color:var(--dim);font-size:12.5px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #182333;vertical-align:top}
+  th{color:var(--dim);font-weight:500;font-size:11.5px;background:#0d141c}
+  td.mono{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .badge{font-size:10.5px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+  .badge.spike{color:var(--red);border-color:#4a2525}
+  .badge.step{color:var(--amber);border-color:#4a3d22}
+  .badge.periodic{color:var(--cyan);border-color:#1e4052}
+  .badge.cluster{color:var(--green);border-color:#1e4a38}
   .steps{margin-top:12px}
   .step{display:grid;grid-template-columns:22px 1fr auto;gap:10px;padding:9px 15px;
     border-bottom:1px solid #182333;align-items:center;font-size:12.5px}
@@ -215,7 +244,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I1a 事件总线</span>
+  <span class="tag">I2 聚类</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -257,12 +286,34 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">01</span><span>本地 Web 控制台 + 状态 API + SSE</span><span class="pill ok">已接入</span></div>
         <div class="step"><span class="s">02</span><span>统一事件总线：breach / sample + 1Hz 哨兵</span><span class="pill ok">已接入</span></div>
         <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
-        <div class="step"><span class="s">04</span><span>事件 → 聚类 → 指纹库</span><span class="pill">I2</span></div>
+        <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
         <div class="step"><span class="s">05</span><span>常驻形态：批量工单、串行修复、unverified 账本</span><span class="pill">I3</span></div>
         <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
         <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
       <div class="foot"><span>本地 127.0.0.1</span><span>所有状态来自 runs/ 与守护进程</span><span>UI 不可用时用 break-glass 停止/回滚</span></div>
+    </section>
+    <section id="page-issues" style="display:none">
+      <h1>问题聚类</h1>
+      <p class="sub">一个 replay/巡检里可能有多个相同或不同问题：先聚成 cluster，再决定修哪个。cluster 是修复/复现率/验证的单位。</p>
+      <div class="panel">
+        <h2>当前 cluster <span id="clusterMeta">—</span></h2>
+        <table>
+          <thead><tr><th>指标</th><th>波形</th><th>相对帧</th><th>次数</th><th>数据档</th><th>值</th></tr></thead>
+          <tbody id="clusterBody"><tr><td colspan="6" class="empty">暂无 cluster。</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="page-library" style="display:none">
+      <h1>指纹库</h1>
+      <p class="sub">cluster 特征命中已知 pattern 时跳过 LLM；指纹是路由，不是证据。命中仍走权限/验证/回滚。</p>
+      <div class="panel">
+        <h2>pattern <span id="fpMeta">—</span></h2>
+        <table>
+          <thead><tr><th>pattern</th><th>指标</th><th>波形</th><th>来源</th><th>命中</th><th>成功/失败</th><th>最后命中</th></tr></thead>
+          <tbody id="fpBody"><tr><td colspan="7" class="empty">指纹库为空。</td></tr></tbody>
+        </table>
+      </div>
     </section>
     <section id="page-other" style="display:none">
       <div class="placeholder"><b id="otherTitle">此页待接入</b><span id="otherHint">该页面在后续迭代交付；I0 只保证壳与状态通道。</span></div>
@@ -323,6 +374,29 @@ function render(s){
     `<div class="d" style="color:var(--muted);font-size:11.5px">${esc(t.run_id)}</div></div>` +
     `<span class="pill warn">待批</span></div>`).join("")
     : `<div class="empty">没有待批工单。</div>`;
+
+  const cl = s.clusters || [];
+  $("clusterMeta").textContent = `${s.cluster_total || cl.length} 个 cluster`;
+  $("clusterBody").innerHTML = cl.length ? cl.map(c => {
+    const vals = (c.values || []).slice(0, 4).map(v => Number(v).toFixed(2)).join(" / ");
+    const shape = esc(c.shape || "unknown");
+    return `<tr><td class="mono">${esc(c.metric)}</td>` +
+           `<td><span class="badge ${shape}">${shape}</span></td>` +
+           `<td class="mono">${esc(c.first_rel)}${c.last_rel !== c.first_rel ? "–" + esc(c.last_rel) : ""}</td>` +
+           `<td>${esc(c.count)}</td><td class="mono">${esc(c.data_tier)}</td>` +
+           `<td class="mono">${esc(vals || "—")}</td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">暂无 cluster。启动探针后这里会出现聚类结果。</td></tr>`;
+
+  const fp = s.fingerprints || {}, fr = s.fingerprint_records || [];
+  $("fpMeta").textContent = `${fp.total || 0} pattern · 命中 ${fp.hits || 0} · 未命中 ${fp.misses || 0} · 成功 ${fp.success || 0} / 失败 ${fp.fail || 0}`;
+  $("fpBody").innerHTML = fr.length ? fr.map(r =>
+    `<tr><td class="mono">${esc(r.pattern_id)}</td>` +
+    `<td class="mono">${esc(r.features && r.features.metric)}</td>` +
+    `<td><span class="badge ${esc(r.features && r.features.shape || "unknown")}">${esc(r.features && r.features.shape || "unknown")}</span></td>` +
+    `<td>${esc(r.source)}</td><td>${esc(r.n_hits)}</td>` +
+    `<td>${esc(r.n_success)} / ${esc(r.n_fail)}</td>` +
+    `<td class="mono">${esc(r.last_seen || "—")}</td></tr>`
+  ).join("") : `<tr><td colspan="7" class="empty">指纹库为空。</td></tr>`;
 }
 
 async function refresh(){
@@ -337,18 +411,18 @@ async function refresh(){
 
 function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
-  const home = $("page-home"), other = $("page-other");
-  if(page === "home"){ home.style.display = ""; other.style.display = "none"; return; }
-  home.style.display = "none"; other.style.display = "";
-  const titles = {issues:"问题 / Cluster", tickets:"工单", regression:"回归", library:"指纹库", reports:"报告", settings:"设置 / 接入"};
+  const home = $("page-home"), issues = $("page-issues"), library = $("page-library"), other = $("page-other");
+  if(page === "home"){ home.style.display = ""; issues.style.display = "none"; library.style.display = "none"; other.style.display = "none"; return; }
+  if(page === "issues"){ home.style.display = "none"; issues.style.display = ""; library.style.display = "none"; other.style.display = "none"; return; }
+  if(page === "library"){ home.style.display = "none"; issues.style.display = "none"; library.style.display = ""; other.style.display = "none"; return; }
+  home.style.display = "none"; issues.style.display = "none"; library.style.display = "none"; other.style.display = "";
+  const titles = {tickets:"工单", regression:"回归", reports:"报告", settings:"设置 / 接入"};
   $("otherTitle").textContent = titles[page] || "此页待接入";
   $("otherHint").textContent = page === "tickets"
     ? "I3 接入：批量候选、批准、串行执行时间线、unverified 账本。"
     : page === "regression"
     ? "I4 接入：replay 套件、3 次基线矩阵、复现率、replay 验证。"
-    : page === "library"
-    ? "I2 接入：指纹、命中率、LLM 节省、教一次。"
-    : "I1~I5 逐项接入；I0 只保证壳与状态通道。";
+    : "I3~I5 逐项接入；I2 已交付问题聚类与指纹库页。";
 }
 
 document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev => {

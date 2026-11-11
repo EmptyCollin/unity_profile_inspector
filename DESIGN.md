@@ -714,4 +714,7 @@ trace: run_id
 - **I1b 探针件完成、真机冒烟通过**：`probe/upi_probe_v4.cs` 一个回调/一个心跳，
   同时产 breach/sample（12/13 recorder，`Render/Indices` 未注册如实 skipped）；
   生产安装/卸载与旧探针退役待 I3。
-- **I2~I6**：聚类+指纹库、常驻、回归、UI 完整化、硬化验收。
+- **I2 完成**：`cluster.py`（run 内/跨 run、复现率、波形）+ `fingerprint.py`
+  （SQLite 指纹库、6 条内置、命中/未命中/歧义路由）；Web“问题/指纹库”页已接；
+  修复执行器仍未消费指纹（I3）。
+- **I3~I6**：常驻、回归、UI 完整化、硬化验收。

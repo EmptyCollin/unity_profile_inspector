@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -23,6 +24,7 @@ from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
 E.isolate(TMP / "runs")
+os.environ["UPI_FINGERPRINT_DB"] = str(TMP / "fingerprints.db")
 (E.RUNS / "_probe").mkdir(parents=True, exist_ok=True)
 (E.RUNS / "_probe" / "pb_hb.txt").write_text("1", encoding="utf-8")
 (E.RUNS / "daemon_status.json").write_text(json.dumps({
@@ -58,7 +60,7 @@ try:
     code, hdr, body = get(base + "/?token=test-token")
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
-    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I1a 事件总线" in html)
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I2 聚类" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
@@ -77,6 +79,12 @@ try:
     ok("事件载荷裁剪（不把整段 series 发前端）",
        "series" not in (data.get("probe_events") or [{}])[0]
        and (data["probe_events"][0].get("series_n") == 3))
+    ok("状态含 cluster 摘要", data.get("cluster_total") == 1
+       and len(data.get("clusters") or []) == 1)
+    ok("cluster 摘要含机制级字段",
+       {"metric", "shape", "count", "data_tier"} <= set((data.get("clusters") or [{}])[0]))
+    ok("状态含指纹库", data.get("fingerprints", {}).get("total") == 6
+       and len(data.get("fingerprint_records") or []) == 6)
 
     code, _hdr, _body = get(base + "/api/status")
     ok("无 token 访问 API 被拒", code == 403, f"code={code}")

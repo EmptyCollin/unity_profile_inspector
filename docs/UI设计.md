@@ -109,10 +109,12 @@
 | `POST /api/regression/run` | I4 | 跑基线/回归 |
 | `GET /api/reports` | I5 | verified/unverified 两本账 |
 
-## 7. 当前 I0/I1a 边界
+## 7. 当前 I0/I1a/I2 边界
 
-- 已接入：首页、状态 API、SSE、探针事件摘要、token/cookie、CP936 不崩。
-- 未接入：工单、审批、执行、回归、指纹库、设置/接入；这些页面显示占位。
+- 已接入：首页、状态 API、SSE、探针事件摘要、token/cookie、CP936 不崩；
+  **问题页（cluster 表）**、**指纹库页（pattern/命中/成功失败）**。
+- 未接入：工单、审批、执行、回归、设置/接入；这些页面显示占位。
+- `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3 补。
 - `README`/`使用说明` 仍是旧 TUI 口径，I5 统一重写。
 
 ## 8. 验收
