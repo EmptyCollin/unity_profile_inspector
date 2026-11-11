@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.agents.webui import WebUI                     # noqa: E402
 from upi.core import events as E                       # noqa: E402
+from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
@@ -28,6 +29,10 @@ E.isolate(TMP / "runs")
     "pid": 4242, "phase": "idle", "sampling_enabled": True,
     "sampling_mode": "steady", "updated_at": "2026-11-11T22:00:00",
 }), encoding="utf-8")
+EventLog().append(ProbeEvent(
+    kind="sample", metric="Render/DrawCalls", series=[47, 47, 47],
+    frame_idx=100, rel_frame=100, data_tier="A2",
+))
 
 
 def ok(name: str, cond: bool, detail: str = ""):
@@ -53,7 +58,7 @@ try:
     code, hdr, body = get(base + "/?token=test-token")
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
-    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I0 骨架" in html)
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I1a 事件总线" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
@@ -67,6 +72,11 @@ try:
         ok(f"状态含 {k}", k in data)
     ok("探针心跳读到（隔离目录）", data.get("probe", {}).get("heartbeat_age_s") is not None)
     ok("守护状态读到隔离 status", data.get("daemon", {}).get("sampling") == "steady")
+    ok("状态含统一探针事件", data.get("probe", {}).get("events_total") == 1
+       and len(data.get("probe_events") or []) == 1)
+    ok("事件载荷裁剪（不把整段 series 发前端）",
+       "series" not in (data.get("probe_events") or [{}])[0]
+       and (data["probe_events"][0].get("series_n") == 3))
 
     code, _hdr, _body = get(base + "/api/status")
     ok("无 token 访问 API 被拒", code == 403, f"code={code}")

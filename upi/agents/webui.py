@@ -25,6 +25,7 @@ from typing import Optional
 from urllib.parse import parse_qs, quote, urlparse
 
 from upi.core import events as E
+from upi.core.probe_events import EventLog
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -110,14 +111,28 @@ def _recent_events(n: int = 12) -> list[dict]:
 
 
 def build_status() -> dict:
+    plog = EventLog()
+    pstats = plog.stats(compat=True)
+    tail = plog.tail(8, compat=True)
+    pevents = [e.model_dump(exclude={"series", "ring_before", "ring_after", "a4_window"})
+               for e in tail]
+    for e, src in zip(pevents, tail):
+        e["series_n"] = len(src.series)
+        e["ring_n"] = len(src.ring_before) + len(src.ring_after)
+        e["a4_n"] = len(src.a4_window)
+    probe = _probe_status()
+    probe.update({"events_total": pstats["total"], "by_kind": pstats["by_kind"],
+                  "bad_lines": pstats["bad_lines"],
+                  "last_event_ts": pstats["last_ts"]})
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I0", "single_channel": True},
+        "ui": {"shell": "I1a", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
-        "probe": _probe_status(),
+        "probe": probe,
+        "probe_events": pevents,
         "tickets": _open_tickets(),
         "events": _recent_events(),
     }
@@ -200,7 +215,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I0 骨架</span>
+  <span class="tag">I1a 事件总线</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -238,13 +253,14 @@ _INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="panel steps">
-        <h2>I0 验收（当前骨架） <span>后续迭代逐项点亮</span></h2>
+        <h2>迭代进度 <span>每项完成即点亮</span></h2>
         <div class="step"><span class="s">01</span><span>本地 Web 控制台 + 状态 API + SSE</span><span class="pill ok">已接入</span></div>
-        <div class="step"><span class="s">02</span><span>单探针（合并 breach/sampler）</span><span class="pill">I1</span></div>
-        <div class="step"><span class="s">03</span><span>事件 → 聚类 → 指纹库</span><span class="pill">I2</span></div>
-        <div class="step"><span class="s">04</span><span>常驻形态：批量工单、串行修复、unverified 账本</span><span class="pill">I3</span></div>
-        <div class="step"><span class="s">05</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
-        <div class="step"><span class="s">06</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
+        <div class="step"><span class="s">02</span><span>统一事件总线：breach / sample + 1Hz 哨兵</span><span class="pill ok">已接入</span></div>
+        <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
+        <div class="step"><span class="s">04</span><span>事件 → 聚类 → 指纹库</span><span class="pill">I2</span></div>
+        <div class="step"><span class="s">05</span><span>常驻形态：批量工单、串行修复、unverified 账本</span><span class="pill">I3</span></div>
+        <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
+        <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
       <div class="foot"><span>本地 127.0.0.1</span><span>所有状态来自 runs/ 与守护进程</span><span>UI 不可用时用 break-glass 停止/回滚</span></div>
     </section>
@@ -274,8 +290,9 @@ function render(s){
   $("projectMeta").textContent = p.error || `${p.id || "—"} · ${p.path || ""}`;
   setClass($("probeVal"), pr.state === "alive" ? "ok" : (pr.state === "stale" ? "warn" : "bad"));
   $("probeVal").textContent = pr.state === "alive" ? "在线" : (pr.state === "stale" ? "心跳超龄" : "无心跳");
-  $("probeMeta").textContent = pr.heartbeat_age_s == null
-    ? "未安装/未运行探针（I1 接单探针）" : `心跳 ${pr.heartbeat_age_s}s 前 · ${pr.heartbeat}`;
+  $("probeMeta").textContent = (pr.heartbeat_age_s == null
+    ? "未安装/未运行探针（I1 接单探针）" : `心跳 ${pr.heartbeat_age_s}s 前 · ${pr.heartbeat}`)
+    + ` · 事件 ${pr.events_total || 0}（breach ${(pr.by_kind||{}).breach || 0} / sample ${(pr.by_kind||{}).sample || 0}）`;
   $("probeTop").textContent = pr.state === "alive" ? "在线" : "离线";
   $("ticketVal").textContent = tk.length ? (tk.length + " 张") : "0";
   $("ticketVal").className = "val " + (tk.length ? "warn" : "ok");
@@ -283,14 +300,23 @@ function render(s){
   $("ticketTop").textContent = tk.length;
   $("updated").textContent = "更新于 " + (s.time || "—");
   const feed = $("feed");
-  const evs = s.events || [];
+  const daemonEvs = (s.events || []).map(e => ({...e, _src:"daemon"}));
+  const probeEvs = (s.probe_events || []).map(e => ({...e, _src:"probe"}));
+  const evs = [...daemonEvs, ...probeEvs]
+      .sort((a,b) => String(b.ts || "").localeCompare(String(a.ts || "")))
+      .slice(0, 12);
   feed.innerHTML = evs.length ? evs.map(e => {
     const ts = (e.ts || e.time || "").toString().slice(11,19);
     const kind = e.kind || e.type || "event";
-    const detail = e.error || e.reason || e.run_id || e.detail || "";
-    return `<div class="ev"><div class="t">${esc(ts)}</div><div class="n">${esc(kind)}</div>` +
+    const detail = e._src === "probe"
+      ? (e.metric
+          ? `${e.metric}=${e.value}${e.unit || ""}` + (e.series_n ? ` · n=${e.series_n}` : "")
+          : `metrics=${Object.keys(e.metrics || {}).length}`)
+      : (e.error || e.reason || e.run_id || e.detail || "");
+    const label = (e._src === "probe" ? "probe/" : "") + kind;
+    return `<div class="ev"><div class="t">${esc(ts)}</div><div class="n">${esc(label)}</div>` +
            (detail ? `<div class="d">${esc(detail)}</div>` : "") + `</div>`;
-  }).join("") : `<div class="empty">暂无事件。启动守护后，这里会实时出现。</div>`;
+  }).join("") : `<div class="empty">暂无事件。启动探针/守护后，这里会实时出现。</div>`;
   const box = $("tickets");
   box.innerHTML = tk.length ? tk.map(t =>
     `<div class="ticket"><div><div class="id">${esc(t.request_id)}</div>` +
@@ -468,7 +494,9 @@ def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
         try:
             with urllib.request.urlopen(ui.url("/api/status"), timeout=5) as r:
                 data = json.loads(r.read().decode("utf-8"))
-            print(json.dumps(data, ensure_ascii=False, indent=2))
+            # --check 是给 CI/脚本读的：ASCII 转义，避免 Windows CP936 终端
+            # 把中文写成 GBK 后调用方按 UTF-8 解析失败。
+            print(json.dumps(data, ensure_ascii=True, indent=2))
         except Exception as e:  # noqa: BLE001
             print(f"!! 自检失败: {type(e).__name__}: {e}")
             return 1

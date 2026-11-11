@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.15
+# DESIGN.md — 自动化性能优化管线（最小集）v0.16
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -10,6 +10,7 @@
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
 > v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
+> v0.16 变更（2026-11-11，**方向重排，权威**）：① 工具分**常驻形态 / 回归形态**：常驻=日常发现+best-effort 修复，结论只记 `unverified`；回归=确定性 replay + 测试目标，修且验，结论才可 `verified`。② **探针是唯一数据源**：合并两个注入件为一探针；1Hz 轮询只做哨兵；事件分 `breach`（确定越界）与 `sample`（不确定抽检）。③ **cluster 是修复/验证单位**：一个 replay/巡检里多个相同/不同问题先聚类再分类。④ **批量工单、串行落地**：工单可列多个候选，一次只落一个 patch，每步 snapshot→编译/冒烟→观测→keep/rollback。⑤ **UI 是唯一人机通道**：本地 Web 控制台（`upi ui`），旧 ANSI TUI 迁移到 `upi dev tui`。⑥ **指纹库**替代大部分 LLM 介入：命中跳过模型，未命中才走 LLM/人工。⑦ 退役/降级：A 档轮询当水位主力、四窗口长标定、C+ 常驻、M8/M9、七视图重报告、文件制人工批准。本节优先级高于后文冲突条目，详见 **§14** 与 `docs/adr/0001`~`0005`、`docs/迭代计划.md`、`docs/UI设计.md`。
 > v0.15 变更（2026-11-11）：**渲染计数数据源改判（#27/#29，exp5/exp6/exp7 + 5298 行句柄全量表）**。① "注入读渲染计数恒 0"根因改判为句柄名口径错误（真名带 `Count` 后缀）+ `UI Toolkit` 同名遮蔽；双条件定位（名字==目标 且 类目==Render）修复后 A2 逐帧注入与轮询在 F-GPU-01 比值 1.00（n=300）——D1"不写插件 + 注入常驻采样器"恢复成立。② G16 重写：Draw/SetPass/Triangles/Vertices 双源可用（A2 主源 + 1Hz 轮询哨兵交叉核对，量级不符或注册失败即 fail-loud 拒收）；无头渲染恒 0 与 Play Mode 约束**维持不变**；batches 因 Render 类目无汇总句柄仍轮询单源。③ G19：渲染计数逐笔 spike detector 解禁；GPU 发作口径（A4 gpuFrameTime）与逐笔归因（转人工）**未被推翻**。④ `sampler_v3`→v3.1：Targets 全换实测真名 + 双条件定位 + 定位不到拒装报 skipped；`Mono Used Memory`/`Update Time`/`Frame Time` 短名经句柄表逐行证实不存在，移出 Targets 并记口径归属。⑤ G20 清单新增第 5 项（batches 注入等价性无从对表），item1 范围收窄为仅 GPU 归因，并封堵旧"detector 注册即 unlocked"的虚报检出入口（I1）。⑥ 换数据源 ⇒ `data_tier` A→A2 变更，既有标定/bundle 按 G7 不可比，#30 重标定是条文义务。⑦ exp7 作废留档：`QualitySettings.enableDynamicBatching` 在 Unity 6000 不存在（eval 内层 CS0117），同批撞出"eval 实验必须查内层 diagnostics，否则把编译失败当活代码"的方法学教训（§2.2.1 事实 12）。
 > v0.14 变更（2026-11-09）：M6 / M6' / M7 统计与报告层落地。① 新增 §7.1 聚合底座实装（SQLite 六表增量幂等 + G13 untraced 剔除 + `upi stats`）；② §7.3 A 形态落地为 `upi report` 单文件 HTML 七视图，G20 不可检出清单与检出率**同屏渲染**（代码层面保证拆不开）；③ §8.7 体检表六项改为可计算并已接进升维提案——阈值**从 `knowledge._CHECKLIST` 的判定函数反查**，报告与提案共用一份口径；实测 3 项达标、3 项受结构性样本不足限制；④ §8.1 的 tuning/holdout 隔离从"靠人工自觉"落为强制校验闸 `scripts/check_fixture_split.py`（S1/S2/S3 三条检查，并用变异测试证明其拦截力）。四处判据修正均由本轮实测撞出：聚合层**不得跨文件按时间戳猜配对**（run_id 是开始时刻、日志 ts 是结束时刻，实测只配上 1/13，会把有结论的轮次写成"0 检出"的静默轮 = 违反 B7）⇒ 改为只读轮次自身 `state.json`；未评估盲区只存在于**最后一条 `kind=verify` 记录**（顶层 `verdict.unevaluated` 为空）；检出率分母须排除缺 `detector` 字段的早期观测并显式报排除数（否则算出假 0）；留出泄漏判据以"可回溯至 CLEAN 重算"为主、"等于留出中位"仅作升级——单看后者会对跨夹具同值指标（gc_alloc_per_frame/triangles/vertices 等实测同值）产生假阳性。
 > v0.13 变更（2026-11-09）：真机全链实测 + 独立运行形态。新增 §2.5 运行形态（常驻守护 / 控制台 UI / 手动开关采样 / 优雅停止）；记忆体守护口径改两侧各自 fresh post-GC，不响应 GC 者（含同物理量双路径别名）降级未评估盲区；G11 预算护栏改节点感知（attempts 只拦 fix 入口、计数点在 verify 出判定处、作废崩溃不烧配额）；真实模型端到端归因首次实跑，保留通路实测 verdict=resolved；AGENTS 同步至 v0.8（§1.5 双分支 / G11 / G20 第四项）。
@@ -79,7 +80,7 @@ Detector = {
 
 误报率按 `detector.id + detector.version` 分桶，才能回答"是不是越用越好用"（你的第 3 条）。
 
-**注册表两条新增约束（v0.12，G19）**：① 每个 detector 必须声明 `finding_kind: episode|waterline|potential|conflict`，判"发作（episode）"的必须有逐帧源（`data_tier ∈ {A2, A4, probe}`）——渲染计数没有逐帧源，故**禁止注册"GPU 逐笔 spike detector"**，GPU 发作 detector 只能建在 A4 的 `gpuFrameTime` 上（判"越线事实"）；② episode 类 detector 附带 `attribution_source` 字段，无自动化归因源时填 `human`（GPU 逐笔归因当前状态），finding 只给"哪帧、哪个指标、越了多少"，根因段转人工——**宁缺毋假，虚报检出能力按 I1 处理**。
+**注册表两条新增约束（v0.12，G19；v0.15/v0.16 改判）**：① 每个 detector 必须声明 `finding_kind: episode|waterline|potential|conflict`，判"发作（episode）"的必须有逐帧源（`data_tier ∈ {A2, A4, probe}`）。**v0.15 起渲染计数（Draw/SetPass/Triangles/Vertices）的 A2 逐帧源已实证可用，旧"渲染计数没有逐帧源"作废**；GPU 侧发作口径仍只建在 A4 `gpuFrameTime` 上（判"越线事实"），且当前注册表**没有** GPU episode detector（`detector.py` 注明"暂缺"），不得把"已解禁"读成"已注册"。② episode 类 detector 附带 `attribution_source` 字段，无自动化归因源时填 `human`（GPU 逐笔归因当前状态），finding 只给"哪帧、哪个指标、越了多少"，根因段转人工——**宁缺毋假，虚报检出能力按 I1 处理**。
 
 ---
 
@@ -304,7 +305,7 @@ Detector = {
    ⚠️ **分布退化例外（G17，实测）**：静止场景 `drawCalls` 40 次全等于 184 ⇒ MAD=0 ⇒ 噪声带判据失效，任何改动都会"统计显著"。此时禁用相对判据、只走 `min_magnitude`，并标 `degenerate_distribution`；夹具回放必须含动态（§2.2.1）。
 4. **双门限**：统计显著 + 业务显著（`deviation_ratio` ≥ 1.5，或该指标占回退总量 `explains_share` ≥ 20%）。
 5. 基线版本化 `baselines/<hash>.json`，失效判定用"采样协议指纹 + 场景 GUID + 资产清单哈希"三元组。
-6. **档位不可跨比**：A/A2/A3/B/C 任意两档之间（含 A 档 Play 与 A 档 Player）一律拒绝并报错。**指标归属制**：渲染计数类只认 A（A2/A3 无此 counter，A3 中表现为 -1 哨兵、A2 中表现为静默 0——两者都必须被解析层拒绝而非当 0 统计）；逐帧 GC/内存类只认 A2/A3。-1 哨兵与静默 0 是"该源无此项"的信号，不是测量值（I1）。
+6. **档位不可跨比**：A/A2/A3/B/C 任意两档之间（含 A 档 Play 与 A 档 Player）一律拒绝并报错。**指标归属制（v0.16 更新）**：渲染计数主源为 A2（Draw/SetPass/Triangles/Vertices，v0.15 实证）；1Hz A 档只做哨兵；batches 因 Render 类目无汇总句柄仍走 A 轮询单源；逐帧 GC/内存类只认 A2/A3。-1 哨兵、静默 0、零对零都不得当测量值（I1；详见 §14）。
 
 误报率来源：**重采样不复现的 Issue 自动记一次 FP**；被 Review 判定"改后数据无显著变化但 Detect 曾判异常"也记一次 FP。按 `detector.id + version` 分桶统计。
 
@@ -557,6 +558,8 @@ trace: run_id
 
 ## 11. 里程碑（第一轮 = M0~M7 含 M0'/M1'/M6'；M8/M9 为扩展位）
 
+> **v0.16 说明**：下表的“第一轮”是 v1 路线（四链路全自动 + 定时巡检）。v0.16 已改为“两形态 + 探针优先 + UI 唯一通道”，**活跃里程碑以 §14 / `docs/迭代计划.md` 的 I0~I6 为准**；本表保留为历史依据，不再作为新开发的范围承诺。
+
 **第一轮必交付**（D10 已确认，M1' 与 M6' 不再是机制演示，而是可用件）
 
 1. `M0` 环境与可达性：用 `6000.6.7f1` 创建 URP 空工程 + `unity pipeline install` + 常驻 Editor 启动脚本 + **可达性探测**（`unity command --project-path` 与 `unity command --query eval` 确认真实命令目录，不假设命令名）+ **模型配置引导（§2.3：加载/生成 `llm_config.yaml`，连通性测试通过才算 M0 完成）**
@@ -643,3 +646,70 @@ trace: run_id
 - **v0.2**（2026-11-07）：新增 §7 管线自身运行统计与可视化控制台（REQ-7）、§8 防过拟合与泛化验证（REQ-8）；原 §7~§11 顺延为 §9~§12；新增决策 D8/D9；里程碑插入 M1'（埋点与统计底座）与 M6'（体检表接入上线流程）。
 - **v0.1**（2026-11-07）：按 D1～D7 拍板结论修订；采集层从"自建 bridge 插件"改为"CLI `eval` 注入常驻采样器"三档方案；新增 §1.1 检测器注册表、§2.2 三个已核实约束（常驻 Editor、Safe Mode 死锁、模块缺失）、§10 环境实测表；里程碑插入 M0'。
 - **v0**：初版讨论稿。
+
+---
+
+## 14. 两形态与探针优先（v0.16，权威）
+
+> 本节是 v0.16 的方向重排，优先级高于前文冲突条目。执行路线见 `docs/迭代计划.md`；UI 见 `docs/UI设计.md`；决策见 `docs/adr/0001`~`0005`。
+
+### 14.1 两种形态
+
+| 维度 | 常驻形态（日常开发） | 回归形态（批量回归） |
+|---|---|---|
+| 数据源 | 常驻探针 + 1Hz 哨兵/抽检 | 确定性 replay + 测试目标 |
+| 问题定义 | 预算线 / 相对基线 / 抽检异常 | replay 指令 + 测试目标 |
+| 复现 | 不要求 3 次基线 | 3 次（或 N 次）基线 + 聚类 + 复现率 |
+| 修复 | best-effort，编译/冒烟/可回滚 | 修 + 同 replay 重跑 + 重新聚类 |
+| 结论 | `unverified`，不进成功率分母 | `verified`，进成功率 |
+
+**硬规则**：常驻不得记 `resolved/verified`；回归的 `verified` 必须来自“同 replay、同 cluster 消失、无新 cluster、守护不劣化”。
+
+### 14.2 探针是唯一数据源
+
+- 合并 `UpiBreachProbe` 与 `sampler_v3` 为一个注入件：一个回调、一个心跳、一条事件流。
+- 事件两类：`breach`（确定越界，进修复循环）、`sample`（不确定抽检，只产候选）。
+- 1Hz 轮询只做哨兵：比值落在 `[0.2, 5.0]` 才通过；**零对零不判通过**（无信息量，fail-loud）。
+- 用户三态开关：关 / 稳态 / 全程。
+
+### 14.3 cluster 是单位
+
+一个 replay/巡检里可能有多条相同或不同问题：先按“指标 + 相对帧 + 波形 + 共现”聚类，再分类。cluster 是修复、复现率、验证的唯一单位；分不清时标 `ambiguous`，不强行归因。
+
+### 14.4 批量工单、串行落地
+
+- 工单可以列多个过阈值候选，按置信度排序；每项带证据、风险、回滚方式、`permission_tier`。
+- 一次只落一个 patch：snapshot → 编译/冒烟 → 观测 → keep/rollback → 下一个。
+- 常驻“修但不验”= 不做复现验证，但安全验证与效果观测仍必须；结果标 `unverified`。
+- 批量批准不绕过单个 patch 的权限闸。
+
+### 14.5 指纹库
+
+- cluster 特征（指标集 + 波形 + 相对帧 + 共现）→ fingerprint。
+- 命中已知 pattern：直接给 root_cause/playbook，跳过 LLM；未命中才走 LLM/人工。
+- 指纹是路由，不是证据；命中仍走权限/验证/回滚。
+
+### 14.6 UI 唯一人机通道
+
+- 本地 Web 控制台（`upi ui`）：状态、事件流、问题/聚类、工单、回归、指纹库、报告、设置/接入。
+- 文件（ticket/decision）只作内部审计载体；日常不要求人手工读写。
+- CLI 只保留启动、停止、诊断、应急；旧 ANSI TUI 迁移到 `upi dev tui`，I5 删除。
+
+### 14.7 退役 / 降级
+
+| 项 | 处置 |
+|---|---|
+| A 档 1Hz 轮询当水位主力 | 退役；1Hz 只做哨兵 |
+| 四窗口长标定 | 退役；改预算表 + 短 warmup + 可选基线 |
+| C+ 静态扫描（M3.5） | 不进常驻链路；可选离线 |
+| M8 B 档 / EX-1 | 继续延期 |
+| M9 dashboard 服务 | 取消，UI 内置 |
+| 七视图重报告 | 简化为报告页 + 导出 |
+| 文件制人工批准 | 降为内部审计；人只在 Web UI 批 |
+
+### 14.8 当前进度（2026-11-11）
+
+- **I0 完成**：ADR、CP936 守门、本地 Web 骨架、`upi ui`、统一测试入口。
+- **I1a 完成**：`ProbeEvent` / `EventLog` / 旧两源兼容桥 / 1Hz 哨兵 / Web 事件流。
+- **下一步 I1b**：C# 单探针物理合并（一个回调、一个心跳、同时写 breach/sample）。
+- **I2~I6**：聚类+指纹库、常驻、回归、UI 完整化、硬化验收。

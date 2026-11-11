@@ -1,8 +1,8 @@
 # AGENTS.md — AI 性能优化管线 · Agent 角色契约
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
-> 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护与 `agents/ui.py` 控制台）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
-> 最后更新：2026-11-11（v0.9，**渲染计数数据源改判**（#27/#29，exp5/exp6 实证）：**G16 重写**——"渲染计数唯一源=轮询"作废，根因是句柄名口径错误（真名带 `Count` 后缀）+ UI Toolkit 同名遮蔽；双条件定位后 A2 注入与轮询比值 1.00 ⇒ Draw/SetPass/Triangles/Vertices 改 A2 主源 + 1Hz 轮询哨兵交叉核对（fail-loud），batches/Mono/Update/FrameTime 因句柄不存在仍轮询单源；无头渲染恒 0 与 Play Mode 约束维持。**G19 渲染逐笔 spike detector 解禁**（GPU 发作口径仍 A4、逐笔归因仍人工——未被推翻）。**G20 补第 5 项**（batches 注入等价性）且 item1 封堵"detector 注册=解锁"虚报入口。承前 v0.8：G11 节点感知 / §1.5 守护双分支 / 独立运行形态（常驻守护+控制台 UI+手动开关采样+优雅停止）；v0.7：G18/G19/G20 三条门禁、Detect 输出扩为 `Finding[]`、采样三问拆分）
+> 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护、`agents/webui.py` Web 控制台、`agents/ui.py` 迁移期 TUI）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
+> 最后更新：2026-11-11（**v1.0 方向重排**：工具分**常驻/回归**两形态；**探针是唯一数据源**，1Hz 只做哨兵；**cluster 是修复/验证单位**；**批量工单、串行落地**；**UI 是唯一人机通道**（本地 Web，旧 ANSI TUI → `upi dev tui`）；常驻结论只 `unverified`，回归才 `verified`。v1.0 新增 G21~G23 与 §8，冲突时以 §8 为准。承前 v0.9：G16 渲染计数 A2 主源 + 轮询哨兵；G19 渲染逐笔 spike 解禁但 GPU 发作仍 A4、逐笔归因仍人工；G20 五项盲区）
 
 ---
 
@@ -265,6 +265,9 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G18 **finding 等级归属门禁**：`potential`（P3 潜在）不得进入修复循环、成功率分母、FP 分母——其断言"规模到 S 才发作"在当前规模下不可证伪，混入即失真（DESIGN §3A）。升级路径只有一条：T5 压测（10×/100×，D15）复现 → 转 `confirmed`；不复现 → 撤回。代码层：Pydantic 构造期拒绝 `kind=potential` 进入 Issue 通道；负例测试必配。
 - G19 **逐帧源与归因源门禁**：判"发作（episode）"的 detector 必须声明逐帧数据源（`data_tier ∈ {A2, A4, probe}`）——A 档秒级抽样判发作 = 漏检 + 把被跳过的异常值当正常（最危险失效）。**2026-11-11 exp5/exp6 改判**：Draw/SetPass/Triangles/Vertices 的 A2 逐帧注入通路已实测可用（正确句柄名 + 双条件类目定位，与轮询比值 1.00）⇒ 这些**渲染计数的逐笔 spike detector 解禁**（"渲染计数无逐帧源"旧前提作废）。但**GPU 侧发作口径仍只建在 A4 `gpuFrameTime`**（固定 4 帧延迟，环形缓冲向后 ≥14 承接，D17；未回填帧 `gpu=0 且 completeTs=0` 按 -1 哨兵同规则拒收）——`GPU Frame Time` 计数器是方法级采样、非逐帧 GPU 时间线，不能替代 A4；**GPU 逐笔归因仍转人工**（FD 程序侧不可解读，实测 ①-⑫ 未被推翻）。episode detector 必须带 `attribution_source` 字段，无自动化归因源时填 `human`——finding 只给"哪帧/哪个指标/越多少"，根因转人工。**虚报检出能力按 I1 处理。**
 - G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前五项：①GPU 尖峰逐笔归因→EX-1/B 档（**2026-11-11 改判后范围收窄**：渲染计数逐帧源已解锁，本项只覆盖"归因到哪一笔"，detector 注册不再算解锁信号）；②未放大的代码风险→M3.5 C+；③感知类退化→M7 T8；④**记忆体守护覆盖面窄**——`monoHeapBytes/totalAllocatedBytes/totalReservedBytes/total_used_per_frame` 经实测**不受强制 GC 影响**（Δ≈0），是会话累积量而非净占用，跨会话不可比 ⇒ 已降级为未评估盲区，"修复是否多吃内存"当前**只能靠 `monoUsedBytes` 一个口径回答**；解锁路径=B 档真机/更长隔离的 fresh 采集；⑤**batches 注入等价性（#27 新列）**——Render 类目结构性无汇总 `Batches Count` 句柄（仅 Dynamic/Instanced/Static 三分项），SRP 常态场景两侧同零 ⇒ 注入与轮询对不了表；`Mono Used Memory`/`Update Time`/`Frame Time` 短名同批证实不存在（口径归属见 G16④）；解锁=真实非零合批场景对表或接受轮询单源标注）。缺该清单的报告无效。
+- G21 **两形态分账（v1.0）**：任何结论必须带 `mode ∈ resident|regression` 与 `verification_status ∈ unverified|observed|verified`。**常驻形态不得记 `resolved/verified`**；`unverified` 不进成功率分母、不得对外说"修好了"。回归形态的 `verified` 必须来自"同 replay、同 cluster 消失、无新 cluster、守护不劣化"。违反即结论作废。
+- G22 **探针唯一源 + 1Hz 哨兵（v1.0）**：常驻采集只认探针事件（`breach`/`sample`）；1Hz 轮询只做交叉核对，**不得单独作为 finding 依据**。哨兵比值不在 `[0.2, 5.0]` 或两侧同零（无信息量）→ 该窗标未评估，不得当通过。物理合并前，旧两心跳文件仍可读，但 Web/统计只认统一事件流（兼容桥除外）。
+- G23 **UI 唯一人机通道（v1.0）**：所有人类操作必须有 UI 路径（接入、模式切换、探针开关、看事件、批工单、执行/回滚、跑回归、看报告、改配置）；文件只作内部审计载体，不要求人手工读写。CLI 只保留启动/停止/诊断/应急。UI 必须本地绑定、token 门禁、可离线；UI 故障时保留 break-glass 停止/回滚，但日常不依赖它。
 
 ---
 
@@ -277,3 +280,63 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - **潜在风险（potential）单列一章**（`runs/<run_id>/potentials/`），与 Issue 章节物理分开，报告模板不得把两者混排进同一张"检出表"（G18 的产物层落实）；章首固定一句："以下条目在当前规模下未发作、不可证伪，仅供决策参考，不计入检出率与误报率"。
 - **FD 人工下钻操作单**（D16=A 形态）附在 GPU 类 Issue 证据链末尾：目标帧号（可复现回放对齐后）、疑似 SetPass 组、建议查看的逐笔字段；不自动截图。
 - 本 demo 的诚实边界必须在产物中显式声明：PC Editor 采样 + 帧预算模拟，不等于真机中低端机型数据；样本量不足时，趋势与泛化结论一律标注为"方法学示范"（DESIGN §8.8）；**"不可检出清单"缺失的报告无效（G20）**。
+
+---
+
+## 8. 两形态执行契约（v1.0，权威）
+
+> 本节是 v1.0 方向重排的落地契约；与 §1.4/§1.5/§2/§5 冲突时，以本节 + DESIGN §14 为准。
+
+### 8.1 形态与证据等级
+
+- `mode ∈ resident | regression`；`verification_status ∈ unverified | observed | verified | failed`。
+- 常驻：现场发现 + best-effort 修复；**不做复现验证**，结论只 `unverified`，不进成功率分母。
+- 回归：确定性 replay + 测试目标；3 次（或 N 次）基线、cluster 复现率、同 replay 验证；结论才可 `verified`。
+- “修但不验”= 不做复现验证；编译/启动/异常/回滚等**安全验证仍必须**。
+- **G21~G23 目前是契约**：执行器/分账/UI 权限检查在 I3~I5 落代码；I1a 只落事件与 1Hz 哨兵，不要读成“分账已经强制执行”。
+
+### 8.2 常驻形态
+
+- 输入：探针事件（`breach`/`sample`）+ 1Hz 哨兵；问题定义=预算线/相对基线/抽检异常。
+- 流程：事件 → 聚类 → 批量工单 →（批准）一次一个 patch → 安全验证 + 效果观测 → keep/rollback → 下一个。
+- 没有可观测变化时：只有“语义安全 + 低风险”才保留，标 `unverified`；否则回滚。
+- 工作区被用户改动/快照失效 → 停止，不硬改。
+
+### 8.3 回归形态
+
+- 输入：replay 套件 + 测试目标（命令、时长、warmup、预算线、目标指标）。
+- 基线：同一 reset/协议/画质/探针模式下跑 3 次（或 N 次），不修，只记录；按 replay 相对帧聚类并跨 run 匹配，算每个 cluster 的复现率。
+- 只允许“复现率达标 + 分类明确”的 cluster 进批量计划；一次一个 patch，修完重跑、重新聚类。
+- `verified` 判据：目标 cluster 消失 + 无新 cluster + 守护不劣化 + 同协议指纹一致。
+- `final=aligned` 只证明轨迹对齐，不证明性能可重复；性能判定仍走 3σ/噪声带。
+
+### 8.4 批量工单与串行落地
+
+- 工单可列多个候选；每个候选必须标明：独立 issue 还是同一 issue 的备选假设。
+- 同一 issue 的备选假设不得批量应用；选 Top1，失败回滚换下一个（搜索）。
+- 独立 issue 可串行修；执行器一次只落一个 patch：
+  `snapshot → apply → compile/smoke → observe → keep/rollback → next`。
+- 每步有停止规则：编译失败/新异常/守护劣化 → 立即回滚并停止后续低置信候选。
+- 每个 patch 单独检查 `permission_tier`；批量批准不绕过权限闸。
+- 结果分账：每个 patch 单独记 `kept / rolled_back / unverified`。
+
+### 8.5 cluster 身份
+
+- run 内：指标 + 相对帧邻域 + 波形（尖峰/成簇/周期/台阶）+ 共现指标。
+- 跨 run：同特征 + 相对帧 ± 容差；算复现率（出现该 cluster 的 run 数 / 总 run 数）。
+- 相同问题重复出现 = 一个 cluster 多个 occurrence；修复后要验证所有 occurrence 消失。
+- 分不清时标 `ambiguous`，不强行归因；不要按“一次探针响 = 一个问题”处理。
+
+### 8.6 UI 唯一通道
+
+- 所有人类操作必须有 UI 路径；文件只作内部审计载体，日常不要求人手工读写。
+- CLI 只保留启动/停止/诊断/应急；旧 ANSI TUI → `upi dev tui`，I5 删除。
+- UI 本地绑定、token 门禁、可离线；审批保留“读完再签”的校验码。
+- UI 故障时保留 break-glass 停止/回滚，但日常不依赖 CLI。
+
+### 8.7 当前进度
+
+- I0 完成：ADR、CP936、本地 Web 骨架、`upi ui`、统一测试入口。
+- I1a 完成：`ProbeEvent`/`EventLog`/旧两源兼容桥/1Hz 哨兵/Web 事件流。
+- I1b 待做：C# 单探针物理合并（一个回调、一个心跳、同时写 breach/sample）。
+- I2~I6：聚类+指纹库、常驻、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
