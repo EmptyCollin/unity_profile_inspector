@@ -566,6 +566,7 @@ def register_flow(line_read) -> str:
         return "未能生成档案（未写任何文件）：\n  - " + "\n  - ".join(problems)
 
     steps = OB.calibration_next_steps(prof)
+    conf = OB.conformance_preview(prof)   # 定档块（build_profile 已探测写入 prof）
     prev = [
         f"将注册工程 {prof.profile_id}：",
         f"  工程路径   = {prof.project_path}",
@@ -575,6 +576,8 @@ def register_flow(line_read) -> str:
         f"  标定目录   = {prof.cal_dir_rel}",
         f"  阈值目录   = {prof.baselines_dir_rel}",
         f"  下限表     = {prof.floor_targets_rel or '（未启用）'}",
+        "",
+        *conf,
         "",
         "注册后还缺（这是下一步要做的）：",
         *[f"  · {s}" for s in steps],

@@ -25,6 +25,7 @@ from typing import Optional
 
 from upi.config.project_profile import (ROOT, ProjectProfile, ProfileError,
                                         profile_file, set_active_profile_id)
+from upi.config import replay_conformance as RC
 from upi.core.floor_check import FloorTable, FloorTarget, load_floor_table
 
 
@@ -170,8 +171,21 @@ def build_profile(answers: dict) -> tuple[Optional[ProjectProfile], list[str]]:
     # 没有 playbook 模板就没有自动修复，检出后转人工。这里刻意不做"聪明映射"——
     # 把夹具模板悄悄套到陌生机制上，表现是"修得动"，实际改的是不相干代码。
     try:
-        return ProjectProfile(**kwargs), []
+        draft = ProjectProfile(**kwargs)
     except Exception as e:  # noqa: BLE001 — 产品模型的校验错翻译成人话
+        return None, [f"档案不合格：{str(e)[:220]}"]
+    # 配合度定档（#31）：注册当场静态探测 RS-1~4 并写进档案。
+    # 方向保守（探测不出证据就降档）——降档只关掉"自动修+验证"这条腿，
+    # 检查-分析-处方腿不受影响；谎报升档才会造成误修，所以宁低勿高。
+    # ⚠️ 用**重新构造**而不是 model_copy 写回：model_copy 不重跑校验器，
+    # tier 越界值就能绕开 _conformance_sane 溜进档案（本轮已两次栽在
+    # "改了值但校验没跑"这一类，见测试里同名纪律）。
+    conf = RC.probe(draft)
+    kwargs["conformance_tier"] = conf["tier"]
+    kwargs["conformance_clauses"] = conf["clauses"]
+    try:
+        return ProjectProfile(**kwargs), []
+    except Exception as e:  # noqa: BLE001
         return None, [f"档案不合格：{str(e)[:220]}"]
 
 
@@ -203,6 +217,34 @@ def calibration_next_steps(prof: ProjectProfile) -> list[str]:
     if not prof.fix_subject:
         steps.append("未指定可修复机制 ⇒ 检出后一律转人工（B3），无自动修复闭环")
     return steps
+
+
+def conformance_preview(prof: ProjectProfile) -> list[str]:
+    """注册预览里的配合度定档块（#31）。纯格式化，证据来自 build_profile
+    当场探测写进档案的 conformance_clauses。
+
+    为什么单列成函数：三档责任边界必须**在批准前**看得见——定档决定"发作类
+    问题会不会自动修"，人在 y 之前只看到"注册成功"的话，等于在不知情的情况
+    下签了免责范围。措辞纪律：静态探测的证据只说"见于某文件"，绝不写
+    "可复现验证通过"（那是 #35 的产物，live_verified 单独一行讲清差距）。
+    """
+    from upi.config.replay_conformance import CLAUSE_LABEL, CLAUSES
+    tier = prof.conformance_tier
+    tier_zh = {"full": "full（一条龙：检查→分析→信封工单→序贯修复→回放验证）",
+               "partial": "partial（慢性病照修照验；发作类只出**免责工单**，"
+                          "批准=知情接受未经复现验证）",
+               "none": "none（只体检开方，管线不动刀）"}[tier]
+    lines = [f"回放准入定档 = {tier_zh}"]
+    for c in CLAUSES:
+        v = (prof.conformance_clauses or {}).get(c) or {}
+        lines.append(f"  {c} [{CLAUSE_LABEL[c]}]：{'✓' if v.get('pass') else '✗'} "
+                     f"{v.get('evidence', '（未探测）')}")
+    # 降档已在 replay_conformance.probe 的返回值里做完（full 必须带合格对齐
+    # 产物，否则当场 partial），这里只如实转写终稿档，不再另述一份"其实按
+    # partial 用"——那是第二处真相。产物指针有就展示，便于回溯。
+    if tier == "full":
+        lines.append(f"  条款级验证产物：{prof.conformance_live_ref or '（未声明）'}")
+    return lines
 
 
 def commit_profile(prof: ProjectProfile, *, activate: bool = True) -> Path:

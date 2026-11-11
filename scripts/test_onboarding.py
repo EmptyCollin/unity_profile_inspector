@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.config import project_profile as PP           # noqa: E402
 from upi.config.project_profile import ProjectProfile  # noqa: E402
+from upi.config import replay_conformance as RC        # noqa: E402
 from upi.core import events as E                        # noqa: E402
 from upi.tooling import onboarding as OB               # noqa: E402
 
@@ -49,6 +50,17 @@ def answers(base: Path, **over):
          "git_root": str(base)}      # 显式给 git 根，避免依赖临时区是否在仓库内
     a.update(over)
     return a
+
+
+def make_replay_markers(base: Path):
+    """在假工程 Assets/ 里写一个含 RS-2/3/4 静态标记的 C#，让 probe 扫得到。
+    文件名与 ReplayDriver.cs 无关——探测认内容标记，不认文件名。"""
+    (base / "Assets").mkdir(parents=True, exist_ok=True)
+    (base / "Assets" / "FakeReplay.cs").write_text(
+        "class X { void M(){ UnityEngine.Random.InitState(7);"
+        " UnityEngine.Time.fixedDeltaTime = 0.02f;"
+        " var c = \"arm:100:10:12\"; var o = \"load:7\";"
+        " int origin = 0; } }\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -218,6 +230,60 @@ def main() -> int:
                  if prof3 is not None and getattr(prof3, k) != getattr(prof_manual, k)]
         ok("向导与手工注册的字段逐字一致（零行为差）",
            not diffs, diffs)
+
+        # ── ⑧ 回放准入定档（#31）：注册当场探测、full 必须带合格产物、fail-closed ──
+        print("== ⑧ 配合度定档（探测→降档闭环→预览）==")
+        p_conf = make_proj(tmp / "pc", ["SampleScene"])
+        # (a) 裸工程（只有场景文件，无回放标记）⇒ partial：
+        #     RS-1 过、RS-2/3/4 无证据 ⇒ 慢性病可修可验、发作类只走免责工单
+        prof_a, _ = OB.build_profile(answers(p_conf, subjects=["SampleScene"]))
+        ok("无回放标记 ⇒ 定档 partial（不是 none——场景可脚本化是够的）",
+           prof_a is not None and prof_a.conformance_tier == "partial",
+           prof_a.conformance_tier if prof_a else None)
+        ok("条款证据逐条落档（工单页眉引用要有据）",
+           prof_a is not None
+           and prof_a.conformance_clauses["RS-1"]["pass"] is True
+           and prof_a.conformance_clauses["RS-3"]["pass"] is False)
+        # (b) 带回放标记但**无验证产物** ⇒ 仍是 partial（full 的降档闭环在
+        #     probe 返回值里做完，不留"字段 full、行为 partial"两份真相）
+        make_replay_markers(p_conf)
+        prof_b, _ = OB.build_profile(answers(p_conf, subjects=["SampleScene"]))
+        ok("四条款静态证据齐但无对齐产物 ⇒ 当场降 partial",
+           prof_b is not None and prof_b.conformance_tier == "partial"
+           and prof_b.conformance_clauses["RS-3"]["pass"] is True,
+           prof_b.conformance_tier if prof_b else None)
+        # (c) 有合格产物（final=aligned）⇒ full 成立。live_ref 用绝对路径：
+        #     pathlib 拼绝对串覆盖左轴（实测），临时区产物可被 _live_check 读到
+        art = tmp / "aligned.json"
+        art.write_text(json.dumps({"final": "aligned"}), encoding="utf-8")
+        prof_c = ProjectProfile(**{
+            **(prof_b.model_dump() if prof_b else {}),
+            "conformance_live_ref": str(art)})
+        rc_c = RC.probe(prof_c)
+        ok("静态证据齐 + 产物 aligned ⇒ full（一条龙解锁）",
+           rc_c["tier"] == "full" and rc_c["live_verified"] is True, rc_c["tier"])
+        # (d) 产物结论不对 ⇒ 照样不是 full（不拿"文件存在"冒充"验证通过"）
+        art_bad = tmp / "diverged.json"
+        art_bad.write_text(json.dumps({"final": "diverged"}), encoding="utf-8")
+        prof_d = ProjectProfile(**{
+            **(prof_b.model_dump() if prof_b else {}),
+            "conformance_live_ref": str(art_bad)})
+        ok("产物 final≠aligned ⇒ probe 拒并降档",
+           RC.probe(prof_d)["tier"] == "partial")
+        # (e) fail-closed：既有档案没这个字段 ⇒ 装载即 none，
+        #     "没探测过"绝不读成"探测过且合格"
+        prof_e = ProjectProfile(profile_id="old", project_path=p_conf,
+                                git_root=p_conf, subjects=["SampleScene"],
+                                scenes_dir="Assets/Scenes", clean_subject="")
+        ok("无 conformance 字段的档案缺省 none（fail-closed）",
+           prof_e.conformance_tier == "none")
+        # (f) 预览块在 y 确认前把责任边界说清（三档各有各自的文案）
+        pv = OB.conformance_preview(prof_e)
+        ok("none 档预览含'只体检开方，管线不动刀'",
+           any("不动刀" in x for x in pv), pv[:2])
+        pv_b = OB.conformance_preview(prof_b)
+        ok("partial 档预览含免责语义（发作类=免责工单）",
+           any("免责" in x for x in pv_b), pv_b[:2])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -95,6 +95,23 @@ class ProjectProfile(BaseModel):
 
     quality_tier: str = "urp-balanced"
 
+    # ── 回放准入配合度（#31，契约见 docs/回放准入标准.md）──
+    # conformance_tier ∈ none / partial / full —— 决定这个工程走哪档流程：
+    #   full    检查→分析→信封工单→序贯修复→**回放验证**一条龙（RS-1~4 齐）
+    #   partial 慢性病（水位类）照修照验；发作类只出**免责工单**（RS-3 缺）
+    #   none    只体检开方，不动刀（连场景脚本化入口都缺证据）
+    # ⚠️ 缺省 none 是 fail-closed：既有 projects/*.json 都没这个字段，装载即
+    #   none——"没探测过"绝不读成"探测过且合格"。谎报 full 的后果是让不配合
+    #   工程被当成可自动修复处理（三档语义的责任边界就在这个默认值上）。
+    # 值由 replay_conformance.probe() 静态探测产出（注册向导当场跑）；
+    # conformance_clauses 留每条款的 pass/证据，报告与工单头要引用它做免责申明。
+    conformance_tier: str = "none"
+    conformance_clauses: dict = Field(default_factory=dict)
+    # 条款级**真机验证**产物路径（相对本仓库根，如 runs/m2a_alignment_report.json）。
+    # 空 = 从未做回放对齐验证 ⇒ live_verified 恒 False：静态探测看到 arm: 命令
+    # 不等于"两遍重放位级一致"（#35 才产得出后者），两者必须分开呈现。
+    conformance_live_ref: str = ""
+
     # 绝对下限目标表（阶段 8 A 方案）：相对工程根的 json 路径，空 = 该工程不启用。
     # 为什么归 profile 而不是运行配置：表是**工程侧数据**（每个项目的帧预算/
     # 画质目标不同），换工程必然换表；放运行配置会造成"切了工程还在用上一个
@@ -185,6 +202,20 @@ class ProjectProfile(BaseModel):
                 f"profile {self.profile_id}: project_path={p} 不在 git_root="
                 f"{self.git_root} 之下，无法建立 attempt 快照（G4/I4 的回滚只依赖 git）。"
                 "要么把工程放进该仓库工作树，要么把 git_root 指向工程自己的 git 根") from None
+        return self
+
+    @model_validator(mode="after")
+    def _conformance_sane(self):
+        # 只校验**形状**（枚举成员），不在装载期读盘——与 _paths_must_be_usable
+        # 同一纪律："CI 里档案可指向还没 checkout 的工程，导入期不炸盘"。
+        # 配合度值必须在枚举内：手改 projects/*.json 塞进 "full-ish" 这类拼错，
+        # 若不在构造期拒，就会静默按"未知档"走流程——三档责任边界被一个拼写击穿。
+        if self.conformance_tier not in ("none", "partial", "full"):
+            raise ValueError(
+                f"profile {self.profile_id}: conformance_tier="
+                f"{self.conformance_tier!r} 只认 none/partial/full")
+        # live_ref 指向的产物是否真存在/结论对不对，由 replay_conformance.probe()
+        # 的 _live_check 在调用期判（它会读盘），不放在这里——否则违反"装载期不碰盘"。
         return self
 
     # ── 派生路径（全部现算，不缓存：与总线 I9 同纪律）──
@@ -316,6 +347,22 @@ _BUILTIN: dict[str, ProjectProfile] = {
         fix_subject="F-CPU-01",
         defect_signature="var ready = new List<SkillRuntime>();",
         quality_tier="urp-balanced",
+        # 配合度（#31）：条款证据**预置进档案**——证据本身是实测的（下方文本
+        # 即 2026-11-11 replay_conformance.probe() 对本工程的真实输出），但这里
+        # 落盘为字段而不是让每个下游都现场重扫盘（detect 每轮都问一次档，扫盘
+        # 成本不该进主循环；且"档案即真相源"与 floor/cal_dir 的哲学一致）。
+        # ⚠️ 预置 ≠ 永久免检：live_ref 指向的 M2a 对齐产物在 runs/ 本机嵌套
+        # 仓库里，_live_check 永远在调用期按盘上证据现判——换机后产物不在，
+        # probe() 的降档闭环会把 full 打成 partial，谎不了。条款证据若与盘
+        # 面漂移（工程改了回放件），重跑注册或自检即刷新。
+        conformance_tier="full",
+        conformance_clauses={
+            "RS-1": {"pass": True, "evidence": "场景文件可得 5/5：Scene_CLEAN.unity 等（模板解析实测）"},
+            "RS-2": {"pass": True, "evidence": "种子标记 1 处 + 定步长标记 1 处（ReplayDriver.cs）"},
+            "RS-3": {"pass": True, "evidence": "回放协议命令面见于 ReplayDriver.cs（arm:/load: 指令）"},
+            "RS-4": {"pass": True, "evidence": "复位/重钉起点标记见于 ReplayDriver.cs, UpiBreachProbe.cs"},
+        },
+        conformance_live_ref="runs/m2a_alignment_report.json",
     )
 }
 
