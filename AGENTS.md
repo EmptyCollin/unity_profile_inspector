@@ -338,5 +338,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 
 - I0 完成：ADR、CP936、本地 Web 骨架、`upi ui`、统一测试入口。
 - I1a 完成：`ProbeEvent`/`EventLog`/旧两源兼容桥/1Hz 哨兵/Web 事件流。
-- I1b 待做：C# 单探针物理合并（一个回调、一个心跳、同时写 breach/sample）。
+- I1b 探针件完成、真机冒烟通过：`probe/upi_probe_v4.cs` 一个回调/一个心跳，同时产 breach/sample；生产安装/卸载与旧探针退役待 I3。
 - I2~I6：聚类+指纹库、常驻、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
