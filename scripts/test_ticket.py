@@ -54,6 +54,7 @@ ok("空批准人被拒", not approve(t, approver="", note="ok", token=t.approve_
 ok("错校验码被拒", not approve(t, approver="我", note="ok", token="0000")[0])
 ok("正确批准通过", approve(t, approver="我", note="批准", token=t.approve_token)[0]
    and t.status == "approved")
+ok("审批历史留痕", any(h.get("action") == "approve_ticket" for h in t.history))
 
 # 串行执行成功
 applied, rolled = [], []
@@ -113,6 +114,7 @@ ok("错单条码被拒", not approve_item(t7, it.item_id, approver="我", note="
 ok("单条批准通过", approve_item(t7, it.item_id, approver="我", note="已读计划",
                               token=it.item_approve_token)[0]
    and it.status == "pending" and it.human_approved)
+ok("明细带可展开 diff", len(t7.summary()["item_list"][0]["plan_diffs"]) >= 1)
 applied7 = []
 out7 = TicketExecutor(store, apply=lambda p: applied7.append(p.playbook_id),
                       compile_ok=lambda: True, observe=lambda: {},

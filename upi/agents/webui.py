@@ -279,6 +279,8 @@ _INDEX_HTML = r"""<!doctype html>
     color:var(--text);padding:7px 8px;font:12px var(--mono);outline:none}
   .form input:focus,.form textarea:focus{border-color:var(--cyan)}
   .form .pbtn{padding:6px 12px}
+  .diff{margin:6px 0;padding:6px;border:1px solid #1b2a3a;border-radius:5px;background:#0b1219}
+  .diff pre{white-space:pre-wrap;word-break:break-all;margin:4px 0;color:var(--dim);font-size:10.5px}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -596,6 +598,9 @@ function showTicketDetail(t){
   const tl = (t.results || []).map(r =>
     `<div class="small">· ${esc(r.metric || r.item_id || "")} → ${esc(r.status || "—")}` +
     `${r.observation ? " · " + esc(JSON.stringify(r.observation).slice(0, 120)) : ""}</div>`).join("");
+  const hist = (t.history || []).map(h =>
+    `<div class="small">· ${esc(h.ts)} ${esc(h.action)} ${esc(h.actor || "")}` +
+    `${h.metric ? " · " + esc(h.metric) : ""}${h.note ? " · " + esc(h.note) : ""}</div>`).join("");
   $("batchDetail").innerHTML = `<div style="padding:10px 15px;color:var(--muted);font-size:12px">` +
     `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b></div>` +
     (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>计划</th><th>单条批准</th><th>原因</th></tr></thead><tbody>` +
@@ -606,11 +611,15 @@ function showTicketDetail(t){
         return `<tr><td class="mono">${esc(i.metric)}</td><td>${esc(i.shape)}</td>` +
         `<td>${i.fingerprint_hit ? "命中" : "未命中"}</td><td class="mono">${esc(i.playbook_id || "—")}</td>` +
         `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td>` +
-        `<td class="small">${esc(files || "—")}${i.diff_count ? " (" + i.diff_count + ")" : ""}</td>` +
+        `<td class="small"><details><summary>${esc(files || "—")}${i.diff_count ? " (" + i.diff_count + ")" : ""}</summary>` +
+        `${(i.plan_diffs || []).map(d => `<div class="diff"><b>${esc(d.file)}</b>` +
+          `${d.why ? "<br><i>" + esc(d.why) + "</i>" : ""}` +
+          `<pre>- ${esc(d.find || "")}\n+ ${esc(d.replace || "")}</pre></div>`).join("")}</details></td>` +
         `<td>${ap}</td><td class="small">${esc(i.error || "—")}</td></tr>`;
       }).join("") +
       `</tbody></table>` : `<div class="empty">无候选。</div>`) +
-    (tl ? `<div style="padding:8px 15px;border-top:1px solid #182333"><b class="small">执行时间线</b>${tl}</div>` : "");
+    (tl ? `<div style="padding:8px 15px;border-top:1px solid #182333"><b class="small">执行时间线</b>${tl}</div>` : "") +
+    (hist ? `<div style="padding:8px 15px;border-top:1px solid #182333"><b class="small">审批历史</b>${hist}</div>` : "");
 }
 async function probeAction(act){
   try{

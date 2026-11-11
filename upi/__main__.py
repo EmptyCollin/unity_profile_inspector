@@ -14,7 +14,6 @@
   drill         演练两阶段（透传 scripts/m4_drill.py 参数）
   report        生成历史统计报告 HTML
   stats         终端快览统计指标（JSON，脚本/CI 取数用）
-  tui           旧 ANSI 终端界面（迁移期保留，I5 后删除）
 
 "彻底唯一入口"的诚实边界（阶段 6）：任何进程都得有人第一次把它启动，可执行
 入口消灭不掉；真正落地的形态是**用户永远只在 UI 里操作，不需要知道命令行的
@@ -233,12 +232,6 @@ def cmd_ui(args=None) -> int:
                      open_browser=not ns.no_browser, check=ns.check)
 
 
-def cmd_tui(_args=None) -> int:
-    """旧 ANSI 终端界面（迁移期保留，I5 后删除）。日常请用 `upi ui`。"""
-    from upi.agents.ui import run_loop
-    return run_loop()
-
-
 def cmd_resume(args) -> int:
     """工单批准后续跑（开发通道）：python -m upi dev resume --run <run_id>
 
@@ -328,8 +321,7 @@ _CMDS = {"ui": cmd_ui, "status": cmd_status,
 # "点启动守护报失败"，看起来像守护坏了——分层重构最常见的自伤，已消除。
 _DEV_CMDS = {"monitor": cmd_monitor, "detect": cmd_detect,
              "patrol-once": cmd_patrol_once, "resume": cmd_resume,
-             "drill": cmd_drill, "report": cmd_report, "stats": cmd_stats,
-             "tui": cmd_tui}
+             "drill": cmd_drill, "report": cmd_report, "stats": cmd_stats}
 
 
 def main(argv: Optional[list] = None) -> int:

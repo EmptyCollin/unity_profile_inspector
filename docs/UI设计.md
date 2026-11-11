@@ -19,7 +19,7 @@
 - Python 标准库 `ThreadingHTTPServer` + 服务端 HTML + SSE；无 Node 构建、无 CDN。
 - 图表用手写 SVG/Canvas；前端原生 JS，不引入框架。
 - `upi ui` 启动并打开浏览器；`--check` 做 HTTP 自检；`--port 0` 系统分配端口。
-- 旧 ANSI TUI 移到 `upi dev tui`，I5 删除。
+- 旧 ANSI TUI 入口已移除（`upi dev tui` 不再可用）；模块仅保留给历史测试。
 
 ## 3. 信息架构
 

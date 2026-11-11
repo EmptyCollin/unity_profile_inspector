@@ -72,6 +72,7 @@ class BatchTicket(BaseModel):
     approve_token: str = ""
     current_index: int = 0
     results: list[dict] = Field(default_factory=list)
+    history: list[dict] = Field(default_factory=list)
 
     def summary(self) -> dict:
         return {
@@ -85,6 +86,7 @@ class BatchTicket(BaseModel):
             "approve_token": self.approve_token if self.status == "awaiting_approval" else "",
             "approver": self.approver,
             "results": self.results[-8:],
+            "history": self.history[-20:],
             "item_list": [{
                 "item_id": i.item_id,
                 "metric": i.metric, "shape": i.shape, "status": i.status,
@@ -94,6 +96,12 @@ class BatchTicket(BaseModel):
                 "plan_files": sorted({str(d.get("file", ""))
                                       for d in (i.plan or {}).get("diffs", [])}),
                 "diff_count": len((i.plan or {}).get("diffs", [])),
+                "plan_diffs": [{
+                    "file": str(d.get("file", "")),
+                    "why": str(d.get("_why", "")),
+                    "find": str(d.get("find", ""))[:400],
+                    "replace": str(d.get("replace", ""))[:400],
+                } for d in (i.plan or {}).get("diffs", [])[:4]],
                 "human_approved": i.human_approved,
                 "approve_token": (i.item_approve_token
                                   if i.status == "needs_human" and i.plan else ""),
@@ -225,6 +233,9 @@ def approve(ticket: BatchTicket, *, approver: str, note: str, token: str) -> tup
     ticket.status = "approved"
     ticket.approver = approver.strip()
     ticket.note = note.strip()
+    ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                           "action": "approve_ticket",
+                           "actor": ticket.approver, "note": ticket.note})
     return True, "approved"
 
 
@@ -236,6 +247,9 @@ def reject(ticket: BatchTicket, *, approver: str, note: str) -> tuple[bool, str]
     ticket.status = "rejected"
     ticket.approver = approver.strip()
     ticket.note = note.strip()
+    ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                           "action": "reject_ticket",
+                           "actor": ticket.approver, "note": ticket.note})
     return True, "rejected"
 
 
@@ -259,6 +273,10 @@ def approve_item(ticket: BatchTicket, item_id: str, *, approver: str,
     item.human_approved = True
     item.approver = approver.strip()
     item.approval_note = note.strip()
+    ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                           "action": "approve_item", "item_id": item.item_id,
+                           "metric": item.metric, "actor": item.approver,
+                           "note": item.approval_note})
     if item.status == "needs_human":
         item.status = "pending"
         item.error = ""

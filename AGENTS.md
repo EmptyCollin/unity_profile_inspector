@@ -354,4 +354,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I4b2b2b1 完成：回归 HTML 报告（runs/plan/verdict/guards），Web 生成/打开。
 - I5a 完成：报告页 + 设置/接入只读页（工程/探针/指纹库/目录 + 首次使用顺序）。
 - I5b1 完成：正式审批表单替代 prompt；工单执行时间线；onboarding 状态勾选。
-- I5b2~I6：完整 diff/审批历史、旧 TUI 删除、夹具 Unity 适配、硬化验收（`docs/迭代计划.md`）。
+- I5b2 完成：明细 diff 展开、审批历史；移除 `upi dev tui` 入口（模块仅留测试）。
+- I6：硬化/验收/迁移/文档重写；真实工程 E2E、夹具 Unity 适配（`docs/迭代计划.md`）。
