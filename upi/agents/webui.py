@@ -383,6 +383,9 @@ function renderTickets(s){
     (t.status === "awaiting_approval"
       ? `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="approve">批准</button>` +
         `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="reject">驳回</button>`
+      : "") +
+    (t.status === "approved" && t.pending > 0
+      ? `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="execute">执行</button>`
       : "") + `</td></tr>`
   ).join("") : `<tr><td colspan="6" class="empty">还没有批量工单。</td></tr>`;
   ts.forEach(t => { batchCache[t.ticket_id] = t; });
@@ -416,6 +419,14 @@ async function probeAction(act){
   }catch(e){ alert("探针操作失败：" + e.message); }
 }
 async function ticketAction(tid, act){
+  if(act === "execute"){
+    try{
+      const r = await post(`/api/tickets/${encodeURIComponent(tid)}/execute`, {});
+      alert(r.ticket ? "执行完成（unverified）" : "已提交");
+      await refresh();
+    }catch(e){ alert("执行失败：" + e.message); }
+    return;
+  }
   const t = batchCache[tid] || {};
   const approver = prompt("批准人/驳回人姓名：");
   if(!approver) return;
@@ -718,9 +729,32 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if re.match(r"^/api/tickets/bt-[A-Za-z0-9_\-]+/execute$", parsed.path):
-            self._send_json(501, {"ok": False,
-                                  "error": "I3b: Unity apply/compile/observe 尚未接线；"
-                                           "当前只能建单与审批"})
+            try:
+                from upi.core.ticket import TicketStore
+                from upi.core.unity_exec import UnityTicketExecutor
+                store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+                tid = parsed.path.split("/")[-2]
+                t = store.load(tid)
+                if t is None:
+                    self._send_json(404, {"ok": False, "error": "ticket not found"})
+                    return
+                if t.status != "approved":
+                    self._send_json(400, {"ok": False,
+                                          "error": f"未批准（{t.status}）"})
+                    return
+                runnable = [i for i in t.items
+                            if i.status == "pending" and i.plan and i.permission_tier == "auto"]
+                if not runnable:
+                    self._send_json(409, {
+                        "ok": False,
+                        "error": "没有可自动执行的候选（无 plan 或需人工）",
+                        "needs_human": sum(1 for i in t.items if i.status == "needs_human"),
+                    })
+                    return
+                out = UnityTicketExecutor(store).execute(t)
+                self._send_json(200, {"ok": True, "ticket": out.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
         self._send_json(404, {"ok": False, "error": "not found"})
 

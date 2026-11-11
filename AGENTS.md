@@ -342,4 +342,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I2 完成：`cluster.py`（run 内/跨 run、复现率、波形）+ `fingerprint.py`（SQLite 指纹库、6 条内置、命中/未命中/歧义路由）；Web“问题/指纹库”页已接；修复执行器仍未消费指纹（I3）。
 - I3a 完成：批量工单模型/存储、4 位校验码审批、串行执行器（注入式）、`unverified` 账本、Web 建单/批准/明细页；Unity apply/compile/observe 接线、统一探针安装/调度待 I3b。
 - I3b-1 完成：`probe_control.py` + Web 探针按钮；install/status/sample/unload 真机通过；卸载后心跳停止。
-- I3b-2~I6：常驻执行/调度、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
+- I3b-2a 完成：`unity_exec.py` 把 snapshot/`fixer.execute`/compile/rollback 接进批量执行；成功只 `applied_unverified`；无 plan 的 `/execute` 返回 409。
+- I3b-2b~I6：live/抽检调度、真实 plan_provider、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。

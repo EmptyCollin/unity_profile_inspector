@@ -138,7 +138,7 @@ try:
                            {"approver": "测试", "note": "批准", "token": t.get("approve_token")})
     ok("POST 批准 200", code == 200 and appr.get("ticket", {}).get("status") == "approved")
     code, ex = post_json(base + f"/api/tickets/{tid}/execute?token=test-token", {})
-    ok("执行未接线返回 501（诚实边界）", code == 501 and ex.get("ok") is False)
+    ok("无可执行 plan 返回 409（诚实边界）", code == 409 and ex.get("ok") is False)
     code, _hdr, body = get(base + "/api/status?token=test-token")
     data2 = json.loads(body.decode("utf-8"))
     ok("状态含批量工单", any(x.get("ticket_id") == tid
