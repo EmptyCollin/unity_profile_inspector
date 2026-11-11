@@ -313,56 +313,69 @@ public static class UpiProbeV4
     {
         try
         {
-            var sb = new StringBuilder(4096);
-            sb.Append("{\"kind\":\"breach\",\"source\":\"unified_probe\",");
-            JN(sb, "frame_idx", p.fc, true);
-            JN(sb, "rel_frame", p.origin >= 0 ? p.fc - (int)p.origin : -1, true);
-            sb.Append("\"metric\":\"frame_time_ms\",");
-            JF(sb, "value", p.ftNs / 1e6, true);
-            JF(sb, "threshold", _thrNs / 1e6, true);
-            JF(sb, "threshold_abs", _thrNs / 1e6, true);
-            JF(sb, "deviation_ratio", _thrNs > 0 ? p.ftNs / (double)_thrNs : 0.0, true);
-
-            sb.Append("\"ring_before\":[");
-            Series(sb, p.fc - _before, p.fc);
-            sb.Append("],\"ring_after\":[");
-            Series(sb, p.fc + 1, p.fc + _after);
-            sb.Append("],\"gc_ring_before\":[");
-            SeriesGc(sb, p.fc - _before, p.fc);
-            sb.Append("],\"gc_ring_after\":[");
-            SeriesGc(sb, p.fc + 1, p.fc + _after);
-            sb.Append(']');
-
-            sb.Append(",\"a4_window\":[");
-            bool first = true;
-            for (int f = p.fc - 2; f <= p.fc + _after; f++)
-            {
-                int a = ((f % A4CAP) + A4CAP) % A4CAP;
-                if (A4Fc[a] != f) continue;
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append('{');
-                JN(sb, "frame_idx", f, true);
-                JF(sb, "cpu_frame_time_ms", A4Cpu[a], true);
-                bool unfilled = A4Gpu[a] == 0.0 && A4Ts[a] == 0L;
-                sb.Append("\"gpu_frame_time_ms\":");
-                if (unfilled) sb.Append("null");
-                else sb.Append(A4Gpu[a].ToString("R", CultureInfo.InvariantCulture));
-                sb.Append(',');
-                JN(sb, "complete_ts", A4Ts[a], false);
-                sb.Append('}');
-            }
-            sb.Append(']');
-
-            sb.Append(",\"data_tier\":\"A4\"");
-            sb.Append(",\"replay_seed\":" + _seed.ToString(CultureInfo.InvariantCulture));
-            sb.Append('}');
-            string line = sb.ToString();
-            Append(Events, line);
-            Append(LegacyBreach, line);
-            LowFreq("flush fc=" + p.fc + " a4first=" + (first ? "none" : "ok"));
+            bool a4Any;
+            // 统一事件带 kind/source/threshold；旧 pb_breach 必须严格保持
+            // BreachSample 契约（extra="forbid"），不能混入新字段，否则旧判定
+            // 会整行拒收。两条线格式分开构造。
+            string unified = BreachJson(p, true, out a4Any);
+            string legacy = BreachJson(p, false, out _);
+            Append(Events, unified);
+            Append(LegacyBreach, legacy);
+            LowFreq("flush fc=" + p.fc + " a4first=" + (a4Any ? "ok" : "none"));
         }
         catch (Exception e) { LowFreq("flush-err " + e.GetType().Name + " " + e.Message); }
+    }
+
+    static string BreachJson(Pending p, bool unified, out bool a4Any)
+    {
+        var sb = new StringBuilder(4096);
+        sb.Append('{');
+        if (unified) sb.Append("\"kind\":\"breach\",\"source\":\"unified_probe\",");
+        JN(sb, "frame_idx", p.fc, true);
+        JN(sb, "rel", p.origin >= 0 ? p.fc - (int)p.origin : -1, true);
+        if (unified)
+            JN(sb, "rel_frame", p.origin >= 0 ? p.fc - (int)p.origin : -1, true);
+        sb.Append("\"metric\":\"frame_time_ms\",");
+        JF(sb, "value", p.ftNs / 1e6, true);
+        if (unified) JF(sb, "threshold", _thrNs / 1e6, true);
+        JF(sb, "threshold_abs", _thrNs / 1e6, true);
+        JF(sb, "deviation_ratio", _thrNs > 0 ? p.ftNs / (double)_thrNs : 0.0, true);
+
+        sb.Append("\"ring_before\":[");
+        Series(sb, p.fc - _before, p.fc);
+        sb.Append("],\"ring_after\":[");
+        Series(sb, p.fc + 1, p.fc + _after);
+        sb.Append("],\"gc_ring_before\":[");
+        SeriesGc(sb, p.fc - _before, p.fc);
+        sb.Append("],\"gc_ring_after\":[");
+        SeriesGc(sb, p.fc + 1, p.fc + _after);
+        sb.Append(']');
+
+        sb.Append(",\"a4_window\":[");
+        a4Any = false;
+        for (int f = p.fc - 2; f <= p.fc + _after; f++)
+        {
+            int a = ((f % A4CAP) + A4CAP) % A4CAP;
+            if (A4Fc[a] != f) continue;   // 槽位不属于这帧 = 没采到
+            if (a4Any) sb.Append(',');
+            a4Any = true;
+            sb.Append('{');
+            JN(sb, "frame_idx", f, true);
+            JF(sb, "cpu_frame_time_ms", A4Cpu[a], true);
+            bool unfilled = A4Gpu[a] == 0.0 && A4Ts[a] == 0L;
+            sb.Append("\"gpu_frame_time_ms\":");
+            if (unfilled) sb.Append("null");
+            else sb.Append(A4Gpu[a].ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',');
+            JN(sb, "complete_ts", A4Ts[a], false);
+            sb.Append('}');
+        }
+        sb.Append(']');
+
+        sb.Append(",\"data_tier\":\"A4\"");
+        sb.Append(",\"replay_seed\":" + _seed.ToString(CultureInfo.InvariantCulture));
+        sb.Append('}');
+        return sb.ToString();
     }
 
     static void FlushSamples(int fc)
