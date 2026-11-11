@@ -170,6 +170,11 @@ try:
         code, r = post_json(base + f"/api/regression/suites/{sid}/record?token=test-token", {})
     ok("POST 记录 3 次基线", code == 200 and r.get("summary", {}).get("runs") == 3)
     ok("3 次后计划 ready", r.get("summary", {}).get("plan", {}).get("status") == "ready")
+    post_json(base + f"/api/regression/suites/{sid}/record?token=test-token", {})
+    code, r = post_json(base + f"/api/regression/suites/{sid}/verify?token=test-token", {})
+    ok("POST 验证最后一次", code == 200 and r.get("ok") is True
+       and r.get("verified") is False
+       and r.get("record", {}).get("verdict", {}).get("status") == "target_present")
     code, _hdr, body = get(base + "/api/status?token=test-token")
     data3 = json.loads(body.decode("utf-8"))
     ok("状态含回归套件", any(x.get("suite_id") == sid

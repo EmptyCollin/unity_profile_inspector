@@ -138,6 +138,15 @@ class RegressionVerdict(BaseModel):
     reason: str = ""
 
 
+class VerifiedRecord(BaseModel):
+    record_id: str
+    suite_id: str
+    plan_id: str
+    target_cluster_id: str
+    verdict: RegressionVerdict
+    created_at: str
+
+
 def _match(c: IssueCluster, ref: IssueCluster, rel_tol: int = 15) -> bool:
     return (c.metric == ref.metric and c.shape == ref.shape
             and c.kind == ref.kind and c.data_tier == ref.data_tier
@@ -210,8 +219,10 @@ class RegressionStore:
             os.environ.get("UPI_REGRESSION_DIR") or DEFAULT_DIR)
         self.suites = self.root / "suites"
         self.matrices = self.root / "matrices"
+        self.verdicts = self.root / "verdicts"
         self.suites.mkdir(parents=True, exist_ok=True)
         self.matrices.mkdir(parents=True, exist_ok=True)
+        self.verdicts.mkdir(parents=True, exist_ok=True)
 
     def save_suite(self, s: ReplaySuite) -> Path:
         p = self.suites / f"{s.suite_id}.json"
@@ -270,10 +281,57 @@ class RegressionStore:
         self.save_matrix(m)
         return r
 
+    def verify_last(self, sid: str) -> dict:
+        """用前 3 次作基线、最后一次作 after，跑 verified 判定并落账本。
+        不启动 replay；调用方必须先记录第 4 次（修复后）事件。"""
+        m = self.load_matrix(sid)
+        if m is None or len(m.runs) < 4:
+            return {"ok": False, "error": "需要至少 4 次记录（3 基线 + 1 修复后）"}
+        base_runs = m.runs[:3]
+        base = BaselineMatrix(suite_id=sid, runs=base_runs,
+                              min_runs=3, stable_rate=m.stable_rate)
+        plan = RegressionPlan.from_matrix(base)
+        if plan.status != "ready" or not plan.items:
+            return {"ok": False, "error": f"计划不可用：{plan.status}"}
+        item = plan.items[0]
+        target = next((c for r in base_runs for c in r.clusters
+                       if c.cluster_id == item.cluster_id), None)
+        if target is None:
+            return {"ok": False, "error": "目标 cluster 不在基线中"}
+        after = m.runs[-1]
+        v = verify_after(base, target, after.clusters,
+                         after_protocol=after.protocol_fingerprint)
+        rec = VerifiedRecord(
+            record_id="vr-" + hashlib.sha256(
+                f"{sid}|{plan.plan_id}|{after.run_id}".encode()).hexdigest()[:10],
+            suite_id=sid, plan_id=plan.plan_id,
+            target_cluster_id=target.cluster_id, verdict=v, created_at=E.now())
+        if v.verification_status == "verified":
+            self.save_verdict(rec)
+        return {"ok": True, "record": rec.model_dump(), "verified": v.verification_status == "verified"}
+
+    def save_verdict(self, rec: VerifiedRecord) -> Path:
+        p = self.verdicts / f"{rec.record_id}.json"
+        E.atomic_write_text(p, rec.model_dump_json(indent=2))
+        return p
+
+    def list_verdicts(self, sid: Optional[str] = None) -> list[VerifiedRecord]:
+        out = []
+        for p in sorted(self.verdicts.glob("vr-*.json"),
+                        key=lambda x: x.stat().st_mtime, reverse=True):
+            try:
+                rec = VerifiedRecord(**json.loads(p.read_text(encoding="utf-8")))
+                if sid is None or rec.suite_id == sid:
+                    out.append(rec)
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
     def summary(self, sid: str) -> dict:
         suite = self.load_suite(sid)
         m = self.load_matrix(sid) or BaselineMatrix(suite_id=sid)
         plan = RegressionPlan.from_matrix(m)
+        vs = self.list_verdicts(sid)
         return {
             "suite_id": sid,
             "name": suite.name if suite else "",
@@ -282,4 +340,5 @@ class RegressionStore:
             "min_runs": m.min_runs,
             "stable_clusters": len(m.stable_matches()),
             "plan": plan.model_dump(),
+            "last_verdict": (vs[0].verdict.model_dump() if vs else None),
         }

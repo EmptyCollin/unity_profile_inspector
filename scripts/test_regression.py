@@ -104,6 +104,32 @@ ok("3 次后计划 ready", sm["plan"]["status"] == "ready"
    and len(sm["plan"]["items"]) == 1)
 ok("套件列表", any(x.suite_id == "s2" for x in st2.list_suites()))
 
+# 第 4 次（修复后）→ verified 账本
+st3 = RegressionStore(TMP / "reg3")
+base_runs = [RegressionRun(run_id=f"v{i}", suite_id="s3", run_index=i,
+                           protocol_fingerprint="fp-v",
+                           clusters=[A, B]) for i in range(3)]
+after_ok = RegressionRun(run_id="v3", suite_id="s3", run_index=3,
+                         protocol_fingerprint="fp-v", clusters=[])
+st3.save_matrix(BaselineMatrix(suite_id="s3", runs=base_runs + [after_ok]))
+res = st3.verify_last("s3")
+ok("第 4 次目标消失→verified", res["ok"] and res["verified"]
+   and res["record"]["verdict"]["verification_status"] == "verified")
+ok("verified 账本落盘", len(st3.list_verdicts("s3")) == 1)
+ok("summary 带 last_verdict", st3.summary("s3")["last_verdict"]["status"] == "verified")
+
+st4 = RegressionStore(TMP / "reg4")
+after_bad = RegressionRun(run_id="v3", suite_id="s4", run_index=3,
+                          protocol_fingerprint="fp-v", clusters=[A, B])
+st4.save_matrix(BaselineMatrix(suite_id="s4", runs=[
+    RegressionRun(run_id=f"w{i}", suite_id="s4", run_index=i,
+                  protocol_fingerprint="fp-v", clusters=[A, B]) for i in range(3)
+] + [after_bad]))
+res2 = st4.verify_last("s4")
+ok("目标仍在→不 verified", res2["ok"] and not res2["verified"]
+   and res2["record"]["verdict"]["status"] == "target_present"
+   and st4.list_verdicts("s4") == [])
+
 
 print()
 if FAIL:

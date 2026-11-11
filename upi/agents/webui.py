@@ -248,6 +248,9 @@ _INDEX_HTML = r"""<!doctype html>
   .rbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .rbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .vbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .vbtn:hover{color:var(--text);border-color:var(--cyan)}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -425,14 +428,17 @@ function renderRegression(s){
   $("regMeta").textContent = `${rs.length} 个`;
   $("regBody").innerHTML = rs.length ? rs.map(x => {
     const plan = x.plan || {};
+    const lv = x.last_verdict ? ` · 上次 ${x.last_verdict.status}` : "";
     const planText = plan.status === "ready"
-      ? `${plan.items.length} 个稳定 cluster`
+      ? `${plan.items.length} 个稳定 cluster${lv}`
       : (plan.status || "—");
+    const vb = x.runs >= 4
+      ? `<button class="vbtn" data-vid="${esc(x.suite_id)}">验证最后一次</button>` : "";
     return `<tr><td>${esc(x.name || x.suite_id)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(x.suite_id)}</div></td>` +
       `<td class="mono">${esc(x.protocol_fingerprint || "—")}</td>` +
       `<td>${esc(x.runs)} / ${esc(x.min_runs || 3)}</td><td>${esc(x.stable_clusters || 0)}</td>` +
       `<td>${esc(planText)}</td>` +
-      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button></td></tr>`;
+      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button>${vb}</td></tr>`;
   }).join("") : `<tr><td colspan="6" class="empty">还没有回归套件。</td></tr>`;
 }
 
@@ -453,6 +459,14 @@ async function recordRun(sid){
     alert(`已记录第 ${sm.runs} 次；计划：${(sm.plan || {}).status || "—"}`);
     await refresh();
   }catch(e){ alert("记录失败：" + e.message); }
+}
+async function verifyLast(sid){
+  try{
+    const r = await post(`/api/regression/suites/${encodeURIComponent(sid)}/verify`, {});
+    const v = (r.record || {}).verdict || {};
+    alert(`验证：${v.status || "—"}（${v.verification_status || "—"}）\n${v.reason || ""}`);
+    await refresh();
+  }catch(e){ alert("验证失败：" + e.message); }
 }
 async function buildTicket(){
   try{
@@ -652,6 +666,8 @@ document.addEventListener("click", (ev) => {
   if(pb){ probeAction(pb.dataset.pact); return; }
   const rb = ev.target.closest && ev.target.closest(".rbtn");
   if(rb){ recordRun(rb.dataset.rid); return; }
+  const vb = ev.target.closest && ev.target.closest(".vbtn");
+  if(vb){ verifyLast(vb.dataset.vid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
@@ -805,6 +821,18 @@ class _Handler(BaseHTTPRequestHandler):
                 store.save_suite(suite)
                 self._send_json(200, {"ok": True, "suite": suite.model_dump(),
                                       "summary": store.summary(sid)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/verify$",
+                     parsed.path)
+        if m:
+            try:
+                from upi.core.regression import RegressionStore
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                res = store.verify_last(m.group(1))
+                self._send_json(200 if res.get("ok") else 400, res)
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

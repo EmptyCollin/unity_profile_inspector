@@ -125,7 +125,8 @@
   不盲改；巡检只建单，不自动执行。
 - 夹具 CPU 已能生成真实 plan，但目标 scripts=blocked，工单显示 `needs_human`，
   不会因批量批准而降级执行；明细里可对**单条** patch 再批准（人+批语+4 位码）。
-- 回归页只记录当前事件，不启动 replay；真实 replay/verified 账本在 I4b2。
+- 回归页只记录当前事件，不启动 replay；≥4 次记录后可“验证最后一次”，
+  只有 verified 落账；真实 replay/时间对齐在 I4b2b。
 - 未接入：设置/接入、报告；正式表单/执行时间线在 I5。
 - `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b-2c 补。
 - `README`/`使用说明` 仍是旧 TUI 口径，I5 统一重写。
