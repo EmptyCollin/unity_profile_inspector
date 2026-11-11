@@ -730,4 +730,6 @@ trace: run_id
   模板 `permission_tier=blocked` 不被 playbook 映射降级，工单保持 `needs_human`。
 - **I3b-2c2a 完成**：逐项批准闸（人+批语+4 位码）；blocked/semi 只有
   `human_approved` 后才放行，批量批准不替代。
-- **I3b-2c2b~I6**：干净工作区/工程下的真机写闭环、回归、UI 完整化、硬化验收。
+- **I4a 完成**：`regression.py` 域模型（ReplaySuite/3 次基线/复现率/稳定 cluster
+  计划/四条件 verified/持久化）；尚未跑真实 replay。
+- **I4b~I6**：真实 replay 执行、回归 UI/账本、UI 完整化、硬化验收。
