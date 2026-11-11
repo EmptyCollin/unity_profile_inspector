@@ -273,6 +273,68 @@ def main():
                                    {"kind": "review", "rollback": {"ok": True}}]})
     check("已回滚过 ⇒ 出口不重复回滚", "rollback" not in CALLS)
 
+    # ── ⑥'' 审查模型化路由（#37 走 b）：规则优先、模型只收紧、失败降级 ──
+    # 替身 RA.adjudicate（不碰网络、不烧积分）；nodes.review 内是函数级 import，
+    # 补上模块属性即可被本处补丁命中（同 test_factor_judge 的 RESULT_PATH 手法）。
+    from upi.agents import review_adjudicate as RA
+    nodes_llm = N.make_nodes(TMP, live_llm=True,
+                             approval_note="单测批准（替身边界）", knowledge_db=db)
+    adj_calls, adj_ret = [], ("escalate_human", {"adjudication": "model_tightened_or_kept",
+                                                 "reason": "触及渲染", "token_in": 10,
+                                                 "token_out": 3,
+                                                 "isolation": "weak(same-model)"})
+    _orig_adj = RA.adjudicate
+    RA.adjudicate = lambda cfg, *, rule_decision, inputs: (
+        adj_calls.append(rule_decision) or adj_ret)
+    try:
+        # (a) not_significant（未到配额）→ 规则给 continue_with_direction → 模型收紧到 escalate
+        N.verdict_from_bundles = make_verdict_stub("not_significant")
+        va = nodes_llm["verify"](vst)
+        rva = nodes_llm["review"]({**vst, "verdict": va["verdict"], "records": []})
+        check("⑥a 模型收紧生效（continue→escalate）"
+              f" [got={rva['review_decision']} calls={adj_calls}]",
+              rva["review_decision"] == "escalate_human"
+              and adj_calls == ["continue_with_direction"])
+        check("⑥a 结构化 reason 为 JSON 且带 model_reason/isolation"
+              f" [{rva['review_reason'][:60]}]",
+              json.loads(rva["review_reason"]).get("model_reason") == "触及渲染"
+              and "same-model" in json.loads(rva["review_reason"]).get("isolation", ""))
+        check(f"⑥a 模型 token 计入 spent 上报 [{rva.get('tokens_used')}]",
+              rva.get("tokens_used") == 13)
+        # (b) 规则已 escalate → 绝不送模型（不该再收紧，也别白烧）
+        adj_calls.clear()
+        rvb = nodes_llm["review"]({**vst, "verdict": va["verdict"],
+                                   "records": [{"kind": "review"}] * 5})  # round≥budget
+        check(f"⑥b 规则 escalate 时不调模型 [calls={adj_calls}]",
+              adj_calls == [] and rvb["review_decision"] == "escalate_human")
+        check("⑥b rule_or_model=rule_only",
+              json.loads(rvb["review_reason"])["rule_or_model"] == "rule_only")
+        # (c) 模型抛错 → 降级回规则裁定，不炸、不虚报
+        adj_calls.clear()
+        def boom(cfg, *, rule_decision, inputs):
+            raise RA.ReviewAdjudicateError("连通性未过")
+        RA.adjudicate = boom
+        N.verdict_from_bundles = make_verdict_stub("not_significant")
+        vc = nodes_llm["verify"](vst)
+        rvc = nodes_llm["review"]({**vst, "verdict": vc["verdict"], "records": []})
+        check(f"⑥c 模型失败降级回规则值（continue 不被顶替）[{rvc['review_decision']}]",
+              rvc["review_decision"] == "continue_with_direction")
+        check("⑥c 降级如实留痕",
+              json.loads(rvc["review_reason"])["rule_or_model"]
+              == "model_failed_degraded_to_rule")
+        # (d) perception_failed → 无条件回滚 + escalate（G3），且不看配额不送模型
+        adj_calls.clear()
+        RA.adjudicate = _orig_adj
+        N.verdict_from_bundles = make_verdict_stub("perception_failed")
+        CALLS.clear()
+        vd = nodes_llm["verify"](vst)
+        rvf = nodes_llm["review"]({**vst, "verdict": vd["verdict"], "records": []})
+        check(f"⑥d 感知失败无条件回滚+转人工（G3）[rb={'rollback' in CALLS}]",
+              rvf["review_decision"] == "escalate_human" and "rollback" in CALLS
+              and adj_calls == [])
+    finally:
+        RA.adjudicate = _orig_adj
+
     print(f"\n==== 七节点端到端(替身边界): {len(PASS)} 通过, {len(FAIL)} 失败"
           + (f" {FAIL}" if FAIL else ""))
     print("边界声明：本测试验证节点逻辑与时序，不是判定结论——resample/floor/"

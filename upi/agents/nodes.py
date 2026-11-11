@@ -445,26 +445,85 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 "records": st.get("records", []) + [rec], "route": "proceed"}
 
     def review(st: dict) -> dict:
-        # 确定性裁定（§1.6 信息隔离：只吃 Verdict+diff+全量数据，不吃 Fix 自辩）
+        # 规则先行（§4 硬门禁优先于一切 Agent 判断）；模型只在"未定"裁定点
+        # **收紧**（#37 走 b：真接 llm_config 的 review 段，弱隔离——
+        # DESIGN §2.3.5 明标，产物必须如实标注，不能让读者以为模型级隔离）。
         v = st["verdict"]
         status = v["status"] if isinstance(v, dict) else v.status
         n_review = len([r for r in st.get("records", []) if r.get("kind") == "review"]) + 1
         rec = {"kind": "review", "round": n_review, "verdict_status": status}
-        if status == "regressed":
+        budget = st["budget"]["max_review_rounds"]
+        tokens = 0
+        if status == "perception_failed":
+            # G3：感知门禁失败 → 无条件回滚 + 转人工。**不烧配额**（§1.6 配额节），
+            # 所以不看 n_review。当前 verify 恒 pending 产不出此状态（M7 T8 前
+            # 感知门禁缺席是如实声明的），这条分支是给门禁落地预留的活路——
+            # 没有它，T8 上线那天感知失败会被当成普通未解决去烧迭代轮。
+            _p, _s = _ctx(st)
+            rec["rollback"] = snapmod.rollback(_snap_from(st), _p, _s)
+            decision = "escalate_human"
+        elif status == "regressed":
             # 引入新问题 → 撤回重评（回滚交 git，review 不自己改文件）
             _p, _s = _ctx(st)
             rb = snapmod.rollback(_snap_from(st), _p, _s)
             rec["rollback"] = rb
-            decision = "rollback_and_replan" if n_review < st["budget"]["max_review_rounds"] \
-                else "escalate_human"
+            decision = "rollback_and_replan" if n_review < budget else "escalate_human"
         elif status == "not_significant":
-            decision = "continue_with_direction" if n_review < st["budget"]["max_review_rounds"] \
-                else "escalate_human"
+            decision = "continue_with_direction" if n_review < budget else "escalate_human"
         else:
             decision = "escalate_human"
+
+        # ── 模型收紧（只在规则给"继续/重评"这类未定点时介入；escalate 不送模型）──
+        adj_meta: dict = {"adjudication": "rule_only"}
+        if live_llm and decision != "escalate_human":
+            from upi.agents import review_adjudicate as RA
+            _ep = st.get("edit_plan") or {}
+            _hyp = (st.get("hypotheses") or [{}])[0]
+            _vd = v if isinstance(v, dict) else v.model_dump()
+            inputs = RA._whitelist_input(
+                status=status, target=_vd.get("target", {}),
+                guards=[g if isinstance(g, dict) else g.model_dump()
+                        for g in _vd.get("guards", [])],
+                conflicts=[c if isinstance(c, dict) else c.model_dump()
+                           for c in _vd.get("conflicts", [])],
+                perception=_vd.get("perception", {}) if isinstance(
+                    _vd.get("perception"), dict) else
+                    (_vd.get("perception").model_dump()
+                     if _vd.get("perception") else {}),
+                compile_ok=_vd.get("compile_ok", False),
+                realized=_vd.get("realized_over_expected", 0.0),
+                root_cause=str(_hyp.get("root_cause", "")),
+                side_effect=str(_ep.get("side_effect", "unknown")),
+                diff_files=[str(d.get("file", "")) for d in (_ep.get("diffs") or [])])
+            try:
+                decision, adj_meta = RA.adjudicate(
+                    load_config(ROOT / "llm_config.yaml"),
+                    rule_decision=decision, inputs=inputs)
+                adj_meta["adjudication"] = "model_tightened_or_kept"
+                tokens = (adj_meta.get("token_in") or 0) + (adj_meta.get("token_out") or 0)
+            except Exception as e:  # noqa: BLE001 — 裁定失败降级回规则，绝不卡循环
+                adj_meta = {"adjudication": "model_failed_degraded_to_rule",
+                            "error": f"{type(e).__name__}: {str(e)[:160]}"}
+        rec["adjudication"] = adj_meta
+        E.write_json(run_dir / "review_archive.json",
+                     {"round": n_review, "rule_inputs_status": status,
+                      "final_decision": decision, "meta": adj_meta},
+                     what="review_archive", strict=False)
+        # §1.6 输出：结构化 reason 回传 Fix（旧版只有 "verdict=… round=…" 一行文本，
+        # Fix 端只能靠根因名去重）。JSON 字符串承载：模型判据、据以判断的字段、
+        # 弱隔离声明——plan 侧可解析（本批 plan 未消费，字段先立住再有牙齿）。
+        reason = json.dumps(
+            {"verdict": status, "round": n_review,
+             "rule_or_model": adj_meta.get("adjudication"),
+             "model_reason": adj_meta.get("reason", ""),
+             "evidence_fields": adj_meta.get("evidence_fields", []),
+             "isolation": adj_meta.get("isolation",
+                                       "rule-only（未启用模型或未到期）")},
+            ensure_ascii=False)
         return {"review_decision": decision,
-                "review_reason": f"verdict={status} round={n_review}",
-                "records": st.get("records", []) + [rec], "route": "proceed"}
+                "review_reason": reason,
+                "records": st.get("records", []) + [rec], "route": "proceed",
+                "tokens_used": tokens}
 
     def record(st: dict) -> dict:
         # 成功修复才写知识库（症状×根因×动作三重签名）
