@@ -238,6 +238,9 @@ _INDEX_HTML = r"""<!doctype html>
   .tbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .tbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .pbtn:hover{color:var(--text);border-color:var(--cyan)}
   .small{font-size:11px;color:var(--dim)}
   .steps{margin-top:12px}
   .step{display:grid;grid-template-columns:22px 1fr auto;gap:10px;padding:9px 15px;
@@ -278,7 +281,14 @@ _INDEX_HTML = r"""<!doctype html>
       <div class="grid">
         <div class="card"><div class="lab">守护进程</div><div class="val" id="daemonVal">—</div><div class="meta" id="daemonMeta"></div></div>
         <div class="card"><div class="lab">工程</div><div class="val" id="projectVal">—</div><div class="meta" id="projectMeta"></div></div>
-        <div class="card"><div class="lab">探针</div><div class="val" id="probeVal">—</div><div class="meta" id="probeMeta"></div></div>
+        <div class="card"><div class="lab">探针</div><div class="val" id="probeVal">—</div><div class="meta" id="probeMeta"></div>
+          <div style="margin-top:9px" id="probeActions">
+            <button class="pbtn" data-pact="install">安装</button>
+            <button class="pbtn" data-pact="sample-on">采样开</button>
+            <button class="pbtn" data-pact="sample-off">采样关</button>
+            <button class="pbtn" data-pact="unload">卸载</button>
+          </div>
+        </div>
         <div class="card"><div class="lab">待批工单</div><div class="val" id="ticketVal">—</div><div class="meta" id="ticketMeta"></div></div>
       </div>
       <div class="cols">
@@ -393,6 +403,17 @@ function showTicketDetail(t){
         `<td>${i.fingerprint_hit ? "命中" : "未命中"}</td><td class="mono">${esc(i.playbook_id || "—")}</td>` +
         `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td><td class="small">${esc(i.error || "—")}</td></tr>`).join("") +
       `</tbody></table>` : `<div class="empty">无候选。</div>`);
+}
+async function probeAction(act){
+  try{
+    let path = "/api/probe/" + (act.startsWith("sample") ? "sample" : act);
+    let body = act === "sample-on" ? {on:true, window:300}
+             : act === "sample-off" ? {on:false}
+             : {};
+    const r = await post(path, body);
+    alert((r.detail || r.error || "完成"));
+    await refresh();
+  }catch(e){ alert("探针操作失败：" + e.message); }
 }
 async function ticketAction(tid, act){
   const t = batchCache[tid] || {};
@@ -520,6 +541,8 @@ document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev 
 const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
 document.addEventListener("click", (ev) => {
+  const pb = ev.target.closest && ev.target.closest(".pbtn");
+  if(pb){ probeAction(pb.dataset.pact); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
   if(!b) return;
   const tid = b.dataset.tid, act = b.dataset.act;
@@ -648,6 +671,22 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 t = eng.build_ticket(plan_provider=None, limit=8)
                 self._send_json(200, {"ok": True, "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        if parsed.path in ("/api/probe/install", "/api/probe/unload",
+                           "/api/probe/sample"):
+            try:
+                from upi.tooling import probe_control as PC
+                if parsed.path.endswith("/install"):
+                    res = PC.install()
+                elif parsed.path.endswith("/unload"):
+                    res = PC.unload()
+                else:
+                    res = PC.sample(bool(body.get("on", True)),
+                                    int(body.get("window", 300) or 300))
+                self._send_json(200 if res.get("ok") else 400, res)
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

@@ -103,19 +103,23 @@
 | `GET /api/status` | 已接入 | 守护/工程/探针/工单/事件摘要 |
 | `GET /api/events` | 已接入 | SSE 状态流 |
 | `GET /api/probe/events` | I1b | 探针事件列表（当前状态里带 `probe_events`） |
-| `POST /api/tickets` | I3 | 创建批量工单 |
-| `POST /api/tickets/{id}/approve` | I3 | 批准 |
-| `POST /api/tickets/{id}/execute` | I3 | 串行执行/停止 |
+| `POST /api/tickets` | I3a | 创建批量工单（实际路径 `/api/tickets/build`） |
+| `POST /api/tickets/{id}/approve` | I3a | 批准（批准人/批语/4 位校验码） |
+| `POST /api/tickets/{id}/execute` | I3b-2 | 串行执行/停止（当前 501） |
+| `POST /api/probe/install` | I3b-1 | 安装统一探针（先卸旧探针） |
+| `POST /api/probe/sample` | I3b-1 | `{on,window}` 采样开关 |
+| `POST /api/probe/unload` | I3b-1 | 卸载探针 |
 | `POST /api/regression/run` | I4 | 跑基线/回归 |
 | `GET /api/reports` | I5 | verified/unverified 两本账 |
 
 ## 7. 当前 I0/I1a/I2/I3a 边界
 
 - 已接入：首页、状态 API、SSE、探针事件摘要、token/cookie、CP936 不崩；
-  **问题页（cluster 表）**、**指纹库页**、**工单页（建单/明细/批准/驳回）**。
-- 工单页的“执行”在 I3b 前返回 501：不假装已接 Unity。
+  **问题页（cluster 表）**、**指纹库页**、**工单页（建单/明细/批准/驳回）**、
+  **首页探针按钮（安装/采样开/采样关/卸载）**。
+- 工单页的“执行”在 I3b-2 前返回 501：不假装已接 Unity。
 - 未接入：回归、设置/接入；执行时间线/回归矩阵/正式审批表单在 I4/I5。
-- `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b 补。
+- `GET /api/probe/events`、`/api/clusters` 仍是状态内嵌；独立端点随 I3b-2 补。
 - `README`/`使用说明` 仍是旧 TUI 口径，I5 统一重写。
 
 ## 8. 验收

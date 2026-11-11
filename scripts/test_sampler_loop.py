@@ -99,7 +99,16 @@ def main() -> int:
         print("[3] 清理探针目录（含心跳，强制全新安装）")
         for f in PROBE.iterdir():
             if f.is_file():
-                f.unlink(missing_ok=True)
+                try:
+                    f.unlink(missing_ok=True)
+                except PermissionError:
+                    # 旧 sampler 可能正在读 cmd.txt；重试一次，仍锁定则跳过，
+                    # 不因一个残留命令文件把整轮采样测试判死。
+                    time.sleep(0.2)
+                    try:
+                        f.unlink(missing_ok=True)
+                    except PermissionError:
+                        print("   ! 跳过锁定文件:", f.name)
 
         print("[4] 安装采样器")
         r = cmd("script eval_file", "--file", SAMPLER)

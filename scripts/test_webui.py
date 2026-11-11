@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from upi.agents.webui import WebUI                     # noqa: E402
 from upi.core import events as E                       # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
+from upi.tooling import probe_control as PC           # noqa: E402
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
@@ -142,6 +143,19 @@ try:
     data2 = json.loads(body.decode("utf-8"))
     ok("状态含批量工单", any(x.get("ticket_id") == tid
                              for x in (data2.get("batch_tickets") or [])))
+
+    # 探针控制：用假实现，不碰真 Unity
+    PC.install = lambda project=None, timeout_s=180: {"ok": True, "detail": "fake install"}
+    PC.unload = lambda: {"ok": True, "detail": "fake unload"}
+    PC.sample = lambda on=True, window=300: {"ok": True,
+                                             "detail": f"sample={'on' if on else 'off'}"}
+    code, r = post_json(base + "/api/probe/install?token=test-token", {})
+    ok("POST 探针安装", code == 200 and r.get("ok") is True)
+    code, r = post_json(base + "/api/probe/sample?token=test-token",
+                        {"on": True, "window": 60})
+    ok("POST 采样开", code == 200 and "sample=on" in r.get("detail", ""))
+    code, r = post_json(base + "/api/probe/unload?token=test-token", {})
+    ok("POST 探针卸载", code == 200 and r.get("ok") is True)
 finally:
     ui.stop()
     th.join(timeout=2)

@@ -720,4 +720,6 @@ trace: run_id
 - **I3a 完成**：批量工单模型/存储、4 位校验码审批、串行执行器（注入式）、
   `unverified` 账本、Web 建单/批准/明细页；Unity apply/compile/observe 接线、
   统一探针安装/调度待 I3b。
-- **I3b~I6**：常驻执行/调度、回归、UI 完整化、硬化验收。
+- **I3b-1 完成**：`probe_control.py` + Web 探针按钮；install/status/sample/unload
+  真机通过；卸载后心跳停止。
+- **I3b-2~I6**：常驻执行/调度、回归、UI 完整化、硬化验收。

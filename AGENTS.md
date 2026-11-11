@@ -341,4 +341,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I1b 探针件完成、真机冒烟通过：`probe/upi_probe_v4.cs` 一个回调/一个心跳，同时产 breach/sample；生产安装/卸载与旧探针退役待 I3。
 - I2 完成：`cluster.py`（run 内/跨 run、复现率、波形）+ `fingerprint.py`（SQLite 指纹库、6 条内置、命中/未命中/歧义路由）；Web“问题/指纹库”页已接；修复执行器仍未消费指纹（I3）。
 - I3a 完成：批量工单模型/存储、4 位校验码审批、串行执行器（注入式）、`unverified` 账本、Web 建单/批准/明细页；Unity apply/compile/observe 接线、统一探针安装/调度待 I3b。
-- I3b~I6：常驻执行/调度、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
+- I3b-1 完成：`probe_control.py` + Web 探针按钮；install/status/sample/unload 真机通过；卸载后心跳停止。
+- I3b-2~I6：常驻执行/调度、回归、UI 完整化、硬化验收（`docs/迭代计划.md`）。
