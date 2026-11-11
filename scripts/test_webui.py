@@ -134,6 +134,10 @@ try:
     ok("SSE 首帧是 data: JSON", first.startswith("data: ") and
        isinstance(json.loads(first[6:]), dict))
 
+    code, hdr, _body = get(base + "/?token=test-token")
+    ok("安全响应头", hdr.get("X-Content-Type-Options") == "nosniff"
+       and hdr.get("X-Frame-Options") == "DENY"
+       and hdr.get("Referrer-Policy") == "no-referrer")
     code, _hdr, _body = get(base + "/nope?token=test-token")
     ok("未知路径 404", code == 404, f"code={code}")
 

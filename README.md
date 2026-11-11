@@ -90,5 +90,6 @@ DESIGN.md     详细设计（§14 为两形态权威）
 ```powershell
 python scripts/run_tests.py             # 31 套离线测试（自动 UTF-8）
 python scripts/check_fixture_split.py   # 夹具隔离闸
+python scripts/acceptance.py            # 6 项验收，落 runs/acceptance_*.json
 python -m upi ui --check                # Web 状态自检（ASCII JSON）
 ```

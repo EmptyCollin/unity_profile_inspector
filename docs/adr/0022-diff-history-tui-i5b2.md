@@ -18,7 +18,7 @@
 
 - `test_ticket.py`：28 项（审批历史、明细 diff）。
 - `test_webui.py`：48 项。
-- `test_ui_actions.py`：142 项仍通过（直接 import 模块，不走 CLI）。
+- `test_ui_actions.py`：141 项仍通过（TUI 模块测试保留，入口移除）。
 - `python -m upi dev` 列表已无 tui。
 - 全量离线：31 套。
 

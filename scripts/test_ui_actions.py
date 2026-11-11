@@ -741,35 +741,19 @@ try:
 finally:
     PP.reset_profile()
 
-# ───────── ⑩ 键位文档与动作表差集核对 ─────────
-# 阶段 6 立的判据形态：文档命令表与代码清单的差集必须为空，靠人记会漏。
-# 接线状态会变（阶段 8 把 n/f/l 陆续接上了），文档不同步就是"说明书里
-# 找不到那个键"或"说它没接其实能点"——后者更坏：用户以为功能缺失，绕去
-# 命令行，而界面本该支持。所以双向核对，不是单向。
-print("== ⑩ 使用说明键位表与动作表对齐 ==")
-import re as _re  # noqa: E402
+# ───────── ⑩ TUI 入口移除核对（v2 Web 单通道） ─────────
+# I5b2 已移除 `upi dev tui`；旧“键位表 ↔ 动作表”双向核对不再适用。
+print("== ⑩ TUI 入口已移除 ==")
 _doc = (ROOT / "docs" / "使用说明.md").read_text(encoding="utf-8")
-# 逐行取 (键 → 该行说明文字)：只按全文子串判断会恒真——"尚未接线"四个字
-# 出现在任意一行，所有键都算"标注了"（我上一版就是这么错的）。
-_doc_rows = {m.group(1): m.group(2)
-             for m in _re.finditer(r"^\| `(.)` \|(.*)$", _doc, _re.M)}
-_doc_keys = set(_doc_rows)
-_code_keys = {a["key"] for a in UA._ALL_ACTIONS}
-ok("代码有而文档无的键 ⇒ 补文档", not (_code_keys - _doc_keys),
-   sorted(_code_keys - _doc_keys))
-ok("文档有而代码无的键 ⇒ 文档写了不存在的键", not (_doc_keys - _code_keys),
-   sorted(_doc_keys - _code_keys))
-# 双向接线核对：未接线的键必须在文档里标出来；**已接线的键不得被标成未接线**
-# （后者是本批真实撞到的：l 接好了、文档两处仍写"尚未接线"，正向断言放行）。
-_wired_map = {a["key"]: bool(a.get("wired", True)) for a in UA._ALL_ACTIONS}
-_stale_unwired = sorted(k for k, wired in _wired_map.items()
-                        if wired and "尚未接线" in _doc_rows.get(k, ""))
-_missing_mark = sorted(k for k, wired in _wired_map.items()
-                       if not wired and "尚未接线" not in _doc_rows.get(k, ""))
-ok("已接线的键不许在文档里仍标\"尚未接线\"（接线后文档必须同步）",
-   not _stale_unwired, _stale_unwired)
-ok("未接线的键必须在文档里标出（不许默默列成可用）",
-   not _missing_mark, _missing_mark)
+ok("使用说明声明 TUI 入口已移除",
+   "旧 ANSI TUI 入口已移除" in _doc or "旧 ANSI TUI 入口已移除" in _doc)
+ok("使用说明不再列 TUI 键位表",
+   not any(f"| `{k}` |" in _doc for k in ("d", "n", "f", "l", "q")))
+try:
+    from upi.__main__ import _DEV_CMDS
+    ok("dev 命令表无 tui", "tui" not in _DEV_CMDS, str(sorted(_DEV_CMDS)))
+except Exception as e:  # noqa: BLE001
+    ok("dev 命令表无 tui", False, f"{type(e).__name__}: {e}")
 
 print(f"\nUI 动作层测试：{len(PASS)} 通过 / {len(FAIL)} 失败")
 for f in FAIL:
