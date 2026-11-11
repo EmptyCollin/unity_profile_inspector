@@ -363,5 +363,6 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I6b2b2b 完成：缺陷态夹具产品 plan E2E（PB-FULL-REUSE）17/17；applied/compile/rollback/字节恢复。
 - I4b2b2b2a 完成：夹具 Unity 自动 replay（scene/Play/探针/Stop/新增事件）；3 次真实基线通过。
 - I4b2b2b2b1 完成：完整回归报告（形态/验证等级/全量守护/G20/HTML+JSON）。
+- I4b2b2b2a2 完成：回归计划只收 breach；sample 只做守护，无 breach 时 `no_stable_cluster`。
 - I6c 完成：删除 TUI 模块/动作层/测试；30 套离线测试通过。
 - I4b2b2b2b2 / I6b2b2c：verified 闭环；真实用户工程（`docs/迭代计划.md`）。

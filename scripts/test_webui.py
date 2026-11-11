@@ -35,7 +35,8 @@ os.environ["UPI_REGRESSION_DIR"] = str(TMP / "regression")
     "sampling_mode": "steady", "updated_at": "2026-11-11T22:00:00",
 }), encoding="utf-8")
 EventLog().append(ProbeEvent(
-    kind="sample", metric="Render/DrawCalls", series=[47, 47, 47],
+    kind="breach", metric="Render/DrawCalls", value=47.0, threshold=30.0,
+    ring_before=[30.0] * 5, ring_after=[47.0] * 5,
     frame_idx=100, rel_frame=100, data_tier="A2",
 ))
 
@@ -94,9 +95,10 @@ try:
     ok("守护状态读到隔离 status", data.get("daemon", {}).get("sampling") == "steady")
     ok("状态含统一探针事件", data.get("probe", {}).get("events_total") == 1
        and len(data.get("probe_events") or []) == 1)
-    ok("事件载荷裁剪（不把整段 series 发前端）",
+    ok("事件载荷裁剪（不把整段 series/ring 发前端）",
        "series" not in (data.get("probe_events") or [{}])[0]
-       and (data["probe_events"][0].get("series_n") == 3))
+       and "ring_after" not in (data.get("probe_events") or [{}])[0]
+       and int((data.get("probe_events") or [{}])[0].get("ring_n") or 0) == 10)
     ok("状态含 cluster 摘要", data.get("cluster_total") == 1
        and len(data.get("clusters") or []) == 1)
     ok("cluster 摘要含机制级字段",

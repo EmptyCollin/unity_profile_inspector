@@ -61,8 +61,9 @@ def post(url: str, body: dict):
 
 def main() -> int:
     EventLog().append(ProbeEvent(
-        kind="sample", metric="drawCalls", rel_frame=10,
-        series=[47.0] * 20, data_tier="A2"))
+        kind="breach", metric="drawCalls", value=47.0, threshold=30.0,
+        ring_before=[30.0] * 5, ring_after=[47.0] * 5,
+        rel_frame=10, data_tier="A2"))
 
     ui = WebUI(host="127.0.0.1", port=0, token="e2e-token").start()
     th = threading.Thread(target=ui.serve_forever, daemon=True)

@@ -172,7 +172,7 @@ class RegressionPlan(BaseModel):
             shape=x.cluster.shape, kind=x.cluster.kind,
             data_tier=x.cluster.data_tier, first_rel=x.cluster.first_rel,
             reproduction_rate=x.reproduction_rate,
-        ) for x in m.stable_matches()]
+        ) for x in m.stable_matches() if x.cluster.kind == "breach"]
         pid = "rp-" + hashlib.sha256(
             f"{m.suite_id}|{m.protocol()}|{len(items)}".encode()).hexdigest()[:10]
         return cls(plan_id=pid, suite_id=m.suite_id,

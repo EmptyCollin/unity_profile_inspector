@@ -27,9 +27,9 @@ Play/Replay/退出；回归页要求人手填命令。I4b2b2b2 需要夹具自�
 
 - `test_regression.py`：**36 项通过**（含 Unity driver 伪注入）。
 - `scripts/e2e_replay.py`：**5/5 通过**，真实 3 次 replay；
-  证据 `runs/e2e_replay_20261111_234629.json`。
-- 每次 run 事件数 96/84/96，各 12 个 sample cluster；协议一致；
-  计划 ready，12 个 sample 候选。
+  证据 `runs/e2e_replay_20261111_235217.json`。
+- 每次 run 事件数 36/48/48，各 12 个 sample cluster；协议一致；
+  计划 `no_stable_cluster`、0 items（sample 不进计划，见 ADR-0032）。
 - 全量离线：**30 套通过 / 0 失败**。
 
 ## 证明了什么 / 没证明什么

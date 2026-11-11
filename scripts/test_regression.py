@@ -32,8 +32,10 @@ def ok(name: str, cond: bool, detail: str = ""):
 
 
 def cluster(metric="gc_alloc_per_frame", rel=10):
-    e = ProbeEvent(kind="sample", metric=metric, rel_frame=rel,
-                   series=[1000.0] * 20, data_tier="A2")
+    e = ProbeEvent(kind="breach", metric=metric, rel_frame=rel,
+                   value=2000.0, threshold=1500.0,
+                   ring_before=[1000.0] * 5, ring_after=[2000.0] * 5,
+                   data_tier="A2")
     return cluster_events([e])[0]
 
 
@@ -100,8 +102,10 @@ st2 = RegressionStore(TMP / "reg2")
 suite2 = ReplaySuite(suite_id="s2", name="live", protocol_fingerprint="fp-live")
 st2.save_suite(suite2)
 log = EventLog(TMP / "ev.jsonl")
-log.append(ProbeEvent(kind="sample", metric="gc_alloc_per_frame", rel_frame=10,
-                      series=[1000.0] * 20, data_tier="A2"))
+log.append(ProbeEvent(kind="breach", metric="gc_alloc_per_frame", rel_frame=10,
+                      value=2000.0, threshold=1500.0,
+                      ring_before=[1000.0] * 5, ring_after=[2000.0] * 5,
+                      data_tier="A2"))
 for _ in range(3):
     st2.record_run("s2", log)
 sm = st2.summary("s2")
@@ -114,12 +118,14 @@ ok("套件列表", any(x.suite_id == "s2" for x in st2.list_suites()))
 st5 = RegressionStore(TMP / "reg5")
 suite5 = ReplaySuite(suite_id="s5", protocol_fingerprint="fp-run")
 def run_once(_suite):
-    return "fp-run", [ProbeEvent(kind="sample", metric="gc_alloc_per_frame",
-                                 rel_frame=10, series=[1000.0] * 20, data_tier="A2")]
+    return "fp-run", [ProbeEvent(kind="breach", metric="gc_alloc_per_frame",
+                                 rel_frame=10, value=2000.0, threshold=1500.0,
+                                 ring_before=[1000.0] * 5,
+                                 ring_after=[2000.0] * 5, data_tier="A2")]
 runner = RegressionRunner(suite5, st5, run_once)
 m5 = runner.collect_baseline(3)
 ok("runner 采 3 次", len(m5.runs) == 3)
-ok("runner 采守护", m5.runs[0].guards.get("gc_alloc_per_frame") == 1000.0)
+ok("runner 采守护", m5.runs[0].guards.get("gc_alloc_per_frame") == 2000.0)
 ok("runner 计划 ready", RegressionPlan.from_matrix(m5).status == "ready")
 
 # 第 4 次（修复后）→ verified 账本
