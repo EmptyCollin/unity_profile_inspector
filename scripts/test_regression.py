@@ -80,6 +80,15 @@ v4 = verify_after(m, A, [B], after_protocol="fp-1",
 ok("守护劣化→guard_regressed", v4.status == "guard_regressed"
    and "drawCalls" in v4.guard_regressions)
 
+# 记忆体窗口值不能判劣化；无 fresh GC 时只能标未评估
+v4m = verify_after(m, A, [B], after_protocol="fp-1",
+                   guards_before={"Memory/TotalUsedBytes": 100.0},
+                   guards_after={"Memory/TotalUsedBytes": 120.0})
+ok("记忆体窗口→unassessed 不判劣化",
+   v4m.status == "verified"
+   and "Memory/TotalUsedBytes" in v4m.unassessed_guards
+   and not v4m.guard_regressions)
+
 # 协议不一致 → failed
 v5 = verify_after(m, A, [B], after_protocol="fp-2")
 ok("协议不一致→failed", v5.status == "protocol_mismatch"

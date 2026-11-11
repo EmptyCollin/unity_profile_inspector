@@ -192,6 +192,7 @@ class RegressionVerdict(BaseModel):
     target_present: bool = False
     new_clusters: list[str] = Field(default_factory=list)
     guard_regressions: list[str] = Field(default_factory=list)
+    unassessed_guards: list[str] = Field(default_factory=list)
     reason: str = ""
 
 
@@ -231,9 +232,19 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
     new = [c.cluster_id for c in after_clusters
            if not any(_match(c, b, rel_tol) for b in baseline)]
     regs: list[str] = []
+    unassessed: list[str] = []
+    # G20/AGENTS §1.5：记忆体窗口值不是净占用，不能用 1% 容差判劣化。
+    # 没有 fresh GC（post_gc）时只能标“未评估盲区”，不能冒充清白或劣化。
+    window_memory = {
+        "Memory/TotalUsedBytes", "Memory/MonoUsedBytes",
+        "Memory/TotalReservedBytes", "Memory/TotalAllocatedBytes",
+    }
     if guards_before and guards_after:
         for k, before in guards_before.items():
             if k not in guards_after:
+                continue
+            if k in window_memory:
+                unassessed.append(k)
                 continue
             after = guards_after[k]
             try:
@@ -252,21 +263,25 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
                                  target_cluster_id=target.cluster_id,
                                  target_present=True,
                                  new_clusters=new, guard_regressions=regs,
+                                 unassessed_guards=unassessed,
                                  reason="target cluster still present")
     if new:
         return RegressionVerdict(status="new_cluster",
                                  verification_status="unverified",
                                  target_cluster_id=target.cluster_id,
                                  new_clusters=new, guard_regressions=regs,
+                                 unassessed_guards=unassessed,
                                  reason="new cluster(s) appeared")
     if regs:
         return RegressionVerdict(status="guard_regressed",
                                  verification_status="unverified",
                                  target_cluster_id=target.cluster_id,
                                  guard_regressions=regs,
+                                 unassessed_guards=unassessed,
                                  reason="guard metric regressed")
     return RegressionVerdict(status="verified", verification_status="verified",
                              target_cluster_id=target.cluster_id,
+                             unassessed_guards=unassessed,
                              reason="target gone, no new cluster, guards ok, protocol same")
 
 
