@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core import events as E                       # noqa: E402
 from upi.core.cluster import cluster_events            # noqa: E402
-from upi.core.probe_events import ProbeEvent           # noqa: E402
+from upi.core.probe_events import EventLog, ProbeEvent   # noqa: E402
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
                                  RegressionRun, RegressionStore,
                                  ReplaySuite, verify_after)
@@ -88,6 +88,22 @@ st.save_suite(suite)
 st.save_matrix(m)
 ok("套件持久化", st.load_suite("s1").protocol_fingerprint == "fp-1")
 ok("矩阵持久化", st.load_matrix("s1").runs[0].run_id == "r0")
+
+# 从当前事件记录 3 次基线 → 出计划
+st2 = RegressionStore(TMP / "reg2")
+suite2 = ReplaySuite(suite_id="s2", name="live", protocol_fingerprint="fp-live")
+st2.save_suite(suite2)
+log = EventLog(TMP / "ev.jsonl")
+log.append(ProbeEvent(kind="sample", metric="gc_alloc_per_frame", rel_frame=10,
+                      series=[1000.0] * 20, data_tier="A2"))
+for _ in range(3):
+    st2.record_run("s2", log)
+sm = st2.summary("s2")
+ok("3 次记录进矩阵", sm["runs"] == 3 and sm["protocol_fingerprint"] == "fp-live")
+ok("3 次后计划 ready", sm["plan"]["status"] == "ready"
+   and len(sm["plan"]["items"]) == 1)
+ok("套件列表", any(x.suite_id == "s2" for x in st2.list_suites()))
+
 
 print()
 if FAIL:

@@ -27,6 +27,7 @@ TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
 E.isolate(TMP / "runs")
 os.environ["UPI_FINGERPRINT_DB"] = str(TMP / "fingerprints.db")
 os.environ["UPI_TICKET_DIR"] = str(TMP / "tickets")
+os.environ["UPI_REGRESSION_DIR"] = str(TMP / "regression")
 (E.RUNS / "_probe").mkdir(parents=True, exist_ok=True)
 (E.RUNS / "_probe" / "pb_hb.txt").write_text("1", encoding="utf-8")
 (E.RUNS / "daemon_status.json").write_text(json.dumps({
@@ -73,7 +74,7 @@ try:
     code, hdr, body = get(base + "/?token=test-token")
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
-    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I3b 执行" in html)
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I4b 回归" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
@@ -160,6 +161,19 @@ try:
 
     code, r = post_json(base + "/api/resident/tick?token=test-token", {})
     ok("POST 巡检一轮", code == 200 and r.get("scheduler", {}).get("tick_count", 0) >= 1)
+
+    code, r = post_json(base + "/api/regression/suites?token=test-token",
+                        {"name": "ui-reg", "protocol_fingerprint": "fp-ui"})
+    sid = (r.get("summary") or {}).get("suite_id") or (r.get("suite") or {}).get("suite_id")
+    ok("POST 新建回归套件", code == 200 and sid)
+    for _ in range(3):
+        code, r = post_json(base + f"/api/regression/suites/{sid}/record?token=test-token", {})
+    ok("POST 记录 3 次基线", code == 200 and r.get("summary", {}).get("runs") == 3)
+    ok("3 次后计划 ready", r.get("summary", {}).get("plan", {}).get("status") == "ready")
+    code, _hdr, body = get(base + "/api/status?token=test-token")
+    data3 = json.loads(body.decode("utf-8"))
+    ok("状态含回归套件", any(x.get("suite_id") == sid
+                             for x in (data3.get("regression_suites") or [])))
 finally:
     ui.stop()
     th.join(timeout=2)

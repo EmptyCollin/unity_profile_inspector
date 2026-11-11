@@ -347,4 +347,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I3b-2c1 完成：`plan_provider.py` 对夹具 CPU 产出真实 EditPlan；模板 `permission_tier=blocked` 不被 playbook 映射降级，工单保持 `needs_human`。
 - I3b-2c2a 完成：逐项批准闸（人+批语+4 位码）；blocked/semi 只有 `human_approved` 后才放行，批量批准不替代。
 - I4a 完成：`regression.py` 域模型（ReplaySuite/3 次基线/复现率/稳定 cluster 计划/四条件 verified/持久化）；尚未跑真实 replay。
-- I4b~I6：真实 replay 执行、回归 UI/账本、UI 完整化、硬化验收（`docs/迭代计划.md`）。
+- I4b1 完成：回归页可新建套件、记录 3 次基线、出计划；不启动 replay，只消费当前探针事件。
+- I4b2~I6：真实 replay 执行、修后验证、verified 账本/报告、UI 完整化、硬化验收（`docs/迭代计划.md`）。

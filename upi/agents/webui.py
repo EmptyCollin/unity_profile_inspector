@@ -145,11 +145,15 @@ def build_status() -> dict:
     from upi.core.ticket import TicketStore
     tstore = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
     batch_tickets = [t.summary() for t in tstore.list(10)]
+    from upi.core.regression import RegressionStore
+    rstore = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+    regression_suites = [rstore.summary(s.suite_id)
+                         for s in rstore.list_suites()[:10]]
     from upi.core.scheduler import get_scheduler
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I3b-2b", "single_channel": True},
+        "ui": {"shell": "I4b", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
@@ -160,6 +164,7 @@ def build_status() -> dict:
         "fingerprints": fp_stats,
         "fingerprint_records": fp_records,
         "batch_tickets": batch_tickets,
+        "regression_suites": regression_suites,
         "resident_scheduler": get_scheduler().status(),
         "tickets": _open_tickets(),
         "events": _recent_events(),
@@ -240,6 +245,9 @@ _INDEX_HTML = r"""<!doctype html>
   .tbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .tbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .rbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .rbtn:hover{color:var(--text);border-color:var(--cyan)}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -259,7 +267,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I3b 执行</span>
+  <span class="tag">I4b 回归</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -316,7 +324,7 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
         <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
         <div class="step"><span class="s">05</span><span>常驻：工单/审批/执行/巡检已接；真实 plan 在 I3b-2c</span><span class="pill ok">I3b</span></div>
-        <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
+        <div class="step"><span class="s">06</span><span>回归：套件/3 次基线/计划已接；真实 replay 执行待 I4b2</span><span class="pill ok">I4b</span></div>
         <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
       <div class="foot"><span>本地 127.0.0.1</span><span>所有状态来自 runs/ 与守护进程</span><span>UI 不可用时用 break-glass 停止/回滚</span></div>
@@ -360,6 +368,19 @@ _INDEX_HTML = r"""<!doctype html>
         <div id="batchDetail"><div class="empty">点“明细”查看候选。</div></div>
       </div>
     </section>
+    <section id="page-regression" style="display:none">
+      <h1>回归验证</h1>
+      <p class="sub">同一 replay/协议跑 3 次基线，只收稳定 cluster；修后同 replay 再验。只有这里能记 <b>verified</b>。</p>
+      <div style="margin:10px 0 14px"><button id="createSuiteBtn" style="background:#14314a;color:#dbe7f3;border:1px solid #2a4a63;border-radius:8px;padding:9px 14px;cursor:pointer">新建回归套件</button>
+        <span style="color:var(--dim);font-size:12px;margin-left:10px">建好后每跑完一次 replay，点“记录本次基线”；满 3 次自动出计划。</span></div>
+      <div class="panel">
+        <h2>套件 <span id="regMeta">—</span></h2>
+        <table>
+          <thead><tr><th>套件</th><th>协议</th><th>基线次数</th><th>稳定 cluster</th><th>计划</th><th>操作</th></tr></thead>
+          <tbody id="regBody"><tr><td colspan="6" class="empty">还没有回归套件。</td></tr></tbody>
+        </table>
+      </div>
+    </section>
     <section id="page-other" style="display:none">
       <div class="placeholder"><b id="otherTitle">此页待接入</b><span id="otherHint">该页面在后续迭代交付；I0 只保证壳与状态通道。</span></div>
     </section>
@@ -397,6 +418,41 @@ function renderTickets(s){
       : "") + `</td></tr>`
   ).join("") : `<tr><td colspan="6" class="empty">还没有批量工单。</td></tr>`;
   ts.forEach(t => { batchCache[t.ticket_id] = t; });
+}
+
+function renderRegression(s){
+  const rs = s.regression_suites || [];
+  $("regMeta").textContent = `${rs.length} 个`;
+  $("regBody").innerHTML = rs.length ? rs.map(x => {
+    const plan = x.plan || {};
+    const planText = plan.status === "ready"
+      ? `${plan.items.length} 个稳定 cluster`
+      : (plan.status || "—");
+    return `<tr><td>${esc(x.name || x.suite_id)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(x.suite_id)}</div></td>` +
+      `<td class="mono">${esc(x.protocol_fingerprint || "—")}</td>` +
+      `<td>${esc(x.runs)} / ${esc(x.min_runs || 3)}</td><td>${esc(x.stable_clusters || 0)}</td>` +
+      `<td>${esc(planText)}</td>` +
+      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button></td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">还没有回归套件。</td></tr>`;
+}
+
+async function createSuite(){
+  const name = prompt("回归套件名（例如 F-CPU-01 回放）:");
+  if(!name) return;
+  const protocol = prompt("协议指纹（同 replay/画质/档位；留空=manual）:", "manual");
+  try{
+    const r = await post("/api/regression/suites", {name, protocol_fingerprint: protocol || "manual"});
+    alert("已创建 " + (r.summary ? r.summary.suite_id : "套件"));
+    await refresh();
+  }catch(e){ alert("创建失败：" + e.message); }
+}
+async function recordRun(sid){
+  try{
+    const r = await post(`/api/regression/suites/${encodeURIComponent(sid)}/record`, {});
+    const sm = r.summary || {};
+    alert(`已记录第 ${sm.runs} 次；计划：${(sm.plan || {}).status || "—"}`);
+    await refresh();
+  }catch(e){ alert("记录失败：" + e.message); }
 }
 async function buildTicket(){
   try{
@@ -557,6 +613,7 @@ function render(s){
   ).join("") : `<tr><td colspan="7" class="empty">指纹库为空。</td></tr>`;
 
   renderTickets(s);
+  renderRegression(s);
 }
 
 async function refresh(){
@@ -572,17 +629,15 @@ async function refresh(){
 function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
   const home = $("page-home"), issues = $("page-issues"), library = $("page-library"),
-        tickets = $("page-tickets"), other = $("page-other");
-  const pages = {home, issues, library, tickets};
+        tickets = $("page-tickets"), regression = $("page-regression"), other = $("page-other");
+  const pages = {home, issues, library, tickets, regression};
   Object.values(pages).forEach(p => { if(p) p.style.display = "none"; });
   if(other) other.style.display = "none";
   if(pages[page]){ pages[page].style.display = ""; return; }
   if(other) other.style.display = "";
-  const titles = {regression:"回归", reports:"报告", settings:"设置 / 接入"};
+  const titles = {reports:"报告", settings:"设置 / 接入"};
   $("otherTitle").textContent = titles[page] || "此页待接入";
-  $("otherHint").textContent = page === "regression"
-    ? "I4 接入：replay 套件、3 次基线矩阵、复现率、replay 验证。"
-    : "I4~I5 逐项接入；I3b 已交付批量工单/探针控制/执行接线。";
+  $("otherHint").textContent = "I5 逐项接入；I4b 已交付回归基线记录/计划。";
 }
 
 document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev => {
@@ -590,9 +645,13 @@ document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev 
 }));
 const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
+const createSuiteBtn = $("createSuiteBtn");
+if(createSuiteBtn) createSuiteBtn.addEventListener("click", createSuite);
 document.addEventListener("click", (ev) => {
   const pb = ev.target.closest && ev.target.closest(".pbtn");
   if(pb){ probeAction(pb.dataset.pact); return; }
+  const rb = ev.target.closest && ev.target.closest(".rbtn");
+  if(rb){ recordRun(rb.dataset.rid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
@@ -723,6 +782,47 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 t = eng.build_ticket(plan_provider=None, limit=8)
                 self._send_json(200, {"ok": True, "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        if parsed.path == "/api/regression/suites":
+            try:
+                from upi.core.regression import RegressionStore, ReplaySuite
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                sid = str(body.get("suite_id") or ("rs-" + secrets.token_hex(3)))
+                if store.load_suite(sid):
+                    self._send_json(409, {"ok": False, "error": "suite already exists"})
+                    return
+                suite = ReplaySuite(
+                    suite_id=sid, name=str(body.get("name") or sid),
+                    project=str(body.get("project") or ""),
+                    scene=str(body.get("scene") or ""),
+                    replay_script=str(body.get("replay_script") or ""),
+                    quality_tier=str(body.get("quality_tier") or ""),
+                    protocol_fingerprint=str(body.get("protocol_fingerprint") or "manual"),
+                    created_at=E.now())
+                store.save_suite(suite)
+                self._send_json(200, {"ok": True, "suite": suite.model_dump(),
+                                      "summary": store.summary(sid)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/record$",
+                     parsed.path)
+        if m:
+            try:
+                from upi.core.probe_events import EventLog
+                from upi.core.regression import RegressionStore
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                r = store.record_run(m.group(1), EventLog(),
+                                     protocol=body.get("protocol_fingerprint"))
+                if r is None:
+                    self._send_json(404, {"ok": False, "error": "suite not found"})
+                    return
+                self._send_json(200, {"ok": True, "run": r.model_dump(),
+                                      "summary": store.summary(m.group(1))})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Literal, Optional
@@ -17,7 +18,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from upi.core import events as E
-from upi.core.cluster import ClusterMatch, IssueCluster, match_across_runs
+from upi.core.cluster import ClusterMatch, IssueCluster, cluster_events, match_across_runs
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = ROOT / "runs" / "_regression"
@@ -205,7 +206,8 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
 
 class RegressionStore:
     def __init__(self, root: Optional[Path | str] = None):
-        self.root = Path(root) if root else DEFAULT_DIR
+        self.root = Path(root) if root else Path(
+            os.environ.get("UPI_REGRESSION_DIR") or DEFAULT_DIR)
         self.suites = self.root / "suites"
         self.matrices = self.root / "matrices"
         self.suites.mkdir(parents=True, exist_ok=True)
@@ -225,6 +227,16 @@ class RegressionStore:
         except Exception:  # noqa: BLE001
             return None
 
+    def list_suites(self) -> list[ReplaySuite]:
+        out = []
+        for p in sorted(self.suites.glob("*.json"), key=lambda x: x.stat().st_mtime,
+                        reverse=True):
+            try:
+                out.append(ReplaySuite(**json.loads(p.read_text(encoding="utf-8"))))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
     def save_matrix(self, m: BaselineMatrix) -> Path:
         p = self.matrices / f"{m.suite_id}.json"
         E.atomic_write_text(p, m.model_dump_json(indent=2))
@@ -238,3 +250,36 @@ class RegressionStore:
             return BaselineMatrix(**json.loads(p.read_text(encoding="utf-8")))
         except Exception:  # noqa: BLE001
             return None
+
+    def record_run(self, sid: str, event_log, *,
+                   protocol: Optional[str] = None) -> Optional[RegressionRun]:
+        """把当前探针事件记成一次 baseline run；重复 3 次即可出计划。
+        不启动 replay、不推断协议：protocol 由 suite 或调用方给。"""
+        suite = self.load_suite(sid)
+        if suite is None:
+            return None
+        events, _bad = event_log.read_all(compat=True)
+        cs = cluster_events(events, merge_gap=30)
+        m = self.load_matrix(sid) or BaselineMatrix(suite_id=sid)
+        idx = len(m.runs)
+        r = RegressionRun(
+            run_id=f"{sid}-r{idx}", suite_id=sid, run_index=idx,
+            protocol_fingerprint=(protocol or suite.protocol_fingerprint or "unspecified"),
+            clusters=cs, event_count=len(events), collected_at=E.now())
+        m.runs.append(r)
+        self.save_matrix(m)
+        return r
+
+    def summary(self, sid: str) -> dict:
+        suite = self.load_suite(sid)
+        m = self.load_matrix(sid) or BaselineMatrix(suite_id=sid)
+        plan = RegressionPlan.from_matrix(m)
+        return {
+            "suite_id": sid,
+            "name": suite.name if suite else "",
+            "protocol_fingerprint": m.protocol(),
+            "runs": len(m.runs),
+            "min_runs": m.min_runs,
+            "stable_clusters": len(m.stable_matches()),
+            "plan": plan.model_dump(),
+        }
