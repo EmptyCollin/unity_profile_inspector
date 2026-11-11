@@ -19,7 +19,8 @@ from typing import Callable, Literal, Optional
 from pydantic import BaseModel, Field
 
 from upi.core import events as E
-from upi.core.cluster import ClusterMatch, IssueCluster, cluster_events, match_across_runs
+from upi.core.cluster import (ClusterMatch, IssueCluster, align_clusters,
+                              cluster_events, match_across_runs)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = ROOT / "runs" / "_regression"
@@ -102,10 +103,12 @@ class RegressionRunner:
     run_once(suite) -> (protocol_fingerprint, events)
     """
     def __init__(self, suite: ReplaySuite, store: "RegressionStore",
-                 run_once: Callable[[ReplaySuite], tuple[str, list]]):
+                 run_once: Callable[[ReplaySuite], tuple[str, list]],
+                 *, align: bool = False):
         self.suite = suite
         self.store = store
         self.run_once = run_once
+        self.align = align
 
     def collect_baseline(self, n: int = 3) -> BaselineMatrix:
         if n < 3:
@@ -114,6 +117,8 @@ class RegressionRunner:
         for i in range(n):
             proto, events = self.run_once(self.suite)
             cs = cluster_events(events, merge_gap=30)
+            if self.align:
+                cs = align_clusters(cs)
             m.runs.append(RegressionRun(
                 run_id=f"{self.suite.suite_id}-r{i}", suite_id=self.suite.suite_id,
                 run_index=i,
@@ -389,6 +394,7 @@ class RegressionStore:
         return {
             "suite_id": sid,
             "name": suite.name if suite else "",
+            "command": suite.command if suite else "",
             "protocol_fingerprint": m.protocol(),
             "runs": len(m.runs),
             "min_runs": m.min_runs,

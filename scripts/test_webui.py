@@ -179,6 +179,15 @@ try:
     data3 = json.loads(body.decode("utf-8"))
     ok("状态含回归套件", any(x.get("suite_id") == sid
                              for x in (data3.get("regression_suites") or [])))
+
+    code, r = post_json(base + "/api/regression/suites?token=test-token",
+                        {"name": "ui-run", "protocol_fingerprint": "fp-run",
+                         "command": f"{sys.executable} -c pass"})
+    sid2 = (r.get("summary") or {}).get("suite_id")
+    code, r = post_json(base + f"/api/regression/suites/{sid2}/run-baseline?token=test-token",
+                        {"runs": 3, "align": True})
+    ok("POST 跑 3 次基线", code == 200 and r.get("runs") == 3)
+    ok("跑基线后计划 ready", r.get("summary", {}).get("plan", {}).get("status") == "ready")
 finally:
     ui.stop()
     th.join(timeout=2)

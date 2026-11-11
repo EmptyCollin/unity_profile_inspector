@@ -10,7 +10,10 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core import events as E                       # noqa: E402
 from upi.core.cluster import cluster_events            # noqa: E402
+from upi.core.cluster import align_clusters, cluster_events  # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent   # noqa: E402
+from upi.core.replay_driver import (ReplayDriverError,  # noqa: E402
+                                    SubprocessReplayDriver)
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
                                  RegressionRun, RegressionRunner,
                                  RegressionStore, ReplaySuite, verify_after)
@@ -143,6 +146,30 @@ ok("目标仍在→不 verified", res2["ok"] and not res2["verified"]
    and len(st4.list_verdicts("s4")) == 1)
 ok("失败 verdict 也审计", st4.list_verdicts("s4")[0].verdict.verification_status
    == "unverified")
+
+# 时间原点对齐
+sh = cluster_events([ProbeEvent(kind="sample", metric="m1", rel_frame=100,
+                                series=[1.0] * 5, data_tier="A2"),
+                     ProbeEvent(kind="sample", metric="m2", rel_frame=130,
+                                series=[2.0] * 5, data_tier="A2")])
+al = align_clusters(sh)
+ok("对齐最早 cluster 到 0", al[0].first_rel == 0 and al[1].first_rel == 30)
+ok("对齐保留 cluster_id", al[0].cluster_id == sh[0].cluster_id)
+ok("对齐 occurrence 同步", al[0].occurrences[0].rel_frame == 0)
+
+# 子进程 driver：执行命令后读事件
+log2 = EventLog()
+log2.append(ProbeEvent(kind="sample", metric="m1", rel_frame=1,
+                       series=[1.0] * 5, data_tier="A2"))
+suite_d = ReplaySuite(suite_id="sd", project=str(TMP), command=f"{sys.executable} -c pass")
+drv = SubprocessReplayDriver()
+proto, evs = drv.run_once(suite_d)
+ok("subprocess driver 读到事件", proto == "" and len(evs) >= 1)
+try:
+    drv.run_once(ReplaySuite(suite_id="empty", command=""))
+    ok("空命令报错", False)
+except ReplayDriverError:
+    ok("空命令报错", True)
 
 
 print()

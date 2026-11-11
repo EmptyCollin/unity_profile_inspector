@@ -251,6 +251,9 @@ _INDEX_HTML = r"""<!doctype html>
   .vbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .vbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .bbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .bbtn:hover{color:var(--text);border-color:var(--cyan)}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -434,11 +437,13 @@ function renderRegression(s){
       : (plan.status || "—");
     const vb = x.runs >= 4
       ? `<button class="vbtn" data-vid="${esc(x.suite_id)}">验证最后一次</button>` : "";
+    const bb = x.command
+      ? `<button class="bbtn" data-bid="${esc(x.suite_id)}">跑3次基线</button>` : "";
     return `<tr><td>${esc(x.name || x.suite_id)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(x.suite_id)}</div></td>` +
       `<td class="mono">${esc(x.protocol_fingerprint || "—")}</td>` +
       `<td>${esc(x.runs)} / ${esc(x.min_runs || 3)}</td><td>${esc(x.stable_clusters || 0)}</td>` +
       `<td>${esc(planText)}</td>` +
-      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button>${vb}</td></tr>`;
+      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button>${bb}${vb}</td></tr>`;
   }).join("") : `<tr><td colspan="6" class="empty">还没有回归套件。</td></tr>`;
 }
 
@@ -446,8 +451,11 @@ async function createSuite(){
   const name = prompt("回归套件名（例如 F-CPU-01 回放）:");
   if(!name) return;
   const protocol = prompt("协议指纹（同 replay/画质/档位；留空=manual）:", "manual");
+  const command = prompt("replay 命令（可留空，之后手点记录）:", "");
   try{
-    const r = await post("/api/regression/suites", {name, protocol_fingerprint: protocol || "manual"});
+    const r = await post("/api/regression/suites",
+                         {name, protocol_fingerprint: protocol || "manual",
+                          command: command || ""});
     alert("已创建 " + (r.summary ? r.summary.suite_id : "套件"));
     await refresh();
   }catch(e){ alert("创建失败：" + e.message); }
@@ -467,6 +475,14 @@ async function verifyLast(sid){
     alert(`验证：${v.status || "—"}（${v.verification_status || "—"}）\n${v.reason || ""}`);
     await refresh();
   }catch(e){ alert("验证失败：" + e.message); }
+}
+async function runBaseline(sid){
+  try{
+    const r = await post(`/api/regression/suites/${encodeURIComponent(sid)}/run-baseline`,
+                         {runs: 3, align: true});
+    alert(`已跑 ${r.runs} 次；计划：${((r.summary || {}).plan || {}).status || "—"}`);
+    await refresh();
+  }catch(e){ alert("跑基线失败：" + e.message); }
 }
 async function buildTicket(){
   try{
@@ -668,6 +684,8 @@ document.addEventListener("click", (ev) => {
   if(rb){ recordRun(rb.dataset.rid); return; }
   const vb = ev.target.closest && ev.target.closest(".vbtn");
   if(vb){ verifyLast(vb.dataset.vid); return; }
+  const bb = ev.target.closest && ev.target.closest(".bbtn");
+  if(bb){ runBaseline(bb.dataset.bid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
@@ -816,11 +834,38 @@ class _Handler(BaseHTTPRequestHandler):
                     scene=str(body.get("scene") or ""),
                     replay_script=str(body.get("replay_script") or ""),
                     quality_tier=str(body.get("quality_tier") or ""),
+                    command=str(body.get("command") or ""),
                     protocol_fingerprint=str(body.get("protocol_fingerprint") or "manual"),
                     created_at=E.now())
                 store.save_suite(suite)
                 self._send_json(200, {"ok": True, "suite": suite.model_dump(),
                                       "summary": store.summary(sid)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/run-baseline$",
+                     parsed.path)
+        if m:
+            try:
+                from upi.core.regression import RegressionRunner, RegressionStore
+                from upi.core.replay_driver import SubprocessReplayDriver
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                suite = store.load_suite(m.group(1))
+                if suite is None:
+                    self._send_json(404, {"ok": False, "error": "suite not found"})
+                    return
+                if not (suite.command or "").strip():
+                    self._send_json(400, {"ok": False,
+                                          "error": "suite.command 为空：先配置 replay 命令"})
+                    return
+                n = max(3, min(10, int(body.get("runs", 3) or 3)))
+                runner = RegressionRunner(
+                    suite, store, SubprocessReplayDriver().run_once,
+                    align=bool(body.get("align", True)))
+                mtx = runner.collect_baseline(n)
+                self._send_json(200, {"ok": True, "runs": len(mtx.runs),
+                                      "summary": store.summary(suite.suite_id)})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

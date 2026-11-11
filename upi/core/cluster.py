@@ -237,3 +237,25 @@ def match_across_runs(runs: list[list[IssueCluster]], *,
 
     return sorted(out, key=lambda m: (m.cluster.metric, m.cluster.first_rel,
                                       m.cluster.shape))
+
+
+def align_clusters(clusters: list[IssueCluster]) -> list[IssueCluster]:
+    """把 run 内最早 cluster 的相对帧归零，消 replay 起步抖动。
+
+    只做**时间原点**对齐，不证明轨迹等价；cluster_id 保持不变，避免跨 run
+    目标 ID 因平移而漂移。"""
+    if not clusters:
+        return []
+    origin = min(c.first_rel for c in clusters)
+    if origin == 0:
+        return clusters
+    out = []
+    for c in clusters:
+        occ = [o.model_copy(update={"rel_frame": o.rel_frame - origin})
+               for o in c.occurrences]
+        out.append(c.model_copy(update={
+            "first_rel": c.first_rel - origin,
+            "last_rel": c.last_rel - origin,
+            "occurrences": occ,
+        }))
+    return out
