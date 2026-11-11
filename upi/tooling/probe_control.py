@@ -83,6 +83,16 @@ def install(project: Optional[Path | str] = None, *, timeout_s: int = 180) -> di
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "detail": f"profile unavailable: {e}"}
     legacy_stop()
+    # 旧统一探针回调无法从新 eval 卸载（I9）；先 unload，再删心跳，
+    # 否则 Main() 看到旧心跳新鲜会直接 return，装出“alive 但仍是旧版本”。
+    try:
+        send_cmd("unload", wait=True, timeout_s=3.0)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        (_probe_dir() / "pb_hb.txt").unlink()
+    except OSError:
+        pass
     r = run_unity(
         ["command", "script eval_file", "--project-path", str(project),
          "--file", str(PROBE_FILE)],
@@ -105,6 +115,10 @@ def install(project: Optional[Path | str] = None, *, timeout_s: int = 180) -> di
 def unload() -> dict:
     resp = send_cmd("unload")
     legacy_stop()
+    try:
+        (_probe_dir() / "pb_hb.txt").unlink()
+    except OSError:
+        pass
     ok = resp == "unloaded" or "unloaded" in resp
     return {"ok": ok, "detail": resp}
 
@@ -118,6 +132,18 @@ def sample(on: bool = True, window: int = 300) -> dict:
     resp = send_cmd("sample:off")
     return {"ok": resp.startswith("sample=off") or "sample=off" in resp,
             "detail": resp}
+
+
+def wait_alive(timeout_s: float = 8.0) -> dict:
+    """等待探针心跳/状态可用；用于编译/安装后的稳定点，不冒充成功。"""
+    deadline = time.time() + max(0.0, timeout_s)
+    while True:
+        s = status()
+        if s["state"] == "alive" and (s.get("status") or {}).get("state") == "ok":
+            return s
+        if time.time() >= deadline:
+            return s
+        time.sleep(0.25)
 
 
 def status() -> dict:

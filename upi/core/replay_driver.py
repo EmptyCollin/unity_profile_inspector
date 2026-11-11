@@ -105,6 +105,12 @@ class UnityReplayDriver:
         started = False
         sampling = False
         try:
+            wait = getattr(self._probe, "wait_alive", None)
+            if callable(wait):
+                st = wait(8)
+                if st.get("state") != "alive":
+                    raise ReplayDriverError(
+                        f"探针不可用（state={st.get('state')}, age={st.get('heartbeat_age_s')}）")
             r = self._cli("scene open", "--path", scene.as_posix(), project=project)
             if not r.get("ok"):
                 # 播放模式可能占着场景：先停一次再开（与 m2a_replay 同策略）

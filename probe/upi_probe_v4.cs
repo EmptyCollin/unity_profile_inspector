@@ -11,7 +11,7 @@
 //  - sample 默认关（用户/上层用 `sample:on[:window]` 开）；避免默认改变旧行为。
 //
 // 控制（文件，10Hz 轮询）：probe_cmd.txt
-//   status | thr:<ns> | seed:<int> | depth:<before>:<after>
+//   status | thr:<ns> | gcthr:<bytes> | seed:<int> | depth:<before>:<after>
 //   sample:on[:window] | sample:off | clear | unload
 // 结果：probe_res.txt；状态：probe_status.json；心跳：pb_hb.txt
 using System;
@@ -44,6 +44,7 @@ public static class UpiProbeV4
     const int SAMPLE_CAP = 600;
 
     static long _thrNs;
+    static long _gcThrBytes;
     static int _seed = -1;
     static int _before = 10;
     static int _after = 14;
@@ -67,6 +68,7 @@ public static class UpiProbeV4
     {
         public int fc; public long ftNs; public long gcBytes;
         public long origin; public int waitLeft;
+        public bool gc;
     }
     static readonly List<Pending> Pend = new List<Pending>();
     static int _cooldown;
@@ -270,6 +272,21 @@ public static class UpiProbeV4
             LowFreq("breach fc=" + fc + " ns=" + ft);
         }
 
+        // GC 分配越界（gcthr:<bytes>）：per-frame GcAllocInFrameBytes > 阈值。
+        if (Application.isPlaying && _gcThrBytes > 0 && (fc - (int)_origin) > 2
+            && GcB[w] > _gcThrBytes && _cooldown == 0 && Pend.Count < 32)
+        {
+            var p = new Pending
+            {
+                fc = fc, ftNs = ft, gcBytes = GcB[w], gc = true,
+                origin = _origin, waitLeft = _after + 1
+            };
+            Pend.Add(p);
+            _cooldown = 20;
+            _nBreach++;
+            LowFreq("gc-breach fc=" + fc + " bytes=" + GcB[w]);
+        }
+
         for (int i = Pend.Count - 1; i >= 0; i--)
         {
             var p = Pend[i];
@@ -313,6 +330,12 @@ public static class UpiProbeV4
     {
         try
         {
+            if (p.gc)
+            {
+                Append(Events, GcBreachJson(p));
+                LowFreq("flush-gc fc=" + p.fc + " bytes=" + p.gcBytes);
+                return;
+            }
             bool a4Any;
             // 统一事件带 kind/source/threshold；旧 pb_breach 必须严格保持
             // BreachSample 契约（extra="forbid"），不能混入新字段，否则旧判定
@@ -324,6 +347,31 @@ public static class UpiProbeV4
             LowFreq("flush fc=" + p.fc + " a4first=" + (a4Any ? "ok" : "none"));
         }
         catch (Exception e) { LowFreq("flush-err " + e.GetType().Name + " " + e.Message); }
+    }
+
+    static string GcBreachJson(Pending p)
+    {
+        var sb = new StringBuilder(2048);
+        sb.Append('{');
+        sb.Append("\"kind\":\"breach\",\"source\":\"unified_probe\",");
+        JN(sb, "frame_idx", p.fc, true);
+        JN(sb, "rel", p.origin >= 0 ? p.fc - (int)p.origin : -1, true);
+        JN(sb, "rel_frame", p.origin >= 0 ? p.fc - (int)p.origin : -1, true);
+        sb.Append("\"metric\":\"gc_alloc_bytes\",");
+        JN(sb, "value", p.gcBytes, true);
+        JN(sb, "threshold", _gcThrBytes, true);
+        JN(sb, "threshold_abs", _gcThrBytes, true);
+        JF(sb, "deviation_ratio", _gcThrBytes > 0
+            ? p.gcBytes / (double)_gcThrBytes : 0.0, true);
+        sb.Append("\"ring_before\":[");
+        SeriesGc(sb, p.fc - _before, p.fc);
+        sb.Append("],\"ring_after\":[");
+        SeriesGc(sb, p.fc + 1, p.fc + _after);
+        sb.Append(']');
+        sb.Append(",\"data_tier\":\"A2\"");
+        sb.Append(",\"replay_seed\":" + _seed.ToString(CultureInfo.InvariantCulture));
+        sb.Append('}');
+        return sb.ToString();
     }
 
     static string BreachJson(Pending p, bool unified, out bool a4Any)
@@ -506,6 +554,12 @@ public static class UpiProbeV4
                 { _thrNs = ns; Write("thr=" + ns); }
                 else Write("ERR thr " + arg);
                 break;
+            case "gcthr":
+                long gc;
+                if (long.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out gc))
+                { _gcThrBytes = gc; Write("gcthr=" + gc); }
+                else Write("ERR gcthr " + arg);
+                break;
             case "seed":
                 int sd;
                 if (int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out sd))
@@ -546,6 +600,7 @@ public static class UpiProbeV4
                 try { if (File.Exists(Events)) File.Delete(Events); } catch (Exception) { }
                 try { if (File.Exists(LegacyBreach)) File.Delete(LegacyBreach); } catch (Exception) { }
                 _nBreach = 0;
+                _gcThrBytes = 0;
                 Write("cleared");
                 break;
             case "unload":
@@ -564,6 +619,7 @@ public static class UpiProbeV4
             + " fc=" + Time.frameCount
             + " origin=" + _origin
             + " thrNs=" + _thrNs
+            + " gcThr=" + _gcThrBytes
             + " seed=" + _seed
             + " depth=" + _before + "/" + _after
             + " rec=" + Rec.Count
