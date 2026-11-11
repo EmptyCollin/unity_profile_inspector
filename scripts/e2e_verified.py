@@ -17,7 +17,8 @@ from upi.config.project_profile import active_profile  # noqa: E402
 from upi.core.cluster import cluster_events  # noqa: E402
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
                                  RegressionRunner, RegressionStore,
-                                 ReplaySuite, merge_gap_for, verify_after)
+                                 ReplaySuite, guards_from_events,
+                                 merge_gap_for, verify_after)
 from upi.core.replay_driver import UnityReplayDriver  # noqa: E402
 from upi.tooling import probe_control as PC  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
@@ -65,10 +66,10 @@ def main() -> int:
             suite_id="e2e-verified", name="e2e verified",
             project=str(fixture),
             scene="Assets/UpiFixtures/Scenes/Scene_F-CPU-01.unity",
-            protocol_fingerprint="fp-e2e-verified", warmup_s=2, window_s=2)
+            protocol_fingerprint="fp-e2e-verified", warmup_s=5, window_s=5)
         store = RegressionStore(ROOT / "runs" / "_e2e_verified")
         store.save_suite(suite)
-        drv = UnityReplayDriver(warmup_s=2, window_s=2)
+        drv = UnityReplayDriver(warmup_s=5, window_s=5)
         runner = RegressionRunner(suite, store, drv.run_once, align=True)
         m = runner.collect_baseline(3)
         ok("3 baselines", len(m.runs) == 3, str([r.event_count for r in m.runs]))
@@ -93,18 +94,32 @@ def main() -> int:
         ok("probe alive after fix", PC.wait_alive(15).get("state") == "alive")
         PC.send_cmd("gcthr:20000")
 
-        proto, after_events = drv.run_once(suite)
-        after_cs = cluster_events(after_events,
-                                  merge_gap=merge_gap_for(suite),
-                                  merge_sample=True)
-        after_breach = [c for c in after_cs if c.kind == "breach"]
         before_guards = {}
         for k in {k for r in m.runs for k in r.guards}:
             vals = [r.guards[k] for r in m.runs if k in r.guards]
             before_guards[k] = statistics.median(vals)
+
+        # 修复后跑 3 次，取守护中位，降低单次瞬态影响；目标必须在所有 run 消失。
+        after_breach = []
+        after_guard_runs = []
+        after_event_counts = []
+        proto = ""
+        for _i in range(3):
+            proto, after_events = drv.run_once(suite)
+            after_cs = cluster_events(after_events,
+                                      merge_gap=merge_gap_for(suite),
+                                      merge_sample=True)
+            after_breach.extend(c for c in after_cs if c.kind == "breach")
+            after_guard_runs.append(guards_from_events(after_events))
+            after_event_counts.append(len(after_events))
+        # 去重，避免同一 cluster 多次计入
+        seen = set()
+        after_breach = [c for c in after_breach
+                        if not (c.cluster_id in seen or seen.add(c.cluster_id))]
         after_guards = {}
-        from upi.core.regression import guards_from_events
-        after_guards = guards_from_events(after_events)
+        for k in {k for g in after_guard_runs for k in g}:
+            vals = [g[k] for g in after_guard_runs if k in g]
+            after_guards[k] = statistics.median(vals)
         v = verify_after(m, target, after_breach, after_protocol=proto,
                          guards_before=before_guards, guards_after=after_guards)
         ok("verified verdict", v.status == "verified"
@@ -114,6 +129,7 @@ def main() -> int:
                   "target": target.summary(),
                   "after_breach_clusters": [c.summary() for c in after_breach],
                   "baseline_runs": [r.event_count for r in m.runs],
+                  "after_runs": after_event_counts,
                   "guards_before": before_guards,
                   "guards_after": after_guards}
     finally:
