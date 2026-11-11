@@ -148,7 +148,7 @@ def build_status() -> dict:
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I3a", "single_channel": True},
+        "ui": {"shell": "I3b-2a", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
@@ -257,7 +257,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I3a 工单</span>
+  <span class="tag">I3b 执行</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -307,7 +307,7 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">02</span><span>统一事件总线：breach / sample + 1Hz 哨兵</span><span class="pill ok">已接入</span></div>
         <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
         <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
-        <div class="step"><span class="s">05</span><span>常驻形态：批量工单/审批已接；Unity 执行器在 I3b</span><span class="pill ok">I3a</span></div>
+        <div class="step"><span class="s">05</span><span>常驻：批量工单/审批/执行已接；plan 与调度在 I3b-2b</span><span class="pill ok">I3b</span></div>
         <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
         <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
@@ -543,7 +543,7 @@ function nav(page, label){
   $("otherTitle").textContent = titles[page] || "此页待接入";
   $("otherHint").textContent = page === "regression"
     ? "I4 接入：replay 套件、3 次基线矩阵、复现率、replay 验证。"
-    : "I4~I5 逐项接入；I3a 已交付批量工单建单/审批。";
+    : "I4~I5 逐项接入；I3b 已交付批量工单/探针控制/执行接线。";
 }
 
 document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev => {

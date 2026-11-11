@@ -73,7 +73,7 @@ try:
     code, hdr, body = get(base + "/?token=test-token")
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
-    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I3a 工单" in html)
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I3b 执行" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
