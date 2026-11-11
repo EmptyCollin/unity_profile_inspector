@@ -71,6 +71,21 @@ try:
     code, _hdr, _body = get(base + "/api/status")
     ok("无 token 访问 API 被拒", code == 403, f"code={code}")
 
+    req = urllib.request.Request(base + "/api/status",
+                                 headers={"Cookie": "upi_token=test-token"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        cookie_ok = r.status == 200
+    ok("正确 cookie 可访问 API", cookie_ok)
+
+    req = urllib.request.Request(base + "/api/status",
+                                 headers={"Cookie": "upi_token=test"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            prefix_code = r.status
+    except urllib.error.HTTPError as e:
+        prefix_code = e.code
+    ok("cookie 前缀不算通过（精确比较）", prefix_code == 403, f"code={prefix_code}")
+
     # SSE 是长连接，不能 read() 到底；只读首帧即关。
     with urllib.request.urlopen(base + "/api/events?token=test-token", timeout=5) as r:
         sse_code, sse_hdr = r.status, r.headers

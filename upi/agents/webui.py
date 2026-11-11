@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -355,8 +356,12 @@ class _Handler(BaseHTTPRequestHandler):
         token = (qs.get("token") or [""])[0]
         if token and secrets.compare_digest(token, self.ui.token):
             return True
-        cookie = self.headers.get("Cookie", "")
-        return f"upi_token={self.ui.token}" in cookie
+        try:
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = cookie.get("upi_token")
+        except Exception:  # noqa: BLE001 - 坏 cookie 不得变成 500
+            return False
+        return bool(morsel and secrets.compare_digest(morsel.value, self.ui.token))
 
     def _send(self, code: int, body: bytes, ctype: str, extra: Optional[dict] = None):
         self.send_response(code)
