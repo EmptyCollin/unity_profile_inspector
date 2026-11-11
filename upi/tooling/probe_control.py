@@ -93,6 +93,12 @@ def install(project: Optional[Path | str] = None, *, timeout_s: int = 180) -> di
         (_probe_dir() / "pb_hb.txt").unlink()
     except OSError:
         pass
+    # 无探针时 unload 命令没人消费；不清掉会被新装的回调立刻读到并自杀。
+    for name in ("probe_cmd.txt", "probe_res.txt"):
+        try:
+            (_probe_dir() / name).unlink()
+        except OSError:
+            pass
     r = run_unity(
         ["command", "script eval_file", "--project-path", str(project),
          "--file", str(PROBE_FILE)],
