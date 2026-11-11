@@ -254,6 +254,9 @@ _INDEX_HTML = r"""<!doctype html>
   .bbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .bbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .gbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .gbtn:hover{color:var(--text);border-color:var(--cyan)}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -439,11 +442,12 @@ function renderRegression(s){
       ? `<button class="vbtn" data-vid="${esc(x.suite_id)}">验证最后一次</button>` : "";
     const bb = x.command
       ? `<button class="bbtn" data-bid="${esc(x.suite_id)}">跑3次基线</button>` : "";
+    const gb = `<button class="gbtn" data-gid="${esc(x.suite_id)}">报告</button>`;
     return `<tr><td>${esc(x.name || x.suite_id)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(x.suite_id)}</div></td>` +
       `<td class="mono">${esc(x.protocol_fingerprint || "—")}</td>` +
       `<td>${esc(x.runs)} / ${esc(x.min_runs || 3)}</td><td>${esc(x.stable_clusters || 0)}</td>` +
       `<td>${esc(planText)}</td>` +
-      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button>${bb}${vb}</td></tr>`;
+      `<td><button class="rbtn" data-rid="${esc(x.suite_id)}">记录本次基线</button>${bb}${vb}${gb}</td></tr>`;
   }).join("") : `<tr><td colspan="6" class="empty">还没有回归套件。</td></tr>`;
 }
 
@@ -483,6 +487,12 @@ async function runBaseline(sid){
     alert(`已跑 ${r.runs} 次；计划：${((r.summary || {}).plan || {}).status || "—"}`);
     await refresh();
   }catch(e){ alert("跑基线失败：" + e.message); }
+}
+async function genReport(sid){
+  try{
+    await post(`/api/regression/suites/${encodeURIComponent(sid)}/report`, {});
+    window.open(q(`/api/regression/suites/${encodeURIComponent(sid)}/report`), "_blank");
+  }catch(e){ alert("生成报告失败：" + e.message); }
 }
 async function buildTicket(){
   try{
@@ -686,6 +696,8 @@ document.addEventListener("click", (ev) => {
   if(vb){ verifyLast(vb.dataset.vid); return; }
   const bb = ev.target.closest && ev.target.closest(".bbtn");
   if(bb){ runBaseline(bb.dataset.bid); return; }
+  const gb = ev.target.closest && ev.target.closest(".gbtn");
+  if(gb){ genReport(gb.dataset.gid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
@@ -764,6 +776,22 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/events":
             self._sse()
             return
+        m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/report$",
+                     parsed.path)
+        if m:
+            try:
+                from upi.core.regression import RegressionStore
+                from upi.core.regression_report import report_path
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                p = report_path(store, m.group(1))
+                if not p.exists():
+                    self._send(404, b"report not generated", "text/plain; charset=utf-8")
+                    return
+                self._send(200, p.read_bytes(), "text/html; charset=utf-8")
+            except Exception as e:  # noqa: BLE001
+                self._send(500, f"report error: {e}".encode("utf-8"),
+                           "text/plain; charset=utf-8")
+            return
         if parsed.path == "/favicon.ico":
             self._send(204, b"", "image/x-icon")
             return
@@ -816,6 +844,24 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 t = eng.build_ticket(plan_provider=None, limit=8)
                 self._send_json(200, {"ok": True, "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/report$",
+                     parsed.path)
+        if m:
+            try:
+                from upi.core.regression import RegressionStore
+                from upi.core.regression_report import write_report
+                store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
+                sid = m.group(1)
+                if store.load_suite(sid) is None:
+                    self._send_json(404, {"ok": False, "error": "suite not found"})
+                    return
+                p = write_report(store, sid)
+                self._send_json(200, {"ok": True, "path": str(p),
+                                      "url": f"/api/regression/suites/{sid}/report"})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return

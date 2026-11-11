@@ -188,6 +188,10 @@ try:
                         {"runs": 3, "align": True})
     ok("POST 跑 3 次基线", code == 200 and r.get("runs") == 3)
     ok("跑基线后计划 ready", r.get("summary", {}).get("plan", {}).get("status") == "ready")
+    code, r = post_json(base + f"/api/regression/suites/{sid2}/report?token=test-token", {})
+    ok("POST 生成回归报告", code == 200 and r.get("ok") is True)
+    code, _hdr, body = get(base + f"/api/regression/suites/{sid2}/report?token=test-token")
+    ok("GET 回归报告 HTML", code == 200 and "回归报告" in body.decode("utf-8", "replace"))
 finally:
     ui.stop()
     th.join(timeout=2)
