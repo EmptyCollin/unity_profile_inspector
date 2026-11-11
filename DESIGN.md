@@ -717,4 +717,7 @@ trace: run_id
 - **I2 完成**：`cluster.py`（run 内/跨 run、复现率、波形）+ `fingerprint.py`
   （SQLite 指纹库、6 条内置、命中/未命中/歧义路由）；Web“问题/指纹库”页已接；
   修复执行器仍未消费指纹（I3）。
-- **I3~I6**：常驻、回归、UI 完整化、硬化验收。
+- **I3a 完成**：批量工单模型/存储、4 位校验码审批、串行执行器（注入式）、
+  `unverified` 账本、Web 建单/批准/明细页；Unity apply/compile/observe 接线、
+  统一探针安装/调度待 I3b。
+- **I3b~I6**：常驻执行/调度、回归、UI 完整化、硬化验收。

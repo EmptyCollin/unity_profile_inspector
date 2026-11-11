@@ -25,6 +25,7 @@ PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_webui_"))
 E.isolate(TMP / "runs")
 os.environ["UPI_FINGERPRINT_DB"] = str(TMP / "fingerprints.db")
+os.environ["UPI_TICKET_DIR"] = str(TMP / "tickets")
 (E.RUNS / "_probe").mkdir(parents=True, exist_ok=True)
 (E.RUNS / "_probe" / "pb_hb.txt").write_text("1", encoding="utf-8")
 (E.RUNS / "daemon_status.json").write_text(json.dumps({
@@ -50,6 +51,17 @@ def get(url: str):
         return e.code, e.headers, e.read()
 
 
+def post_json(url: str, body: dict):
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode("utf-8"))
+
+
 ui = WebUI(port=0, token="test-token").start()
 th = threading.Thread(target=ui.serve_forever, daemon=True)
 th.start()
@@ -60,7 +72,7 @@ try:
     code, hdr, body = get(base + "/?token=test-token")
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
-    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I2 聚类" in html)
+    ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I3a 工单" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
@@ -115,6 +127,21 @@ try:
 
     code, _hdr, _body = get(base + "/nope?token=test-token")
     ok("未知路径 404", code == 404, f"code={code}")
+
+    code, built = post_json(base + "/api/tickets/build?token=test-token", {})
+    t = built.get("ticket") or {}
+    ok("POST 建单 200", code == 200 and t.get("status") == "awaiting_approval")
+    ok("工单含候选与校验码", bool(t.get("items")) and len(t.get("approve_token") or "") == 4)
+    tid = t.get("ticket_id")
+    code, appr = post_json(base + f"/api/tickets/{tid}/approve?token=test-token",
+                           {"approver": "测试", "note": "批准", "token": t.get("approve_token")})
+    ok("POST 批准 200", code == 200 and appr.get("ticket", {}).get("status") == "approved")
+    code, ex = post_json(base + f"/api/tickets/{tid}/execute?token=test-token", {})
+    ok("执行未接线返回 501（诚实边界）", code == 501 and ex.get("ok") is False)
+    code, _hdr, body = get(base + "/api/status?token=test-token")
+    data2 = json.loads(body.decode("utf-8"))
+    ok("状态含批量工单", any(x.get("ticket_id") == tid
+                             for x in (data2.get("batch_tickets") or [])))
 finally:
     ui.stop()
     th.join(timeout=2)

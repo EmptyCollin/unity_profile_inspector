@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -86,7 +87,8 @@ def _score(a: FingerprintFeatures, b: dict) -> float:
 
 class FingerprintStore:
     def __init__(self, path: Optional[Path | str] = None):
-        self.path = Path(path) if path else DEFAULT_PATH
+        self.path = Path(path) if path else Path(
+            os.environ.get("UPI_FINGERPRINT_DB") or DEFAULT_PATH)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 

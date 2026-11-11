@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -140,10 +141,14 @@ def build_status() -> dict:
     fp.ensure_seed()
     fp_stats = fp.stats()
     fp_records = [r.model_dump(exclude={"features"}) for r in fp.all()[:20]]
+
+    from upi.core.ticket import TicketStore
+    tstore = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+    batch_tickets = [t.summary() for t in tstore.list(10)]
     return {
         "ok": True,
         "time": E.now(),
-        "ui": {"shell": "I2", "single_channel": True},
+        "ui": {"shell": "I3a", "single_channel": True},
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
@@ -153,6 +158,7 @@ def build_status() -> dict:
         "cluster_total": len(clusters),
         "fingerprints": fp_stats,
         "fingerprint_records": fp_records,
+        "batch_tickets": batch_tickets,
         "tickets": _open_tickets(),
         "events": _recent_events(),
     }
@@ -229,6 +235,10 @@ _INDEX_HTML = r"""<!doctype html>
   .badge.step{color:var(--amber);border-color:#4a3d22}
   .badge.periodic{color:var(--cyan);border-color:#1e4052}
   .badge.cluster{color:var(--green);border-color:#1e4a38}
+  .tbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
+  .tbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .small{font-size:11px;color:var(--dim)}
   .steps{margin-top:12px}
   .step{display:grid;grid-template-columns:22px 1fr auto;gap:10px;padding:9px 15px;
     border-bottom:1px solid #182333;align-items:center;font-size:12.5px}
@@ -244,7 +254,7 @@ _INDEX_HTML = r"""<!doctype html>
 <body>
 <header class="top">
   <div class="brand"><span class="dot"></span>UPI 性能 Agent</div>
-  <span class="tag">I2 聚类</span>
+  <span class="tag">I3a 工单</span>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
@@ -287,7 +297,7 @@ _INDEX_HTML = r"""<!doctype html>
         <div class="step"><span class="s">02</span><span>统一事件总线：breach / sample + 1Hz 哨兵</span><span class="pill ok">已接入</span></div>
         <div class="step"><span class="s">03</span><span>单探针物理合并（一个心跳 / 一个回调）</span><span class="pill">I1b</span></div>
         <div class="step"><span class="s">04</span><span>事件 → 聚类（问题页已接入）；指纹库后端已落地</span><span class="pill ok">I2</span></div>
-        <div class="step"><span class="s">05</span><span>常驻形态：批量工单、串行修复、unverified 账本</span><span class="pill">I3</span></div>
+        <div class="step"><span class="s">05</span><span>常驻形态：批量工单/审批已接；Unity 执行器在 I3b</span><span class="pill ok">I3a</span></div>
         <div class="step"><span class="s">06</span><span>回归形态：3 次基线、replay 验证、verified 账本</span><span class="pill">I4</span></div>
         <div class="step"><span class="s">07</span><span>全部页面 + 审批 + 回归矩阵 + 报告</span><span class="pill">I5</span></div>
       </div>
@@ -315,6 +325,23 @@ _INDEX_HTML = r"""<!doctype html>
         </table>
       </div>
     </section>
+    <section id="page-tickets" style="display:none">
+      <h1>批量工单</h1>
+      <p class="sub">一次列多个候选、按顺序执行；执行一次只落一个 patch。常驻结论只 <b>unverified</b>；批量批准不绕过单个 patch 的权限闸。</p>
+      <div style="margin:10px 0 14px"><button id="buildTicketBtn" style="background:#14314a;color:#dbe7f3;border:1px solid #2a4a63;border-radius:8px;padding:9px 14px;cursor:pointer">从当前 cluster 生成工单</button>
+        <span id="ticketHint" style="color:var(--dim);font-size:12px;margin-left:10px">I3a：建单/审批可用；Unity 执行接线在 I3b。</span></div>
+      <div class="panel">
+        <h2>工单 <span id="batchMeta">—</span></h2>
+        <table>
+          <thead><tr><th>工单</th><th>状态</th><th>候选</th><th>待批/需人工</th><th>校验码</th><th>操作</th></tr></thead>
+          <tbody id="batchBody"><tr><td colspan="6" class="empty">还没有批量工单。</td></tr></tbody>
+        </table>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>当前工单明细 <span>指标 / 指纹 / 权限 / 状态</span></h2>
+        <div id="batchDetail"><div class="empty">点“明细”查看候选。</div></div>
+      </div>
+    </section>
     <section id="page-other" style="display:none">
       <div class="placeholder"><b id="otherTitle">此页待接入</b><span id="otherHint">该页面在后续迭代交付；I0 只保证壳与状态通道。</span></div>
     </section>
@@ -325,6 +352,66 @@ const TOKEN = "__UPI_TOKEN__";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const q = (p) => p + (p.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+async function post(path, body){
+  const r = await fetch(q(path), {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body || {})});
+  let data = {};
+  try{ data = await r.json(); }catch(_){}
+  if(!r.ok || data.ok === false) throw new Error(data.error || data.message || ("HTTP " + r.status));
+  return data;
+}
+const batchCache = {};
+function renderTickets(s){
+  const ts = s.batch_tickets || [];
+  $("batchMeta").textContent = `${ts.length} 张`;
+  $("batchBody").innerHTML = ts.length ? ts.map(t =>
+    `<tr><td class="mono">${esc(t.ticket_id)}<div style="color:var(--dim);font-size:10.5px">${esc(t.created_at)}</div></td>` +
+    `<td><span class="badge ${t.status === "approved" ? "cluster" : "step"}">${esc(t.status)}</span></td>` +
+    `<td>${esc(t.items)}</td><td>${esc(t.pending)} / ${esc(t.needs_human)}</td>` +
+    `<td class="mono">${esc(t.approve_token || "—")}</td>` +
+    `<td><button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="view">明细</button>` +
+    (t.status === "awaiting_approval"
+      ? `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="approve">批准</button>` +
+        `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="reject">驳回</button>`
+      : "") + `</td></tr>`
+  ).join("") : `<tr><td colspan="6" class="empty">还没有批量工单。</td></tr>`;
+  ts.forEach(t => { batchCache[t.ticket_id] = t; });
+}
+async function buildTicket(){
+  try{
+    const r = await post("/api/tickets/build", {});
+    await refresh();
+    if(r.ticket){ showTicketDetail(r.ticket); }
+  }catch(e){ alert("建单失败：" + e.message); }
+}
+function showTicketDetail(t){
+  const items = (t.item_list || t.items || []).map(i => ({...i, tier: i.tier || i.permission_tier}));
+  $("batchDetail").innerHTML = `<div style="padding:10px 15px;color:var(--muted);font-size:12px">` +
+    `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b></div>` +
+    (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>原因</th></tr></thead><tbody>` +
+      items.map(i => `<tr><td class="mono">${esc(i.metric)}</td><td>${esc(i.shape)}</td>` +
+        `<td>${i.fingerprint_hit ? "命中" : "未命中"}</td><td class="mono">${esc(i.playbook_id || "—")}</td>` +
+        `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td><td class="small">${esc(i.error || "—")}</td></tr>`).join("") +
+      `</tbody></table>` : `<div class="empty">无候选。</div>`);
+}
+async function ticketAction(tid, act){
+  const t = batchCache[tid] || {};
+  const approver = prompt("批准人/驳回人姓名：");
+  if(!approver) return;
+  const note = prompt("批语（必填）：");
+  if(!note) return;
+  try{
+    if(act === "approve"){
+      const token = prompt("校验码（工单列表/明细里的 4 位）：", t.approve_token || "");
+      if(token === null) return;
+      await post(`/api/tickets/${encodeURIComponent(tid)}/approve`,
+                 {approver, note, token});
+    }else{
+      await post(`/api/tickets/${encodeURIComponent(tid)}/reject`, {approver, note});
+    }
+    await refresh();
+  }catch(e){ alert("操作失败：" + e.message); }
+}
 
 function setClass(el, cls){ el.className = "val " + (cls || ""); }
 
@@ -397,6 +484,8 @@ function render(s){
     `<td>${esc(r.n_success)} / ${esc(r.n_fail)}</td>` +
     `<td class="mono">${esc(r.last_seen || "—")}</td></tr>`
   ).join("") : `<tr><td colspan="7" class="empty">指纹库为空。</td></tr>`;
+
+  renderTickets(s);
 }
 
 async function refresh(){
@@ -411,23 +500,37 @@ async function refresh(){
 
 function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
-  const home = $("page-home"), issues = $("page-issues"), library = $("page-library"), other = $("page-other");
-  if(page === "home"){ home.style.display = ""; issues.style.display = "none"; library.style.display = "none"; other.style.display = "none"; return; }
-  if(page === "issues"){ home.style.display = "none"; issues.style.display = ""; library.style.display = "none"; other.style.display = "none"; return; }
-  if(page === "library"){ home.style.display = "none"; issues.style.display = "none"; library.style.display = ""; other.style.display = "none"; return; }
-  home.style.display = "none"; issues.style.display = "none"; library.style.display = "none"; other.style.display = "";
-  const titles = {tickets:"工单", regression:"回归", reports:"报告", settings:"设置 / 接入"};
+  const home = $("page-home"), issues = $("page-issues"), library = $("page-library"),
+        tickets = $("page-tickets"), other = $("page-other");
+  const pages = {home, issues, library, tickets};
+  Object.values(pages).forEach(p => { if(p) p.style.display = "none"; });
+  if(other) other.style.display = "none";
+  if(pages[page]){ pages[page].style.display = ""; return; }
+  if(other) other.style.display = "";
+  const titles = {regression:"回归", reports:"报告", settings:"设置 / 接入"};
   $("otherTitle").textContent = titles[page] || "此页待接入";
-  $("otherHint").textContent = page === "tickets"
-    ? "I3 接入：批量候选、批准、串行执行时间线、unverified 账本。"
-    : page === "regression"
+  $("otherHint").textContent = page === "regression"
     ? "I4 接入：replay 套件、3 次基线矩阵、复现率、replay 验证。"
-    : "I3~I5 逐项接入；I2 已交付问题聚类与指纹库页。";
+    : "I4~I5 逐项接入；I3a 已交付批量工单建单/审批。";
 }
 
 document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev => {
   ev.preventDefault(); nav(a.dataset.page, a.textContent.trim());
 }));
+const buildBtn = $("buildTicketBtn");
+if(buildBtn) buildBtn.addEventListener("click", buildTicket);
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest && ev.target.closest(".tbtn");
+  if(!b) return;
+  const tid = b.dataset.tid, act = b.dataset.act;
+  if(!tid) return;
+  if(act === "view"){
+    const t = batchCache[tid];
+    if(t) showTicketDetail(t);
+  }else if(act === "approve" || act === "reject"){
+    ticketAction(tid, act);
+  }
+});
 
 refresh();
 setInterval(refresh, 5000);
@@ -512,6 +615,75 @@ class _Handler(BaseHTTPRequestHandler):
                 time.sleep(2)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
+
+    def _send_json(self, code: int, obj):
+        self._send(code, _json_bytes(obj), "application/json; charset=utf-8")
+
+    def _body_json(self) -> dict:
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            n = 0
+        raw = self.rfile.read(n) if n > 0 else b"{}"
+        return json.loads(raw.decode("utf-8") or "{}")
+
+    def do_POST(self):  # noqa: N802 - 标准库签名
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        if not self._authorized(qs):
+            self._send(403, b"forbidden: missing/invalid token", "text/plain; charset=utf-8")
+            return
+        try:
+            body = self._body_json()
+        except Exception as e:  # noqa: BLE001
+            self._send_json(400, {"ok": False, "error": f"bad json: {e}"})
+            return
+
+        if parsed.path == "/api/tickets/build":
+            try:
+                from upi.core.resident import ResidentEngine
+                eng = ResidentEngine(
+                    fp_store=None,
+                    ticket_store=None,
+                )
+                t = eng.build_ticket(plan_provider=None, limit=8)
+                self._send_json(200, {"ok": True, "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/tickets/(bt-[A-Za-z0-9_\-]+)/(approve|reject)$",
+                     parsed.path)
+        if m:
+            tid, action = m.group(1), m.group(2)
+            try:
+                from upi.core.ticket import TicketStore, approve, reject
+                store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+                t = store.load(tid)
+                if t is None:
+                    self._send_json(404, {"ok": False, "error": "ticket not found"})
+                    return
+                if action == "approve":
+                    ok, msg = approve(t, approver=str(body.get("approver", "")),
+                                      note=str(body.get("note", "")),
+                                      token=str(body.get("token", "")))
+                else:
+                    ok, msg = reject(t, approver=str(body.get("approver", "")),
+                                     note=str(body.get("note", "")))
+                if ok:
+                    store.save(t)
+                self._send_json(200 if ok else 400, {"ok": ok, "message": msg,
+                                                     "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        if re.match(r"^/api/tickets/bt-[A-Za-z0-9_\-]+/execute$", parsed.path):
+            self._send_json(501, {"ok": False,
+                                  "error": "I3b: Unity apply/compile/observe 尚未接线；"
+                                           "当前只能建单与审批"})
+            return
+        self._send_json(404, {"ok": False, "error": "not found"})
 
 
 class WebUI:
