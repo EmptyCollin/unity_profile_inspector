@@ -272,19 +272,33 @@ public static class UpiProbeV4
             LowFreq("breach fc=" + fc + " ns=" + ft);
         }
 
-        // GC 分配越界（gcthr:<bytes>）：per-frame GcAllocInFrameBytes > 阈值。
-        if (Application.isPlaying && _gcThrBytes > 0 && (fc - (int)_origin) > 2
-            && GcB[w] > _gcThrBytes && _cooldown == 0 && Pend.Count < 32)
+        // GC 分配越界（gcthr:<bytes>）：最近 30 帧中至少 24 帧超过阈值。
+        // 单帧阈值会被修复态的零散 GC 尖峰误触发；窗口化只抓持续分配。
+        if (Application.isPlaying && _gcThrBytes > 0 && (fc - (int)_origin) >= 30
+            && _cooldown == 0 && Pend.Count < 32)
         {
-            var p = new Pending
+            int over = 0;
+            long[] tmp = new long[30];
+            for (int i = 0; i < 30; i++)
             {
-                fc = fc, ftNs = ft, gcBytes = GcB[w], gc = true,
-                origin = _origin, waitLeft = _after + 1
-            };
-            Pend.Add(p);
-            _cooldown = 20;
-            _nBreach++;
-            LowFreq("gc-breach fc=" + fc + " bytes=" + GcB[w]);
+                int idx = ((w - i) % CAP + CAP) % CAP;
+                tmp[i] = GcB[idx];
+                if (GcB[idx] > _gcThrBytes) over++;
+            }
+            if (over >= 24)
+            {
+                Array.Sort(tmp);
+                var p = new Pending
+                {
+                    fc = fc, ftNs = ft, gcBytes = tmp[15], gc = true,
+                    origin = _origin, waitLeft = _after + 1
+                };
+                Pend.Add(p);
+                _cooldown = 20;
+                _nBreach++;
+                LowFreq("gc-window-breach fc=" + fc + " over=" + over
+                        + " med=" + tmp[15]);
+            }
         }
 
         for (int i = Pend.Count - 1; i >= 0; i--)
@@ -620,6 +634,7 @@ public static class UpiProbeV4
             + " origin=" + _origin
             + " thrNs=" + _thrNs
             + " gcThr=" + _gcThrBytes
+            + " gcWin=24/30"
             + " seed=" + _seed
             + " depth=" + _before + "/" + _after
             + " rec=" + Rec.Count
