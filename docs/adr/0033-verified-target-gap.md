@@ -41,3 +41,14 @@
 1. 探针增加 `gcthr:<bytes>`（或 `budget:gc_alloc`）与 breach metric；
 2. 缺陷态 3 次 replay → 修复 → 第 4 次 → `verify_after`；
 3. 只有目标 breach cluster 消失、无新 cluster、守护不劣化才记 verified。
+
+## 更新（2026-11-12）：gcthr 已实现，但热重载仍卡住
+
+- `probe/upi_probe_v4.cs` 已加 `gcthr:<bytes>`，产出 `metric=gc_alloc_bytes`
+  的统一 breach；`probe_control.install` 先 unload、删心跳再 eval，避免
+  “旧心跳新鲜导致 Main 直接 return”。
+- 但真实 Editor 上仍出现 **旧回调残留/控制无响应**：`gcthr` 返回
+  `ERR cmd`，`status` 偶尔 `ERR no-response`；重新 eval 不能稳定替换回调。
+- 这是 I9“旧回调无法卸载”的又一次现场复现；需要**重启 Editor**清残留后
+  再验证，而不是继续在同一 Editor 里热换。
+- 因此本轮**没有** verified 证据；GC detector 代码已提交，但真实闭环待重启后做。

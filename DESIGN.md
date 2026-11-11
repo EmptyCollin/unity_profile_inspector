@@ -759,6 +759,6 @@ trace: run_id
 - **I4b2b2b2a2 完成**：回归计划只收 breach；sample 只做守护，无 breach 时
   计划 `no_stable_cluster`。
 - **verified 诊断（ADR-0033）**：缺陷/修复 GC 77.5KB vs 8.9KB 可分；frame-time
-  2.37 vs 2.76ms 不可分，需 GC detector 才能做 verified。
+  2.37 vs 2.76ms 不可分；`gcthr` detector 已实现，但旧回调残留需重启 Editor。
 - **I6c 完成**：删除 TUI 模块/动作层/测试；30 套离线测试通过。
-- **I4b2b2b2b2 / I6b2b2c**：GC detector + verified；真实用户工程。
+- **I4b2b2b2b2 / I6b2b2c**：重启后 verified；真实用户工程。

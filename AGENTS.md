@@ -364,6 +364,6 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I4b2b2b2a 完成：夹具 Unity 自动 replay（scene/Play/探针/Stop/新增事件）；3 次真实基线通过。
 - I4b2b2b2b1 完成：完整回归报告（形态/验证等级/全量守护/G20/HTML+JSON）。
 - I4b2b2b2a2 完成：回归计划只收 breach；sample 只做守护，无 breach 时 `no_stable_cluster`。
-- verified 诊断（ADR-0033）：缺陷/修复 GC 77.5KB vs 8.9KB 可分；frame-time 2.37 vs 2.76ms 不可分，需 GC detector。
+- verified 诊断（ADR-0033）：缺陷/修复 GC 77.5KB vs 8.9KB 可分；frame-time 2.37 vs 2.76ms 不可分；`gcthr` 已实现，但旧回调残留需重启 Editor。
 - I6c 完成：删除 TUI 模块/动作层/测试；30 套离线测试通过。
-- I4b2b2b2b2 / I6b2b2c：GC detector + verified；真实用户工程（`docs/迭代计划.md`）。
+- I4b2b2b2b2 / I6b2b2c：重启后 verified；真实用户工程（`docs/迭代计划.md`）。
