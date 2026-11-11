@@ -273,6 +273,12 @@ _INDEX_HTML = r"""<!doctype html>
   .gbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:3px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .gbtn:hover{color:var(--text);border-color:var(--cyan)}
+  .form{display:grid;gap:9px;padding:10px 15px 14px}
+  .form label{display:grid;gap:4px;font-size:11.5px;color:var(--dim)}
+  .form input,.form textarea{background:#0b1219;border:1px solid var(--line);border-radius:6px;
+    color:var(--text);padding:7px 8px;font:12px var(--mono);outline:none}
+  .form input:focus,.form textarea:focus{border-color:var(--cyan)}
+  .form .pbtn{padding:6px 12px}
   .pbtn{background:#152130;color:var(--muted);border:1px solid var(--line);border-radius:6px;
     padding:4px 8px;margin-right:4px;cursor:pointer;font-size:11px}
   .pbtn:hover{color:var(--text);border-color:var(--cyan)}
@@ -392,6 +398,16 @@ _INDEX_HTML = r"""<!doctype html>
         <h2>当前工单明细 <span>指标 / 指纹 / 权限 / 状态</span></h2>
         <div id="batchDetail"><div class="empty">点“明细”查看候选。</div></div>
       </div>
+      <div class="panel" id="approvalPanel" style="display:none;margin-top:12px">
+        <h2>审批 <span id="approvalTitle">—</span></h2>
+        <div class="form">
+          <label>批准人 / 驳回人<input id="appName" placeholder="姓名"></label>
+          <label>批语<textarea id="appNote" rows="3" placeholder="说明你已读证据/计划"></textarea></label>
+          <label id="appTokenRow">4 位校验码<input id="appToken" maxlength="4" placeholder="读完工单后填"></label>
+          <div><button id="appConfirm" class="pbtn">确认</button><button id="appCancel" class="pbtn">取消</button>
+            <span id="appError" class="small"></span></div>
+        </div>
+      </div>
     </section>
     <section id="page-regression" style="display:none">
       <h1>回归验证</h1>
@@ -426,11 +442,8 @@ _INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="panel" style="margin-top:12px">
         <h2>首次使用顺序</h2>
-        <div style="padding:10px 15px;color:var(--muted);font-size:12px;line-height:1.9">
-          1. 首页“安装”统一探针（会先卸旧探针）<br>
-          2. 进 Play 后点“采样开”；首页“巡检一轮”看 cluster<br>
-          3. 工单页建单/批准；需要单条时在明细里再批准<br>
-          4. 回归页新建套件，记录/跑 3 次基线，修后第 4 次验证并生成报告
+        <div id="onboard" style="padding:10px 15px;color:var(--muted);font-size:12px;line-height:1.9">
+          加载中…
         </div>
       </div>
     </section>
@@ -538,6 +551,16 @@ function renderSettings(s){
   $("settingsBody").innerHTML = rows.length
     ? rows.map(([k, v]) => `<tr><th style="width:160px">${esc(k)}</th><td class="mono small">${esc(v)}</td></tr>`).join("")
     : `<tr><td class="empty">无设置数据。</td></tr>`;
+  const p = s.probe || {}, bt = s.batch_tickets || [], rs2 = s.regression_suites || [];
+  const steps = [
+    ["安装探针", p.state === "alive"],
+    ["有探针事件/聚类", (s.cluster_total || 0) > 0],
+    ["有批量工单", bt.length > 0],
+    ["有回归套件", rs2.length > 0],
+  ];
+  $("onboard").innerHTML = steps.map(([label, ok]) =>
+    `<div>${ok ? '<span class="ok">✓</span>' : '<span class="bad">○</span>'} ${esc(label)}</div>`).join("")
+    + `<div class="small" style="margin-top:6px">顺序：装探针 → 采样开 → 巡检/建单 → 批准 → 回归 3 次基线 → 验证/报告</div>`;
 }
 async function verifyLast(sid){
   try{
@@ -570,6 +593,9 @@ async function buildTicket(){
 }
 function showTicketDetail(t){
   const items = (t.item_list || t.items || []).map(i => ({...i, tier: i.tier || i.permission_tier}));
+  const tl = (t.results || []).map(r =>
+    `<div class="small">· ${esc(r.metric || r.item_id || "")} → ${esc(r.status || "—")}` +
+    `${r.observation ? " · " + esc(JSON.stringify(r.observation).slice(0, 120)) : ""}</div>`).join("");
   $("batchDetail").innerHTML = `<div style="padding:10px 15px;color:var(--muted);font-size:12px">` +
     `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b></div>` +
     (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>计划</th><th>单条批准</th><th>原因</th></tr></thead><tbody>` +
@@ -583,7 +609,8 @@ function showTicketDetail(t){
         `<td class="small">${esc(files || "—")}${i.diff_count ? " (" + i.diff_count + ")" : ""}</td>` +
         `<td>${ap}</td><td class="small">${esc(i.error || "—")}</td></tr>`;
       }).join("") +
-      `</tbody></table>` : `<div class="empty">无候选。</div>`);
+      `</tbody></table>` : `<div class="empty">无候选。</div>`) +
+    (tl ? `<div style="padding:8px 15px;border-top:1px solid #182333"><b class="small">执行时间线</b>${tl}</div>` : "");
 }
 async function probeAction(act){
   try{
@@ -602,22 +629,49 @@ async function probeAction(act){
     await refresh();
   }catch(e){ alert("操作失败：" + e.message); }
 }
-async function ticketAction(tid, act, iid){
-  if(act === "item-approve"){
-    const approver = prompt("单条批准人姓名：");
-    if(!approver) return;
-    const note = prompt("单条批语（说明你已读计划/文件）：");
-    if(!note) return;
-    const token = prompt("单条校验码（明细里的 4 位）：");
-    if(token === null) return;
-    try{
-      const r = await post(`/api/tickets/${encodeURIComponent(tid)}/items/${encodeURIComponent(iid)}/approve`,
-                           {approver, note, token});
-      if(r.ticket) showTicketDetail(r.ticket);
-      await refresh();
-    }catch(e){ alert("单条批准失败：" + e.message); }
-    return;
+let approvalCtx = null;
+function openApproval(tid, act, iid){
+  const t = batchCache[tid] || {};
+  const isItem = act === "item-approve";
+  const it = isItem ? (t.item_list || []).find(x => x.item_id === iid) : null;
+  approvalCtx = isItem ? {kind:"item", tid, iid} : {kind:"ticket", tid, act};
+  $("approvalTitle").textContent = isItem
+    ? `${act} · ${(it && it.metric) || iid}` : `${act} · ${tid}`;
+  $("appName").value = ""; $("appNote").value = ""; $("appError").textContent = "";
+  $("appToken").value = isItem ? ((it && it.approve_token) || "") : (t.approve_token || "");
+  $("appTokenRow").style.display = act === "reject" ? "none" : "";
+  $("approvalPanel").style.display = "";
+  $("approvalPanel").scrollIntoView({behavior:"smooth", block:"nearest"});
+  $("appName").focus();
+}
+function hideApproval(){ approvalCtx = null; $("approvalPanel").style.display = "none"; }
+async function confirmApproval(){
+  if(!approvalCtx) return;
+  const approver = $("appName").value.trim();
+  const note = $("appNote").value.trim();
+  const token = $("appToken").value.trim();
+  if(!approver || !note){ $("appError").textContent = "批准人和批语必填"; return; }
+  if(approvalCtx.kind !== "item" && approvalCtx.act !== "reject" && !token){
+    $("appError").textContent = "校验码必填"; return;
   }
+  try{
+    let r;
+    if(approvalCtx.kind === "item"){
+      r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/items/${encodeURIComponent(approvalCtx.iid)}/approve`,
+                     {approver, note, token});
+      if(r.ticket) showTicketDetail(r.ticket);
+    }else if(approvalCtx.act === "approve"){
+      r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/approve`,
+                     {approver, note, token});
+    }else{
+      r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/reject`,
+                     {approver, note});
+    }
+    hideApproval();
+    await refresh();
+  }catch(e){ $("appError").textContent = "失败：" + e.message; }
+}
+async function ticketAction(tid, act, iid){
   if(act === "execute"){
     try{
       const r = await post(`/api/tickets/${encodeURIComponent(tid)}/execute`, {});
@@ -626,22 +680,7 @@ async function ticketAction(tid, act, iid){
     }catch(e){ alert("执行失败：" + e.message); }
     return;
   }
-  const t = batchCache[tid] || {};
-  const approver = prompt("批准人/驳回人姓名：");
-  if(!approver) return;
-  const note = prompt("批语（必填）：");
-  if(!note) return;
-  try{
-    if(act === "approve"){
-      const token = prompt("校验码（工单列表/明细里的 4 位）：", t.approve_token || "");
-      if(token === null) return;
-      await post(`/api/tickets/${encodeURIComponent(tid)}/approve`,
-                 {approver, note, token});
-    }else{
-      await post(`/api/tickets/${encodeURIComponent(tid)}/reject`, {approver, note});
-    }
-    await refresh();
-  }catch(e){ alert("操作失败：" + e.message); }
+  openApproval(tid, act, iid);
 }
 
 function setClass(el, cls){ el.className = "val " + (cls || ""); }
@@ -756,6 +795,10 @@ const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
 const createSuiteBtn = $("createSuiteBtn");
 if(createSuiteBtn) createSuiteBtn.addEventListener("click", createSuite);
+const appConfirm = $("appConfirm");
+if(appConfirm) appConfirm.addEventListener("click", confirmApproval);
+const appCancel = $("appCancel");
+if(appCancel) appCancel.addEventListener("click", hideApproval);
 document.addEventListener("click", (ev) => {
   const pb = ev.target.closest && ev.target.closest(".pbtn");
   if(pb){ probeAction(pb.dataset.pact); return; }

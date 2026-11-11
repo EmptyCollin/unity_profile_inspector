@@ -84,6 +84,7 @@ class BatchTicket(BaseModel):
                         if i.status in ("applied_unverified", "rolled_back", "failed")),
             "approve_token": self.approve_token if self.status == "awaiting_approval" else "",
             "approver": self.approver,
+            "results": self.results[-8:],
             "item_list": [{
                 "item_id": i.item_id,
                 "metric": i.metric, "shape": i.shape, "status": i.status,

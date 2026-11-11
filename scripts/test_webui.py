@@ -75,6 +75,10 @@ try:
     html = body.decode("utf-8", "replace")
     ok("首页 200", code == 200, f"code={code}")
     ok("首页含品牌与导航", "UPI 性能 Agent" in html and "首页" in html and "I5a 报告/设置" in html)
+    ok("工单页含正式审批表单/时间线容器",
+       "approvalPanel" in html and "appConfirm" in html
+       and "执行时间线" in html)
+    ok("设置页含 onboarding 状态", "onboard" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
