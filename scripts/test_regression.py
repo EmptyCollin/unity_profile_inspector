@@ -13,7 +13,8 @@ from upi.core.cluster import cluster_events            # noqa: E402
 from upi.core.cluster import align_clusters, cluster_events  # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent   # noqa: E402
 from upi.core.replay_driver import (ReplayDriverError,  # noqa: E402
-                                    SubprocessReplayDriver)
+                                    SubprocessReplayDriver, UnityReplayDriver,
+                                    driver_for)
 from upi.core.regression_report import build_report, write_report  # noqa: E402
 from upi.core.regression import (BaselineMatrix, RegressionPlan,  # noqa: E402
                                  RegressionRun, RegressionRunner,
@@ -175,6 +176,54 @@ try:
     ok("空命令报错", False)
 except ReplayDriverError:
     ok("空命令报错", True)
+
+# 自动 Unity replay：命令名/探针开关/新增事件（全注入，不碰 Editor）
+class _Probe:
+    def __init__(self):
+        self.calls = []
+
+    def sample(self, on, window=300):
+        self.calls.append((on, window))
+        return {"ok": True, "detail": "sample=" + ("on" if on else "off")}
+
+
+_ulog = EventLog()
+_ucli_calls = []
+
+
+def _ucli(name, *extra, project=None):
+    _ucli_calls.append(name)
+    if name == "editor.playmode start":
+        _ulog.append(ProbeEvent(kind="sample", metric="cpu", rel_frame=1,
+                                series=[1.0] * 5, data_tier="A2"))
+    return {"ok": True, "data": {}}
+
+
+_uprobe = _Probe()
+_udrv = UnityReplayDriver(cli=_ucli, probe=_uprobe, sleep=lambda _s: None,
+                          event_log=_ulog, warmup_s=0, window_s=0.01)
+_usuite = ReplaySuite(suite_id="u", project=str(TMP),
+                      scene="Assets/UpiFixtures/Scenes/X.unity",
+                      protocol_fingerprint="fp-u")
+_uproto, _uevs = _udrv.run_once(_usuite)
+ok("Unity driver 返回协议与新增事件", _uproto == "fp-u" and len(_uevs) >= 1,
+   f"{_uproto} n={len(_uevs)}")
+ok("Unity driver 开场景/Play/Stop 全走 CLI",
+   "scene open" in _ucli_calls and "editor.playmode start" in _ucli_calls
+   and "editor.playmode stop" in _ucli_calls, str(_ucli_calls))
+ok("Unity driver 采样开+关", [c[0] for c in _uprobe.calls] == [True, False],
+   str(_uprobe.calls))
+ok("driver_for 选 Unity（无 command 有 scene）",
+   isinstance(driver_for(_usuite), UnityReplayDriver))
+ok("driver_for 选子进程（有 command）",
+   isinstance(driver_for(ReplaySuite(suite_id="s", command="x")),
+              SubprocessReplayDriver))
+
+# sample 窗口按指标合并：多次抽检不是多个 issue
+_me = [ProbeEvent(kind="sample", metric="m", rel_frame=r,
+                  series=[1.0] * 5, data_tier="A2") for r in (1, 2, 3)]
+ok("sample 合并为单 cluster",
+   len(cluster_events(_me, merge_gap=300, merge_sample=True)) == 1)
 
 
 print()

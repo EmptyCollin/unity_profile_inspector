@@ -74,6 +74,11 @@ def _norm_protocol(s: str) -> str:
     return (s or "").strip()
 
 
+def merge_gap_for(suite: ReplaySuite) -> int:
+    """sample 窗口按帧合并：默认 5s×60fps=300，至少 30。"""
+    return max(30, int(round(float(suite.window_s or 5) * 60)))
+
+
 class BaselineMatrix(BaseModel):
     suite_id: str
     runs: list[RegressionRun] = Field(default_factory=list)
@@ -116,7 +121,8 @@ class RegressionRunner:
         m = BaselineMatrix(suite_id=self.suite.suite_id, min_runs=n)
         for i in range(n):
             proto, events = self.run_once(self.suite)
-            cs = cluster_events(events, merge_gap=30)
+            cs = cluster_events(events, merge_gap=merge_gap_for(self.suite),
+                                merge_sample=True)
             if self.align:
                 cs = align_clusters(cs)
             m.runs.append(RegressionRun(
@@ -321,7 +327,8 @@ class RegressionStore:
         if suite is None:
             return None
         events, _bad = event_log.read_all(compat=True)
-        cs = cluster_events(events, merge_gap=30)
+        cs = cluster_events(events, merge_gap=merge_gap_for(suite),
+                            merge_sample=True)
         m = self.load_matrix(sid) or BaselineMatrix(suite_id=sid)
         idx = len(m.runs)
         r = RegressionRun(

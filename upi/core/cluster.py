@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import math
 import statistics
+from collections import Counter
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -127,16 +128,20 @@ def _cid(metric: str, shape: str, first_rel: int) -> str:
 
 
 def cluster_events(events: list[ProbeEvent], *, merge_gap: int = 30,
-                   min_occurrences: int = 1) -> list[IssueCluster]:
+                   min_occurrences: int = 1,
+                   merge_sample: bool = False) -> list[IssueCluster]:
     """同指标 + 同波形 + 相对帧相邻的事件 → 一个 cluster。
 
     merge_gap 单位是回放相对帧。breach 通常 15~30；sample 窗口可按调用方放大。
+    merge_sample=True 时，sample 事件按指标合并、形状取组内多数（回归用：
+    同一窗口的多次抽检不是多个 issue）。
     """
     buckets: dict[tuple[str, str, str], list[ProbeEvent]] = {}
     for e in events:
         if e.kind not in ("breach", "sample") or not e.metric:
             continue
-        buckets.setdefault((e.metric, e.kind, _shape_of(e)), []).append(e)
+        shape = "*" if (merge_sample and e.kind == "sample") else _shape_of(e)
+        buckets.setdefault((e.metric, e.kind, shape), []).append(e)
 
     out: list[IssueCluster] = []
     for (metric, kind, shape), group in buckets.items():
@@ -158,10 +163,14 @@ def cluster_events(events: list[ProbeEvent], *, merge_gap: int = 30,
                   key=lambda c: (c.metric, c.first_rel, c.shape))
 
 
-def _build(metric: str, shape: Shape, group: list[ProbeEvent],
+def _build(metric: str, shape: str, group: list[ProbeEvent],
            min_occurrences: int) -> IssueCluster:
     rels = [_rel(e) for e in group]
-    final_shape: Shape = shape
+    if shape == "*":
+        counts = Counter(_shape_of(e) for e in group)
+        final_shape: Shape = counts.most_common(1)[0][0]
+    else:
+        final_shape = shape  # type: ignore[assignment]
     if len(group) >= 3 and _periodic(rels):
         final_shape = "periodic"
     elif len(group) >= 3 and (max(rels) - min(rels)) <= 30:

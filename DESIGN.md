@@ -753,5 +753,7 @@ trace: run_id
   夹具脏区已清理，HEAD/工作区恢复。
 - **I6b2b2b 完成**：缺陷态夹具产品 plan E2E（PB-FULL-REUSE）17/17；
   真实 applied/compile/rollback/字节恢复。
+- **I4b2b2b2a 完成**：夹具 Unity 自动 replay（scene/Play/探针/Stop/新增事件），
+  3 次真实基线通过；仍无 verified/完整 RunReport。
 - **I6c 完成**：删除 TUI 模块/动作层/测试；30 套离线测试通过。
-- **I6b2b2c**：真实用户工程接入、产品 plan 写入/编译/回滚、迁移/发布审计、发布。
+- **I4b2b2b2b / I6b2b2c**：全量守护+RunReport；真实用户工程。

@@ -1022,7 +1022,7 @@ class _Handler(BaseHTTPRequestHandler):
         if m:
             try:
                 from upi.core.regression import RegressionRunner, RegressionStore
-                from upi.core.replay_driver import SubprocessReplayDriver
+                from upi.core.replay_driver import driver_for
                 store = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
                 suite = store.load_suite(m.group(1))
                 if suite is None:
@@ -1034,7 +1034,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 n = max(3, min(10, int(body.get("runs", 3) or 3)))
                 runner = RegressionRunner(
-                    suite, store, SubprocessReplayDriver().run_once,
+                    suite, store, driver_for(suite).run_once,
                     align=bool(body.get("align", True)))
                 mtx = runner.collect_baseline(n)
                 self._send_json(200, {"ok": True, "runs": len(mtx.runs),
