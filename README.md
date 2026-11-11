@@ -91,5 +91,6 @@ DESIGN.md     详细设计（§14 为两形态权威）
 python scripts/run_tests.py             # 31 套离线测试（自动 UTF-8）
 python scripts/check_fixture_split.py   # 夹具隔离闸
 python scripts/acceptance.py            # 6 项验收，落 runs/acceptance_*.json
+python scripts/e2e_smoke.py             # Web/API 全链路 10 项，落 runs/e2e_smoke_*.json
 python -m upi ui --check                # Web 状态自检（ASCII JSON）
 ```

@@ -357,4 +357,5 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - I5b2 完成：明细 diff 展开、审批历史；移除 `upi dev tui` 入口（模块仅留测试）。
 - I6a 完成：README/使用说明重写为 v2 Web 单通道，删 TUI 用法，测试口径 31 套。
 - I6b1 完成：`acceptance.py` 6 项验收落盘；Web 增加 nosniff/no-referrer/DENY。
-- I6b2：真实工程 E2E、安全/迁移审计、夹具 Unity 适配、发布（`docs/迭代计划.md`）。
+- I6b2a 完成：`e2e_smoke.py` Web/API 全链路 10/10（不碰 Unity）。
+- I6b2b：真实工程/夹具 Unity E2E、迁移/发布审计（`docs/迭代计划.md`）。
