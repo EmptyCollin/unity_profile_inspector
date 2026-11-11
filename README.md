@@ -39,9 +39,10 @@ python -m upi start
 python -m upi ui
 ```
 
-当前做到 **I6b2b2a**：问题聚类、指纹库、批量工单/正式审批、探针安装/采样/
+当前做到 **I6b2b2b**：问题聚类、指纹库、批量工单/正式审批、探针安装/采样/
 自动巡检、回归套件/基线/验证/报告、设置/接入只读页都已接进 Web；真实
-Unity **写-编译-回滚 harness** 已通过。旧 ANSI 终端入口/模块已移除。
+Unity **写-编译-回滚 harness** 与**缺陷态夹具产品 plan** 均已通过。
+旧 ANSI 终端入口/模块已移除。
 
 **接入自己的工程**：设置页只读展示当前 profile/工程；完整 Web 接入向导在
 I5b 之后。迁移期编辑 `projects/<id>.json`。回放准入见
@@ -53,8 +54,10 @@ I5b 之后。迁移期编辑 `projects/<id>.json`。回放准入见
 - **常驻自动修**当前只有少量模板（夹具 CPU full-reuse）能生成 plan；
   夹具脚本是 `blocked`，需要单条人工批准；
 - **真实 Unity harness** 已做“临时注释 patch → snapshot → apply → 编译 →
-  回滚 → HEAD 恢复”E2E；但这**不是**“夹具 CPU 产品 plan 已自动修好”：
-  该 plan 的 find 段来自缺陷态，当前 HEAD 已修复，直接套用会 `diff_rejected`；
+  回滚 → HEAD 恢复”E2E；**缺陷态夹具**上还真实执行了 `PB-FULL-REUSE`
+  产品 plan（17/17：applied/compile/rollback/字节恢复）。但这不等于当前
+  修复态 HEAD 可被再套一遍：产品 plan 的 find 段来自缺陷参照，当前 HEAD
+  已修复，直接套用会 `diff_rejected`；
 - **回归真实 replay**：可用 `suite.command` 跑用户提供的命令；尚未内置
   夹具 Unity 自动 Play/ReplayDriver/退出适配；
 - **GPU 逐笔归因**仍转人工；“量大了以后会炸”类潜在风险暂测不到；
@@ -96,6 +99,7 @@ python scripts/check_fixture_split.py   # 夹具隔离闸
 python scripts/acceptance.py            # 6 项验收，落 runs/acceptance_*.json
 python scripts/e2e_smoke.py             # Web/API 全链路 10 项，落 runs/e2e_smoke_*.json
 python scripts/e2e_unity_write.py       # 真实 Unity 写-编译-回滚 9 项（临时改夹具，自动恢复）
+python scripts/e2e_unity_product.py     # 缺陷态夹具产品 plan 17 项（临时装回缺陷，自动恢复）
 python scripts/release_check.py         # 发布前审计，落 runs/release_*.json
 python -m upi ui --check                # Web 状态自检（ASCII JSON）
 ```
