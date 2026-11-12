@@ -1,0 +1,17 @@
+{
+  "replay_id": "c03",
+  "base_hash": "e616c40678022314",
+  "commands": [
+    {
+      "type": "start_game"
+    },
+    {
+      "type": "wait",
+      "seconds": 3.0
+    },
+    {
+      "type": "stop"
+    }
+  ],
+  "notes": "c03: HUD/item 每帧重建，无需交换"
+}

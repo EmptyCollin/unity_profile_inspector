@@ -21,17 +21,20 @@ def ok(name, cond, detail=""):
 
 
 PROJECT = ROOT / "sim" / "project"
-CASES = [ROOT / "sim" / "cases" / "c01", ROOT / "sim" / "cases" / "c02"]
+CASES = [ROOT / "sim" / "cases" / "c01", ROOT / "sim" / "cases" / "c02",
+         ROOT / "sim" / "cases" / "c03"]
 base_board = (PROJECT / "Assets/DevSim/Runtime/BoardModel.cs").read_bytes()
 base_game = (PROJECT / "Assets/DevSim/Runtime/ChromaGame.cs").read_bytes()
 out = Path(tempfile.mkdtemp(prefix="upi_combo_")) / "project"
 try:
     run = apply_cases(PROJECT, CASES, out)
-    ok("c01+c02 组合", run.case_ids == ["c01", "c02"] and len(run.files) == 2, run)
+    ok("c01+c02+c03 组合", run.case_ids == ["c01", "c02", "c03"] and len(run.files) == 2, run)
     board = (out / "Assets/DevSim/Runtime/BoardModel.cs").read_text(encoding="utf-8")
     game = (out / "Assets/DevSim/Runtime/ChromaGame.cs").read_text(encoding="utf-8")
     ok("c01 病存在", "var hit = new bool[N, N];" in board and "_hitBuffer" not in board)
     ok("c02 病存在", "lastHudRound" not in game and 'roundText.text = "ROUND " + round;' in game)
+    ok("c03 病存在", "lastItemCounts[i] != inventory[i]" not in game
+       and "if (itemCountLabels[i] != null) itemCountLabels[i].text" in game)
     ok("base 不冲突",
        (PROJECT / "Assets/DevSim/Runtime/BoardModel.cs").read_bytes() == base_board
        and (PROJECT / "Assets/DevSim/Runtime/ChromaGame.cs").read_bytes() == base_game)

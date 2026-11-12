@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.case_overlay import tree_hash  # noqa: E402
-from upi.core.replay_spec import ReplayCommand, load_replay  # noqa: E402
+from upi.core.replay_spec import (ReplayCommand, load_replay,  # noqa: E402
+                                   merge_replays)
 
 PASS, FAIL = [], []
 
@@ -41,6 +42,19 @@ try:
     ok("负时间拒绝", False)
 except ValueError:
     ok("负时间拒绝", True)
+
+merged = merge_replays([
+    load_replay(ROOT / "sim/replay/c01.json"),
+    load_replay(ROOT / "sim/replay/c02.json"),
+    load_replay(ROOT / "sim/replay/c03.json"),
+])
+ok("组合 replay 只有一个起停",
+   merged.commands[0].type == "start_game" and merged.commands[-1].type == "stop"
+   and sum(c.type == "start_game" for c in merged.commands) == 1
+   and sum(c.type == "stop" for c in merged.commands) == 1)
+ok("组合 replay 保留各 case 命令",
+   sum(c.type == "swap" for c in merged.commands) == 2
+   and sum(c.type == "wait" for c in merged.commands) == 5)
 
 print(f"\n==== c01 replay/oracle 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 raise SystemExit(1 if FAIL else 0)

@@ -7,41 +7,11 @@
     },
     {
       "type": "wait",
-      "seconds": 2.0
-    },
-    {
-      "type": "swap",
-      "from_cell": [
-        0,
-        0
-      ],
-      "to_cell": [
-        0,
-        1
-      ]
-    },
-    {
-      "type": "wait",
-      "seconds": 2.0
-    },
-    {
-      "type": "swap",
-      "from_cell": [
-        1,
-        1
-      ],
-      "to_cell": [
-        1,
-        2
-      ]
-    },
-    {
-      "type": "wait",
-      "seconds": 2.0
+      "seconds": 3.0
     },
     {
       "type": "stop"
     }
   ],
-  "notes": "c01: 稳定触发 FindMatches/CountByColor 的匹配分配"
+  "notes": "c02: HUD/item 每帧重建，无需交换"
 }

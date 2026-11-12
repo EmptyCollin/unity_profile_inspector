@@ -1,0 +1,18 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -922,14 +922,8 @@
+         private void RefreshItemLabelsBody()
+         {
+             if (itemCountLabels == null) return;
+-            if (lastItemCounts == null || lastItemCounts.Length != itemCountLabels.Length)
+-                lastItemCounts = new int[itemCountLabels.Length];
+             for (int i = 0; i < itemCountLabels.Length; i++)
+-                if (itemCountLabels[i] != null && lastItemCounts[i] != inventory[i])
+-                {
+-                    lastItemCounts[i] = inventory[i];
+-                    itemCountLabels[i].text = "x" + inventory[i];
+-                }
++                if (itemCountLabels[i] != null) itemCountLabels[i].text = "x" + inventory[i];
+         }
+ 
+         // ───────────────────────── board ─────────────────────────

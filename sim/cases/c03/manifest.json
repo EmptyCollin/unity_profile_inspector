@@ -1,0 +1,14 @@
+{
+  "case_id": "c03",
+  "overlay": [],
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/item-label.patch"
+    }
+  ],
+  "replay": "c03",
+  "oracle": "c03",
+  "base_hash": "e616c40678022314",
+  "notes": "item labels rebuilt every update; same file as c02, different hunk"
+}

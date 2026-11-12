@@ -1,10 +1,14 @@
 {
   "case_id": "c02",
-  "overlay": [
-    "Assets/DevSim/Runtime/ChromaGame.cs"
+  "overlay": [],
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/chromagame.patch"
+    }
   ],
   "replay": "c02",
   "oracle": "c02",
   "base_hash": "e616c40678022314",
-  "notes": "HUD static text rebuilt every update"
+  "notes": "HUD static text rebuilt every update (minimal patch)"
 }
