@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -68,6 +69,7 @@ namespace DevSim
         private void Start()
         {
             cfg = CaseConfig.Load();
+            WriteFeatureState(cfg);
             rng = new System.Random(cfg.seed);
             tier = cfg.start_tier;
             Application.targetFrameRate = 60;
@@ -173,6 +175,37 @@ namespace DevSim
             var img = go.AddComponent<Image>();
             img.color = color;
             img.raycastTarget = true;
+        }
+
+        [Serializable]
+        private sealed class FeatureState
+        {
+            public string case_id;
+            public bool legacy_ui, legacy_material, legacy_match_alloc, sync_shop_load;
+            public bool legacy_particle, legacy_canvas, legacy_texture, legacy_hint;
+        }
+
+        private static void WriteFeatureState(CaseConfig c)
+        {
+            try
+            {
+                var fs = new FeatureState
+                {
+                    case_id = c.case_id,
+                    legacy_ui = c.legacy_ui,
+                    legacy_material = c.legacy_material,
+                    legacy_match_alloc = c.legacy_match_alloc,
+                    sync_shop_load = c.sync_shop_load,
+                    legacy_particle = c.legacy_particle,
+                    legacy_canvas = c.legacy_canvas,
+                    legacy_texture = c.legacy_texture,
+                    legacy_hint = c.legacy_hint,
+                };
+                // 运行期特征状态，仅用于“当前激活了哪些路径”；不是 oracle。
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "devsim_active_features.json"),
+                                  JsonUtility.ToJson(fs));
+            }
+            catch (Exception e) { Debug.LogWarning("DevSim feature state write failed: " + e.Message); }
         }
 
         private void BuildUI()

@@ -41,8 +41,20 @@ PATTERNS: tuple[Pattern, ...] = (
     Pattern("per_tile_texture", "total_used_memory", "gpu",
             r"new\s+Texture2D\s*\(", "共享图集优于每格独立 Texture2D/Sprite"),
     Pattern("idle_hint_scan_per_frame", "cpuMainThreadFrameTimeMs", "cpu",
-            r"^\s*HasMatch\s*\(\s*\)\s*;", "空闲提示应缓存/节流，不应每帧全盘扫描"),
+            r"HasMatch\s*\(\s*\)\s*;", "空闲提示应缓存/节流，不应每帧全盘扫描"),
 )
+
+
+FLAG_FOR_PATTERN = {
+    "ui_text_rebuild_per_frame": "legacy_ui",
+    "per_instance_material": "legacy_material",
+    "match_scan_allocation": "legacy_match_alloc",
+    "sync_resources_load_on_shop": "sync_shop_load",
+    "per_clear_particle_instantiate": "legacy_particle",
+    "canvas_layout_churn": "legacy_canvas",
+    "per_tile_texture": "legacy_texture",
+    "idle_hint_scan_per_frame": "legacy_hint",
+}
 
 
 def _iter_cs(root: Path) -> Iterable[Path]:
@@ -57,7 +69,7 @@ def _iter_cs(root: Path) -> Iterable[Path]:
 
 
 def scan(project_root: str | Path, *, project_id: str = "",
-         scene: str = "") -> list[OpportunityFinding]:
+         scene: str = "", active_flags: set[str] | None = None) -> list[OpportunityFinding]:
     root = Path(project_root).resolve()
     found: list[OpportunityFinding] = []
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -68,6 +80,8 @@ def scan(project_root: str | Path, *, project_id: str = "",
             continue
         rel = path.relative_to(root).as_posix()
         for pat in PATTERNS:
+            if active_flags is not None and FLAG_FOR_PATTERN.get(pat.id) not in active_flags:
+                continue
             try:
                 rx = re.compile(pat.regex)
             except re.error:

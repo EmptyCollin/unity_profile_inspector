@@ -36,6 +36,10 @@ def main() -> int:
     ok("机会不进入 verified 语义", all(f.status == "draft" for f in findings))
     ok("代码锚点在工程内", all(f.code_anchor.file.startswith("Assets/") for f in findings))
 
+    inactive = scan(ROOT / "sim" / "project", project_id="chroma-rogue",
+                    active_flags=set())
+    ok("运行期未激活时 0 机会", len(inactive) == 0, str(len(inactive)))
+
     ev = ROOT / "runs" / "opportunity_eval_c18.json"
     if ev.exists():
         d = json.loads(ev.read_text(encoding="utf-8"))

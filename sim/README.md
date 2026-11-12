@@ -47,10 +47,10 @@ python sim/oracle/evaluate.py --case c18
 ```
 
 - `OpportunityFinding` 已落模型：必须带 `reference_ref`，不进入 `verified` 计数；
-- 当前扫描器是**静态模式匹配**，会看到代码里所有条件分支；
-- `c18`：recall=1.0，precision≈0.57（把未激活的 particle/canvas/texture 也报了）；
-- `c20` 负对照当前 **negative_ok=false**：静态扫描无法区分“代码存在”和“case 激活”，
-  需要运行期门控/探针证据；这是下一步，不是通过。
+- 当前是**静态模式匹配 + 运行期 feature 门控**：游戏启动时写
+  `%TEMP%/devsim_active_features.json`，扫描器只报当前 case 激活的分支；
+- 22 case 全跑结果：**recall=1.0、precision=1.0、3 个负对照全过**；
+- 若没有运行期 feature 状态，静态扫描仍会报休眠分支（这是已知局限）。
 
 ## 尚未完成
 
