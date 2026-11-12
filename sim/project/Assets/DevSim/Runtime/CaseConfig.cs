@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DevSim
 {
-    // 由外部 replay 传入的场景配置；工程本身不知道 oracle/期望机会。
+    // 由外部命令传入的运行配置；工程本身不包含期望结果。
     // 轮次/棋盘/商店规则全部走这里，UI 与 replay 共用同一份数值。
     [Serializable]
     public sealed class CaseConfig

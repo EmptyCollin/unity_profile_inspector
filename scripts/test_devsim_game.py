@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "sim" / "project"
-SELFTEST = ROOT / "sim" / "tests" / "devsim_selftest.cs"
+SELFTEST = ROOT / "probe" / "devsim_selftest.cs"
 OUT = ROOT / "runs"
 
 CASE = {

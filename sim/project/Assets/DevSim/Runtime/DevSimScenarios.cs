@@ -4,7 +4,7 @@ namespace DevSim
 {
     /// <summary>
     /// UI 专项测试与 replay 共用的 case scenario 开关。
-    /// 只描述“当前激活哪些开发写法”，不含 oracle/期望机会。
+    /// 只描述“当前激活哪些开发写法”，不含期望结果。
     /// </summary>
     public static class DevSimScenarios
     {

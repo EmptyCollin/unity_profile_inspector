@@ -316,7 +316,7 @@ namespace DevSim
                     legacy_hint = c.legacy_hint,
                     legacy_anim = c.legacy_anim,
                 };
-                // 运行期特征状态，仅用于“当前激活了哪些路径”；不是 oracle。
+                // 运行期特征状态，仅用于“当前激活了哪些路径”。
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "devsim_active_features.json"),
                                   JsonUtility.ToJson(fs));
             }
@@ -2104,7 +2104,7 @@ namespace DevSim
         }
 
         // ───────────────────────── deterministic debug API ─────────────────────────
-        // 供 sim/tests 的确定性测试与 replay 取证使用；不读 oracle、不含期望答案。
+        // 供外部确定性测试与 replay 取证使用；不读期望答案。
 
         [Serializable]
         public sealed class DebugStateDto

@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DevSim.Editor
 {
-    /// <summary>一次性把 shop payload 标成 addressable；答案/oracle 不在工程里。</summary>
+    /// <summary>一次性把 shop payload 标成 addressable；工程内不包含期望结果。</summary>
     [InitializeOnLoad]
     public static class DevSimAddressablesSetup
     {

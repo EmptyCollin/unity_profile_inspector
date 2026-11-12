@@ -16,7 +16,7 @@ namespace DevSim
         public int col;
         public int dragEvents;
 
-        // 供确定性测试与排障读取的最近一次拖拽轨迹（不是 oracle）。
+        // 供确定性测试与排障读取的最近一次拖拽轨迹。
         public int lastBeginRow = -1, lastBeginCol = -1;
         public int lastEndRow = -1, lastEndCol = -1;
         public Vector2 lastTotalDelta;
