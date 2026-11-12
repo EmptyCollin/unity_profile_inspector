@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,10 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.case_overlay import apply_cases  # noqa: E402
+from upi.core.replay_exec import ReplayExecutor  # noqa: E402
 from upi.core.replay_spec import load_replay, merge_replays  # noqa: E402
 
 CASES_DIR = ROOT / "sim" / "cases"
 LAB = ROOT / "runs" / "i8_lab"
+PROJECT = ROOT / "sim" / "project"
 
 
 def cases():
@@ -67,6 +72,145 @@ def latest_candidates() -> dict:
     return {"ok": True, "path": str(p), "data": json.loads(p.read_text(encoding="utf-8"))}
 
 
+def unity(*args, timeout=120) -> dict:
+    p = subprocess.run(["unity", "command", *args, "--project-path", str(PROJECT),
+                        "--format", "json"], cwd=str(ROOT), capture_output=True,
+                       text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    try:
+        return json.loads(p.stdout)
+    except Exception:
+        return {"success": False, "raw": p.stdout[-500:]}
+
+
+def editor_status() -> dict:
+    d = unity("editor", "status")
+    if not d.get("success"):
+        return {"ok": False, "error": "Unity pipeline 不可达；不自动开新窗口",
+                "detail": d.get("errors") or d.get("raw")}
+    s = ((d.get("data") or {}).get("result") or {})
+    return {"ok": True, "status": s.get("status"), "playMode": s.get("playMode")}
+
+
+def _git_clean() -> bool:
+    p = subprocess.run(["git", "status", "--porcelain", "--", "sim/project"],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    return not (p.stdout or "").strip()
+
+
+def apply_to_base() -> dict:
+    f = LAB / "preview.json"
+    if not f.exists():
+        return {"ok": False, "error": "先组合预览"}
+    if not _git_clean():
+        return {"ok": False, "error": "sim/project 有未提交改动，拒绝应用"}
+    pv = json.loads(f.read_text(encoding="utf-8"))
+    src = Path(pv["workdir"])
+    backup = LAB / "backup"
+    if backup.exists():
+        shutil.rmtree(backup)
+    backup.mkdir(parents=True)
+    touched = []
+    for rel in pv["files"]:
+        s = src / rel
+        d = PROJECT / rel
+        b = backup / rel
+        b.parent.mkdir(parents=True, exist_ok=True)
+        if d.exists():
+            shutil.copy2(d, b)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(s, d)
+        touched.append(rel)
+    (LAB / "touched.json").write_text(json.dumps(touched, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+    d = unity("recompile")
+    deadline = time.time() + 20
+    st = {}
+    while time.time() < deadline:
+        st = ((unity("recompile_status").get("data") or {}).get("result") or {})
+        if st.get("status") in {"completed", "up_to_date", "failed"}:
+            break
+        time.sleep(1)
+    if st.get("failed"):
+        restore_base()
+        return {"ok": False, "error": "编译失败，已自动恢复 base", "compile": st}
+    return {"ok": True, "touched": touched, "compile": st}
+
+
+def restore_base() -> dict:
+    f = LAB / "touched.json"
+    touched = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    if touched:
+        subprocess.run(["git", "checkout", "--", *[f"sim/project/{r}" for r in touched]],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    unity("editor.playmode stop")
+    return {"ok": True, "restored": touched, "clean": _git_clean()}
+
+
+def run_lab_replay() -> dict:
+    f = LAB / "replay.json"
+    if not f.exists():
+        return {"ok": False, "error": "先组合预览"}
+    es = editor_status()
+    if not es.get("ok") or es.get("playMode") != "playing":
+        return {"ok": False, "error": "Unity 需要在 Play Mode", "editor": es}
+    spec = load_replay(f)
+    steps = ReplayExecutor(PROJECT).run(spec)
+    slim = []
+    for s in steps:
+        st = s.get("state")
+        if isinstance(st, str) and len(st) > 300:
+            try:
+                st = json.loads(st)
+            except Exception:
+                st = st[:300]
+        if isinstance(st, dict):
+            st = {k: st.get(k) for k in ("phase", "shopOpen", "totalCleared", "accepted") if k in st}
+        slim.append({**s, "state": st})
+    return {"ok": True, "replay_id": spec.replay_id, "steps": slim}
+
+
+def capture_candidates() -> dict:
+    es = editor_status()
+    if not es.get("ok") or es.get("playMode") != "playing":
+        return {"ok": False, "error": "Unity 需要在 Play Mode", "editor": es}
+    ev = ROOT / "runs" / "_probe" / "evidence_v1.json"
+    try:
+        ev.unlink()
+    except OSError:
+        pass
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--file", str(ROOT / "probe" / "upi_evidence_v1.cs"), "--format", "json"],
+                   capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   timeout=60)
+    deadline = time.time() + 10
+    while time.time() < deadline and not ev.exists():
+        time.sleep(0.2)
+    if not ev.exists():
+        return {"ok": False, "error": "collector 没有写出证据"}
+    run_id = "lab"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
+                    "--project", str(PROJECT), "--evidence", str(ev),
+                    "--run-id", run_id, "--scene", "Assets/Scenes/00_Bootstrap.unity"],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
+    out = ROOT / "runs" / run_id / "evidence" / "candidates.json"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
+                    "--project", str(PROJECT), "--evidence", str(bundle),
+                    "--out", str(out), "--limit", "8"],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    if not out.exists():
+        return {"ok": False, "error": "候选生成失败"}
+    data = json.loads(out.read_text(encoding="utf-8"))
+    return {"ok": True, "path": str(out),
+            "candidates": [{"kind": c.get("kind"), "root_cause": c.get("root_cause"),
+                            "score": c.get("score"), "evidence_n": c.get("evidence_n")}
+                           for c in data.get("candidates", [])[:8]]}
+
+
 HTML = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <title>I8 Lab</title><style>
 body{font:14px system-ui;background:#0f141b;color:#dbe7f3;max-width:1000px;margin:30px auto;padding:0 18px}
@@ -78,6 +222,11 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 <h1>I8 Lab <span class="small">病例组合 / replay / 候选查看（安全模式）</span></h1>
 <div class="card"><b>病例</b><div id="cases"></div>
 <button onclick="runPreview()">组合到临时工程</button>
+<button onclick="checkEditor()">检查 Unity</button>
+<button onclick="applyBase()">应用到 base</button>
+<button onclick="runReplay()">执行 replay</button>
+<button onclick="capture()">采集候选</button>
+<button onclick="restore()">恢复 base</button>
 <button onclick="loadCandidates()">查看最近候选</button>
 <button onclick="loadPreviewInfo()">查看当前组合</button>
 <span id="msg" class="small"></span></div>
@@ -86,9 +235,15 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 async function api(path, body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return await r.json();}
 async function init(){const d=await api('/api/cases');document.getElementById('cases').innerHTML=d.cases.map(c=>`<label><input type="checkbox" value="${c.case_id}" checked> <b>${c.case_id}</b> — ${c.notes||''} <span class="small">${c.replay}</span></label>`).join('');}
 function selected(){return [...document.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);}
-async function runPreview(){document.getElementById('msg').textContent='组合中...';const r=await api('/api/preview',{cases:selected()});document.getElementById('msg').textContent=r.ok?'完成':'失败';document.getElementById('out').textContent=JSON.stringify(r,null,2);}
-async function loadPreviewInfo(){const r=await api('/api/preview_info');document.getElementById('out').textContent=JSON.stringify(r,null,2);}
-async function loadCandidates(){const r=await api('/api/candidates');document.getElementById('out').textContent=JSON.stringify(r,null,2);}
+function show(r){document.getElementById('msg').textContent=r.ok?'完成':'失败';document.getElementById('out').textContent=JSON.stringify(r,null,2);}
+async function runPreview(){document.getElementById('msg').textContent='组合中...';show(await api('/api/preview',{cases:selected()}));}
+async function checkEditor(){show(await api('/api/editor'));}
+async function applyBase(){if(!confirm('会临时修改 sim/project，失败自动恢复。继续？'))return;document.getElementById('msg').textContent='应用中...';show(await api('/api/apply',{}));}
+async function runReplay(){document.getElementById('msg').textContent='执行 replay...';show(await api('/api/replay',{}));}
+async function capture(){document.getElementById('msg').textContent='采集中...';show(await api('/api/capture',{}));}
+async function restore(){show(await api('/api/restore',{}));}
+async function loadPreviewInfo(){show(await api('/api/preview_info'));}
+async function loadCandidates(){show(await api('/api/candidates'));}
 init();
 </script></body></html>"""
 
@@ -119,6 +274,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "cases": cases()})
         if p == "/api/candidates":
             return self._send(200, latest_candidates())
+        if p == "/api/editor":
+            return self._send(200, editor_status())
         if p == "/api/preview_info":
             f = LAB / "preview.json"
             if not f.exists():
@@ -139,6 +296,30 @@ class H(BaseHTTPRequestHandler):
                 (LAB / "preview.json").write_text(json.dumps(r, ensure_ascii=False, indent=2),
                                                   encoding="utf-8")
                 self._send(200, r)
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/apply":
+            try:
+                self._send(200, apply_to_base())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/replay":
+            try:
+                self._send(200, run_lab_replay())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/capture":
+            try:
+                self._send(200, capture_candidates())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/restore":
+            try:
+                self._send(200, restore_base())
             except Exception as e:  # noqa: BLE001
                 self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
