@@ -61,6 +61,10 @@ ok("候选有源码", cs[0].sources and cs[0].sources[0].file.endswith("Foo.cs")
 ok("候选不来自 EditorLoop", all("EditorLoop" not in c.root_cause for c in cs))
 ok("候选有 evidence id", all(c.evidence_ids for c in cs))
 ok("候选 limit", len(generate_candidates(bundle, g, project_root=proj, limit=1)) == 1)
+ok("单帧标 single_frame", all(c.interval_basis == "single_frame" for c in cs),
+   [(c.kind, c.interval_basis) for c in cs])
+ok("候选带区间", all(c.score_interval_low <= c.score <= c.score_interval_high
+                 for c in cs))
 
 fp = FingerprintStore(tmp / "fp.db")
 fp.seed_builtin()

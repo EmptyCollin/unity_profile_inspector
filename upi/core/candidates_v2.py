@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from upi.core.evidence_graph import EvidenceGraph
 from upi.core.evidence_v2 import EvidenceBundleV2, SourceSpan
+from upi.core.intervals import bootstrap_ci
 
 
 class CandidateV2(BaseModel):
@@ -25,6 +26,10 @@ class CandidateV2(BaseModel):
     sources: list[SourceSpan] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     score: float = 0.0
+    score_interval_low: float = 0.0
+    score_interval_high: float = 0.0
+    interval_basis: str = ""
+    evidence_n: int = 0
     prior: float = 0.0
     source_kind: str = "evidence"
 
@@ -44,7 +49,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
 
     # 1) 分配点：同源码位置聚合 bytes×count；这是 GC 类最直接的证据。
     alloc_by_span: dict[tuple, dict] = defaultdict(lambda: {"bytes": 0, "count": 0,
-                                                            "symbol": "", "evidence": []})
+                                                            "symbol": "", "evidence": [],
+                                                            "vals": []})
     for i, site in enumerate(bundle.allocations):
         span = site.source
         if span is None and site.stack:
@@ -58,6 +64,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
         alloc_by_span[key]["count"] += site.count or 1
         alloc_by_span[key]["symbol"] = sym or alloc_by_span[key]["symbol"]
         alloc_by_span[key]["evidence"].append(f"alloc:{i}")
+        alloc_by_span[key]["vals"].append(float(site.bytes * max(1, site.count or 1)))
 
     for (file, line), a in alloc_by_span.items():
         key = ("alloc", file, line)
@@ -66,6 +73,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
         seen.add(key)
         span = SourceSpan(file=file, start_line=line, end_line=line,
                           symbol=a["symbol"])
+        ci = bootstrap_ci(a["vals"], statistic=sum)
         out.append(CandidateV2(
             id=f"cand-alloc-{len(out)}",
             root_cause=f"allocation_site:{a['symbol'] or file}:{line}",
@@ -75,11 +83,14 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[span],
             evidence_ids=a["evidence"],
             score=float(a["bytes"] * max(1, a["count"])),
+            score_interval_low=ci["low"], score_interval_high=ci["high"],
+            interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
 
     # 2) 热点函数：按 total_ms 聚合，只保留工程源码内的函数。
     fn_by_sym: dict[tuple, dict] = defaultdict(lambda: {"total": 0.0, "calls": 0,
-                                                         "span": None, "ids": []})
+                                                         "span": None, "ids": [],
+                                                         "vals": []})
     for i, fn in enumerate(bundle.functions):
         if fn.source is None or not g.span_project(fn.source):
             continue
@@ -89,11 +100,13 @@ def generate_candidates(bundle: EvidenceBundleV2,
         e["calls"] += fn.calls
         e["span"] = fn.source
         e["ids"].append(f"fn:{i}:{fn.symbol}")
+        e["vals"].append(float(fn.total_ms) * 1000.0 + float(fn.calls))
     for (sym, file, line), e in fn_by_sym.items():
         key = ("fn", file, line)
         if key in seen:
             continue
         seen.add(key)
+        ci = bootstrap_ci(e["vals"], statistic=sum)
         out.append(CandidateV2(
             id=f"cand-fn-{len(out)}",
             root_cause=f"hot_function:{sym}",
@@ -103,11 +116,14 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[e["span"]],
             evidence_ids=e["ids"],
             score=float(e["total"]) * 1000.0 + float(e["calls"]),
+            score_interval_low=ci["low"], score_interval_high=ci["high"],
+            interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
 
     # 3) 调用栈：按栈内第一个工程帧聚合，补足“函数统计看不到”的路径。
     stack_by_sym: dict[tuple, dict] = defaultdict(lambda: {"weight": 0.0,
-                                                            "span": None, "ids": []})
+                                                            "span": None, "ids": [],
+                                                            "vals": []})
     for i, cs in enumerate(bundle.callstacks):
         for fr in cs.frames:
             if fr.source is None or not g.span_project(fr.source):
@@ -117,12 +133,14 @@ def generate_candidates(bundle: EvidenceBundleV2,
             e["weight"] += cs.weight
             e["span"] = fr.source
             e["ids"].append(f"stack:{i}")
+            e["vals"].append(float(cs.weight) * 100.0)
             break
     for (sym, file, line), e in stack_by_sym.items():
         key = ("stack", file, line)
         if key in seen:
             continue
         seen.add(key)
+        ci = bootstrap_ci(e["vals"], statistic=sum)
         out.append(CandidateV2(
             id=f"cand-stack-{len(out)}",
             root_cause=f"callstack_hot:{sym}",
@@ -132,6 +150,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[e["span"]],
             evidence_ids=e["ids"],
             score=float(e["weight"]) * 100.0,
+            score_interval_low=ci["low"], score_interval_high=ci["high"],
+            interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
 
     if fingerprint_store is not None:
