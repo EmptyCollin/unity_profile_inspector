@@ -69,6 +69,8 @@ python scripts/plan_opportunity.py --project sim/project --pattern ui_text_rebui
 - 不读 `_refs`、不按 profile_id 分流；
 - 当前覆盖 6 个 devsim pattern（含 sync Addressables → async 模板）；
 - `scripts/e2e_devsim_plan.py`：UI/材质已真实 apply+compile+rollback（6/6）；
+- `scripts/e2e_real_project.py`：devsim 真实工程闭环 12/12（注册→机会→建单→apply+compile→smoke→回滚）；
+- `scripts/e2e_project_onboarding.py`：devsim+testlab 双工程接入 8/8；
 - `scripts/e2e_opportunity_ticket.py`：Web 建单/审批/执行/同步模板 7/7。
 - `build_opportunity_ticket()`：auto → pending；semi/no-plan → needs_human；
 - Web 工单页“从机会生成工单” → `POST /api/tickets/opportunities`。
