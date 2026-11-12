@@ -122,7 +122,10 @@ class BatchTicket(BaseModel):
         }
 
 
-_AUTO_PLAYBOOKS = {"PB-REUSE-BUFFER", "PB-CACHE-COMPONENT", "PB-PREGEN-LOOKUP"}
+_AUTO_PLAYBOOKS = {"PB-REUSE-BUFFER", "PB-CACHE-COMPONENT", "PB-PREGEN-LOOKUP",
+                   # 源码配方（语义保持：文本/匹配结果不变，只去重复工作）
+                   "PB-OP-HUD-TEXT-CACHE", "PB-OP-ITEM-LABEL-CACHE",
+                   "PB-OP-BOARD-BUFFER-REUSE"}
 _SEMI_PLAYBOOKS = {"PB-SHARED-MAT-MPB", "PB-PARAM-EQUAL-GUARD", "PB-ASYNC-STAGGER"}
 
 
@@ -153,11 +156,22 @@ def _item_token(ticket_id: str, item_id: str) -> str:
 PlanProvider = Callable[[IssueCluster, str], Optional[EditPlan]]
 
 
+def _call_plan_provider(provider, cluster, playbook: str,
+                        anchors: list[str], project_root) -> Optional[EditPlan]:
+    """兼容两种 provider：新签名带 anchors/project_root，老的 (cluster, playbook)。"""
+    try:
+        return provider(cluster, playbook, anchors=anchors,
+                        project_root=project_root)
+    except TypeError:
+        return provider(cluster, playbook)
+
+
 def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[FingerprintStore] = None,
                  plan_provider: Optional[PlanProvider] = None,
                  mode: Literal["resident", "regression"] = "resident",
                  limit: int = 8, knowledge_store=None,
-                 previous_notes: Optional[list[dict]] = None) -> BatchTicket:
+                 previous_notes: Optional[list[dict]] = None,
+                 anchor_resolver=None, project_root=None) -> BatchTicket:
     tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-" + secrets.token_hex(3)
     items: list[TicketItem] = []
     for c in clusters[:max(1, limit)]:
@@ -175,7 +189,14 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
         elif plan_provider is None:
             err = "no EditPlan provider (I3a)"
         else:
-            plan = plan_provider(c, playbook)
+            anchors: list[str] = []
+            if anchor_resolver is not None:
+                try:
+                    anchors = list(anchor_resolver(c) or [])
+                except Exception:  # noqa: BLE001
+                    anchors = []
+            plan = _call_plan_provider(plan_provider, c, playbook, anchors,
+                                       project_root)
             if plan is None:
                 err = "plan_provider returned none"
             else:

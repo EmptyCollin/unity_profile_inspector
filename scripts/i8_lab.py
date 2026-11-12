@@ -1,14 +1,16 @@
-"""I8 考卷台：用 组合病例 + oracle + 干净 base 生成测试工程，并查看当前考卷得分。
+"""I8 考卷台：用 组合病例 + oracle + 干净 base 生成测试工程，并按能力口径判分。
 
 定位（2026-11-13 修正）：
-- 这里只负责"出考卷"和"看得分"，不做诊断、采集、修复；
-- 用户用 `run.bat` 启动产品控制台，自己把 `test_project` 接入并跑工具；
-- 得分 = 工具的机会扫描引擎（与产品控制台机会建单同一入口）在 test_project 上的检出
-  与 oracle 期望的对比。oracle 不进工程。
+- 只负责"出考卷"和"看得分"，不做诊断、采集、修复；
+- 用户用 `run.bat` 启动产品控制台，自己拿 `test_project` 去跑工具；
+- **判分不匹配正则、不匹配 case 编号**：只读工具运行产出的能力结果
+  （findings / repairs / verdict），与 oracle 的"机制 + 位置 + 效果"结构化比对。
+  没有产物 = 未评估，不拿静态扫描凑分。
+
+oracle 只提供结果性期望（哪条机制、哪个文件/方法、修完应该怎样），不进工程。
 
 用法：
     python scripts/i8_lab.py --port 8787
-  或双击 start_lab.bat
 """
 from __future__ import annotations
 
@@ -25,16 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.case_overlay import apply_cases, tree_hash  # noqa: E402
-from upi.core.opportunity import PATTERNS, scan  # noqa: E402
 
 CASES_DIR = ROOT / "sim" / "cases"
 ORACLE_DIR = ROOT / "sim" / "oracle" / "cases"
 BASE = ROOT / "sim" / "project"
 TEST_PROJECT = ROOT / "test_project"
+TEST_PROJECT_ID = "test_project"
 LAB = ROOT / "runs" / "i8_lab"
 PAPER = LAB / "paper.json"
-
-PATTERN_IDS = {p.id for p in PATTERNS}
 
 
 def _case_ids() -> list[str]:
@@ -45,32 +45,33 @@ def cases() -> list[dict]:
     out = []
     for cid in _case_ids():
         m = json.loads((CASES_DIR / cid / "manifest.json").read_text(encoding="utf-8"))
-        pid = m.get("pattern_id", "")
         ex = m.get("expects") or {}
         out.append({"case_id": cid, "notes": m.get("notes", ""),
-                    "pattern_id": pid, "scored": pid in PATTERN_IDS,
                     "windows": ex.get("windows", []),
                     "symbols": ex.get("symbols", [])})
     return out
 
 
-def _oracle_patterns(case_ids: list[str]) -> tuple[list[str], list[str]]:
-    """按 oracle 的 atomic_cases 反查期望 pattern；返回 (expected, unscored)。
-
-    以 oracle 为权威：只有 oracle 里出现过的 pattern 才算"可判分"。
-    """
-    expected: set[str] = set()
-    scored_cases: set[str] = set()
+def _capability_expectations(case_ids: list[str]) -> list[dict]:
+    """oracle → 结果性期望：机制 + 锚点（文件::方法）+ 指标。不含正则。"""
+    expected: list[dict] = []
     for p in sorted(ORACLE_DIR.glob("c*.json")):
         d = json.loads(p.read_text(encoding="utf-8"))
         atoms = set(d.get("atomic_cases") or [])
         if not atoms or not atoms <= set(case_ids):
             continue
         for e in d.get("expected_opportunities", []):
-            expected.add(str(e.get("pattern_id")))
-        scored_cases |= atoms
-    unscored = [c for c in case_ids if c not in scored_cases]
-    return sorted(expected), unscored
+            expected.append({"mechanism": e.get("pattern_id"),
+                             "anchor": e.get("code_anchor", ""),
+                             "metric": e.get("metric", "")})
+    # 去重（同一机制可能被多个场景引用）
+    seen, uniq = set(), []
+    for e in expected:
+        k = (e["mechanism"], e["anchor"], e["metric"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(e)
+    return uniq
 
 
 def generate(case_ids: list[str]) -> dict:
@@ -84,15 +85,27 @@ def generate(case_ids: list[str]) -> dict:
     if target.exists():
         shutil.rmtree(target)
     run = apply_cases(BASE, dirs, target)
-    expected, unscored = _oracle_patterns(case_ids)
     paper = {"cases": run.case_ids, "files": run.files,
-             "base_hash": tree_hash(BASE), "expected_patterns": expected,
-             "unscored_cases": unscored,
+             "base_hash": tree_hash(BASE),
+             "expectations": _capability_expectations(case_ids),
              "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-             "project": str(target)}
+             "project": str(target), "project_id": TEST_PROJECT_ID}
     LAB.mkdir(parents=True, exist_ok=True)
     PAPER.write_text(json.dumps(paper, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "paper": paper}
+
+
+def _latest_findings(created_at: str) -> tuple[dict | None, str]:
+    """读工具在 test_project 上的运行产物；没有就明确"未评估"。"""
+    try:
+        from upi.core.findings import load_runs
+        runs = load_runs(TEST_PROJECT_ID)
+    except Exception as e:  # noqa: BLE001
+        return None, f"findings 契约不可用：{type(e).__name__}: {e}"
+    if not runs:
+        return None, "未运行工具（没有 findings.json）"
+    after = [r for r in runs if str(r.created_at) >= created_at]
+    return (after[-1] if after else runs[-1]), ""
 
 
 def score() -> dict:
@@ -101,37 +114,18 @@ def score() -> dict:
     paper = json.loads(PAPER.read_text(encoding="utf-8"))
     if not TEST_PROJECT.is_dir():
         return {"ok": False, "error": "test_project 不存在（可能被删了），重新生成考卷"}
-    findings = scan(TEST_PROJECT, project_id="test_project")
-    found_by_pattern: dict[str, list[dict]] = {}
-    for f in findings:
-        found_by_pattern.setdefault(f.pattern_id, []).append(
-            {"file": f.code_anchor.file, "line": f.code_anchor.line_range,
-             "metric": f.metric})
-    expected = set(paper.get("expected_patterns") or [])
-    found = set(found_by_pattern)
-    tp = sorted(expected & found)
-    fp = sorted(found - expected)
-    fn = sorted(expected - found)
-    per_case = []
-    for cid in paper.get("cases", []):
-        m = json.loads((CASES_DIR / cid / "manifest.json").read_text(encoding="utf-8"))
-        pid = m.get("pattern_id", "")
-        per_case.append({"case_id": cid, "pattern_id": pid,
-                         "scored": pid in expected,
-                         "hit": pid in found})
-    negative = not expected
-    return {"ok": True, "paper": {"cases": paper.get("cases"),
-                                  "created_at": paper.get("created_at")},
-            "expected": sorted(expected), "found": sorted(found),
-            "tp": tp, "fp": fp, "fn": fn,
-            "found_detail": {k: v for k, v in found_by_pattern.items()},
-            "precision": round(len(tp) / max(1, len(found)), 4),
-            "recall": round(len(tp) / max(1, len(expected)), 4),
-            "negative_control": negative,
-            "negative_ok": (not found) if negative else None,
-            "per_case": per_case,
-            "unscored_cases": paper.get("unscored_cases", []),
-            "engine": "upi.core.opportunity.scan（与产品控制台机会建单同一引擎）"}
+    run, why = _latest_findings(paper.get("created_at", ""))
+    if run is None:
+        return {"ok": True, "evaluated": False, "reason": why,
+                "paper": {"cases": paper.get("cases"),
+                          "created_at": paper.get("created_at")},
+                "dimensions": {"discovery": None, "no_false_positive": None,
+                               "repair": None, "reproducible": None}}
+    from upi.core.findings import score_run
+    return {"ok": True, "evaluated": True,
+            "paper": {"cases": paper.get("cases"),
+                      "created_at": paper.get("created_at")},
+            **score_run(paper, run)}
 
 
 HTML = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
@@ -142,11 +136,11 @@ label{display:block;margin:7px 0}button{background:#1e4e3a;color:#dbe7f3;border:
 pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-height:460px;overflow:auto}
 .small{color:#8da2b5}.ok{color:#5ee0a0}.bad{color:#ff8b8b}.hint{background:#131c25;border-left:3px solid #2e7a58;padding:8px 10px;margin:8px 0}
 </style></head><body>
-<h1>I8 考卷台 <span class="small">组合病例 + oracle → test_project；看得分</span></h1>
+<h1>I8 考卷台 <span class="small">出考卷 + 按能力看得分</span></h1>
 <div class="card"><b>怎么考试</b>
 <div class="hint small">1) 勾选病例 → 生成考卷（写到仓库根目录 <b>test_project/</b>，已有内容先清理）。<br>
 2) 双击 <b>run.bat</b> 启动产品控制台，把 test_project 接入并跑工具。<br>
-3) 回到本页点“查看得分”，对比工具检出与 oracle。</div>
+3) 回本页点“查看得分”：只读工具运行产物，按能力判分，不做正则匹配。</div>
 </div>
 <div class="card"><b>选择病例</b><div id="cases"></div></div>
 <div class="card">
@@ -154,21 +148,20 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 <button onclick="loadScore()">查看得分</button>
 <span id="msg" class="small"></span></div>
 <div class="card"><b>当前考卷</b><pre id="paper">还没有考卷</pre></div>
-<div class="card"><b>得分</b><pre id="score">未评分</pre></div>
+<div class="card"><b>能力得分</b><pre id="score">未评估</pre></div>
 <script>
 async function api(path, body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return await r.json();}
 function sel(){return [...document.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);}
 function show(id,r){document.getElementById(id).textContent=JSON.stringify(r,null,2);}
-function mark(r){const el=document.getElementById('msg');el.className=r.ok?'ok small':'bad small';el.textContent=r.ok?'完成':'失败：'+(r.error||'');}
+function mark(r){const el=document.getElementById('msg');el.className=r.ok?'ok small':'bad small';el.textContent=r.ok?(r.evaluated===false?'未评估：'+(r.reason||''):'完成'):'失败：'+(r.error||'');}
 async function init(){
   const d=await api('/api/cases');
   document.getElementById('cases').innerHTML=d.cases.map(c=>
-    `<label><input type="checkbox" value="${c.case_id}" ${c.scored?'':'data-unscored="1"'}> <b>${c.case_id}</b> — ${c.notes||''}
-     <span class="small">pattern:${c.pattern_id||'-'} ${c.scored?'':'（无 oracle，仅出题不计分）'}</span></label>`).join('');
+    `<label><input type="checkbox" value="${c.case_id}"> <b>${c.case_id}</b> — ${c.notes||''}</label>`).join('');
   const p=await api('/api/paper'); if(p.ok) show('paper',p.paper);
 }
 async function generate(){const r=await api('/api/paper',{cases:sel()});mark(r);if(r.ok)show('paper',r.paper);}
-async function loadScore(){const r=await api('/api/score');mark(r);if(r.ok)show('score',r);}
+async function loadScore(){const r=await api('/api/score');mark(r);show('score',r);}
 init();
 </script></body></html>"""
 

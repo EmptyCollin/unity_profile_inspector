@@ -332,10 +332,29 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 而不是对着同一条路再撞一次（§1.6 reason 回传给 Fix 的最小落实）
         tried = {r.get("root_cause") for r in st.get("records", [])
                  if r.get("kind") == "fix"}
+        root = None
+        try:
+            root = _prof().abs_project
+        except Exception:  # noqa: BLE001 — 档案缺失时仍可走夹具模板分支
+            root = None
         for top in st["hypotheses"]:
             if top["root_cause"] in tried:
                 continue
-            ep = _plan_for(_anchor_of(top["root_cause"]))
+            ep = None
+            # 1) 源码驱动：用假设的代码锚点在当前工程里生成 diff（产品默认）
+            anchors = top.get("code_anchors") or []
+            if anchors and root is not None:
+                try:
+                    from upi.core.source_plan import plan_for_anchor_list
+                    ep = plan_for_anchor_list(root, anchors)
+                except Exception:  # noqa: BLE001
+                    ep = None
+            # 2) 夹具模板：只在源码配方不适用时回退（历史测试通路）
+            if ep is None:
+                try:
+                    ep = _plan_for(_anchor_of(top["root_cause"]))
+                except TemplateUnavailable:
+                    ep = None
             if ep is not None:
                 return {"edit_plan": ep.model_dump(), "route": "proceed"}
         return {"route": "needs_human",

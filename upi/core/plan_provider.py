@@ -39,5 +39,25 @@ def fixture_cpu_plan(cluster: IssueCluster, playbook: str) -> Optional[EditPlan]
         return None
 
 
-def default_plan_provider(cluster: IssueCluster, playbook: str) -> Optional[EditPlan]:
+def source_plan_for_cluster(cluster: IssueCluster, *,
+                            anchors: Optional[list[str]] = None,
+                            project_root=None) -> Optional[EditPlan]:
+    """源码驱动：锚点 → 当前源码配方。不依赖 profile_id / defect_ref。"""
+    if not anchors or project_root is None:
+        return None
+    try:
+        from upi.core.source_plan import plan_for_anchor_list
+        return plan_for_anchor_list(project_root, anchors)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def default_plan_provider(cluster: IssueCluster, playbook: str, *,
+                          anchors: Optional[list[str]] = None,
+                          project_root=None) -> Optional[EditPlan]:
+    """产品默认：优先源码驱动；夹具模板只作历史测试回退。"""
+    ep = source_plan_for_cluster(cluster, anchors=anchors,
+                                 project_root=project_root)
+    if ep is not None:
+        return ep
     return fixture_cpu_plan(cluster, playbook)
