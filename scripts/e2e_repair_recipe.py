@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents import fixer  # noqa: E402
-from upi.core.repair_recipe import plan_hud_text_cache, plan_item_label_cache  # noqa: E402
+from upi.core.repair_recipe import (plan_board_buffer_reuse,  # noqa: E402
+                                    plan_hud_text_cache, plan_item_label_cache)
 from upi.core.source_index import SourceIndex  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
 
@@ -35,7 +36,7 @@ def git(*args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--recipe", choices=["item", "hud"], default="item")
+    ap.add_argument("--recipe", choices=["item", "hud", "board"], default="item")
     a = ap.parse_args()
     original = git("rev-parse", "HEAD")
     dirty = git("status", "--porcelain")
@@ -45,6 +46,8 @@ def main():
     tags_before = set(git("tag", "-l", "upi/attempt-*").splitlines())
     plan = (plan_hud_text_cache(PROJECT, SourceIndex.build(PROJECT))
             if a.recipe == "hud" else
+            plan_board_buffer_reuse(PROJECT, SourceIndex.build(PROJECT))
+            if a.recipe == "board" else
             plan_item_label_cache(PROJECT, SourceIndex.build(PROJECT)))
     ok("recipe plan", plan is not None, plan)
     if plan is None:

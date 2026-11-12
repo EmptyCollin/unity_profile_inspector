@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents.fixer import apply_diffs  # noqa: E402
-from upi.core.repair_recipe import (plan_for_candidate, plan_hud_text_cache,  # noqa: E402
+from upi.core.repair_recipe import (plan_board_buffer_reuse,  # noqa: E402
+                                    plan_for_candidate, plan_hud_text_cache,
                                     plan_item_label_cache)
 from upi.core.source_index import SourceIndex  # noqa: E402
 
@@ -66,6 +67,22 @@ if hud is not None:
     finally:
         shutil.rmtree(tmp2, ignore_errors=True)
 
+board = plan_board_buffer_reuse(PROJECT, idx)
+ok("Board recipe 生成", board is not None)
+if board is not None:
+    ok("Board 三片 diff", len(board.diffs) == 3, len(board.diffs))
+    tmp3 = Path(tempfile.mkdtemp(prefix="upi_recipe_board_"))
+    try:
+        dst3 = tmp3 / "Assets/DevSim/Runtime/BoardModel.cs"
+        dst3.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PROJECT / "Assets/DevSim/Runtime/BoardModel.cs", dst3)
+        apply_diffs(board, root=tmp3)
+        t3 = dst3.read_text(encoding="utf-8")
+        ok("Board 复用字段", "_hitBuffer" in t3 and "_perColorBuffer" in t3)
+        ok("Board 清零", "Array.Clear(_hitBuffer" in t3)
+    finally:
+        shutil.rmtree(tmp3, ignore_errors=True)
+
 class FakeCand:
     root_cause = "hot_function:ChromaGame.UpdateHud"
     sources = [type("S", (), {"symbol": "ChromaGame.UpdateHud"})()]
@@ -74,6 +91,9 @@ ok("候选→HUD recipe", plan_for_candidate(FakeCand(), PROJECT, idx) is not No
 FakeCand.root_cause = "hot_function:ChromaGame.RefreshItemLabels"
 FakeCand.sources = [type("S", (), {"symbol": "ChromaGame.RefreshItemLabels"})()]
 ok("候选→item recipe", plan_for_candidate(FakeCand(), PROJECT, idx) is not None)
+FakeCand.root_cause = "hot_function:BoardModel.FindMatches"
+FakeCand.sources = [type("S", (), {"symbol": "BoardModel.FindMatches"})()]
+ok("候选→Board recipe", plan_for_candidate(FakeCand(), PROJECT, idx) is not None)
 
 print(f"\n==== 修复 recipe 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 raise SystemExit(1 if FAIL else 0)

@@ -18,6 +18,7 @@ from upi.core.source_index import SourceIndex
 
 PLAYBOOK = "PB-OP-ITEM-LABEL-CACHE"
 HUD_PLAYBOOK = "PB-OP-HUD-TEXT-CACHE"
+BOARD_PLAYBOOK = "PB-OP-BOARD-BUFFER-REUSE"
 FIELD_ANCHOR = "        private bool busy, dragging;"
 FIELD_ADD = "        private int[] lastItemCounts;"
 HUD_FIELD_ADD = (
@@ -126,6 +127,50 @@ def plan_hud_text_cache(project_root: Path | str,
     )
 
 
+def plan_board_buffer_reuse(project_root: Path | str,
+                            source_index: Optional[SourceIndex] = None) -> Optional[EditPlan]:
+    """BoardModel.FindMatches / CountByColor 复用数组，避免每次匹配分配。"""
+    root = Path(project_root).resolve()
+    idx = source_index or SourceIndex.build(root)
+    span = idx.resolve("BoardModel.FindMatches")
+    if span is None:
+        return None
+    file = root / span.file
+    try:
+        text = file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    anchor = "        public int[,] Layers { get; private set; }"
+    if anchor not in text:
+        return None
+    find_old = "            var hit = new bool[N, N];"
+    per_old = "            var per = new int[Colors];"
+    if find_old not in text or per_old not in text:
+        return None
+    diffs = [
+        {"file": span.file, "find": anchor,
+         "replace": anchor + "\n        private bool[,] _hitBuffer;\n        private int[] _perColorBuffer;",
+         "expect_count": 1, "_why": "复用匹配缓冲"},
+        {"file": span.file, "find": find_old,
+         "replace": "            if (_hitBuffer == null || _hitBuffer.GetLength(0) != N)\n"
+                    "                _hitBuffer = new bool[N, N];\n"
+                    "            else Array.Clear(_hitBuffer, 0, _hitBuffer.Length);\n"
+                    "            var hit = _hitBuffer;",
+         "expect_count": 1, "_why": "FindMatches 复用 bool[N,N]"},
+        {"file": span.file, "find": per_old,
+         "replace": "            if (_perColorBuffer == null || _perColorBuffer.Length != Colors)\n"
+                    "                _perColorBuffer = new int[Colors];\n"
+                    "            else Array.Clear(_perColorBuffer, 0, _perColorBuffer.Length);\n"
+                    "            var per = _perColorBuffer;",
+         "expect_count": 1, "_why": "CountByColor 复用 int[Colors]"},
+    ]
+    return EditPlan(
+        playbook_id=BOARD_PLAYBOOK, diffs=diffs,
+        invariants_assert=["匹配结果不变", "每次匹配前缓冲清零"],
+        side_effect="none", touched_assets=[span.file], permission_tier="auto",
+    )
+
+
 def plan_for_candidate(candidate, project_root: Path | str,
                        source_index: Optional[SourceIndex] = None) -> Optional[EditPlan]:
     """按候选源码符号选择 recipe；不是 case_id/文件行硬编码。"""
@@ -137,4 +182,6 @@ def plan_for_candidate(candidate, project_root: Path | str,
         return plan_item_label_cache(project_root, source_index)
     if "updatehud" in symbol or "updatehud" in root:
         return plan_hud_text_cache(project_root, source_index)
+    if "findmatches" in symbol or "boardmodel" in symbol or "findmatches" in root:
+        return plan_board_buffer_reuse(project_root, source_index)
     return None
