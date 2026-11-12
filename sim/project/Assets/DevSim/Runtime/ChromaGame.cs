@@ -53,9 +53,12 @@ namespace DevSim
         private Text caseButtonLabel;
         private Sprite tileSprite;
         private bool busy, dragging;
+        private bool bonusChoiceLocked;
         private int dragR = -1, dragC = -1;
         private readonly Vector2[,] tileBase = new Vector2[N, N];
         private int bonusTriggeredCount;
+        private AudioSource sfx;
+        private AudioClip clickClip, clearClip, bonusClip;
         private int[,] board = new int[N, N];
         private int[,] armor = new int[N, N];
         private readonly int[] inventory = new int[8];
@@ -88,6 +91,7 @@ namespace DevSim
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             BuildCanvas();
             BuildEventSystem();
+            BuildAudio();
             BuildUI();
             ShowLobby();
             if (cfg.autoplay) StartGame();
@@ -122,6 +126,36 @@ namespace DevSim
             if (FindFirstObjectByType<EventSystem>() != null) return;
             var go = new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
             go.transform.SetParent(transform, false);
+        }
+
+        private void BuildAudio()
+        {
+            sfx = gameObject.AddComponent<AudioSource>();
+            sfx.playOnAwake = false;
+            sfx.volume = 0.16f;
+            clickClip = Tone("click", 740f, 0.045f);
+            clearClip = Tone("clear", 980f, 0.08f);
+            bonusClip = Tone("bonus", 1320f, 0.18f);
+        }
+
+        private static AudioClip Tone(string name, float freq, float seconds)
+        {
+            const int rate = 22050;
+            int n = Mathf.Max(1, (int)(rate * seconds));
+            var data = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                float env = 1f - i / (float)n;
+                data[i] = Mathf.Sin(2f * Mathf.PI * freq * i / rate) * env * 0.18f;
+            }
+            var clip = AudioClip.Create(name, n, 1, rate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        private void Play(AudioClip clip)
+        {
+            if (sfx != null && clip != null) sfx.PlayOneShot(clip);
         }
 
         private RectTransform MakeRect(string name, Transform parent, float x, float y, float w, float h)
@@ -170,6 +204,7 @@ namespace DevSim
             b.targetGraphic = img;
             var t = MakeLabel(rt, text, 0, 0, w, h, size, new Color(0.92f, 0.97f, 1f), TextAnchor.MiddleCenter);
             if (click != null) b.onClick.AddListener(() => click());
+            b.onClick.AddListener(() => Play(clickClip));
             return b;
         }
 
@@ -822,6 +857,7 @@ namespace DevSim
                 if (n == 0) break;
                 chain++;
                 totalCleared += n;
+                Play(clearClip);
                 yield return StartCoroutine(AnimateClear(hit));
                 for (int r = 0; r < N; r++)
                     for (int c = 0; c < N; c++)
@@ -1132,7 +1168,9 @@ namespace DevSim
         private void ShowBonus(int cleared)
         {
             bonusOpen = true; paused = true;
+            bonusChoiceLocked = false;
             bonusTriggeredCount++;
+            Play(bonusClip);
             Debug.Log($"BONUS triggered: cleared={cleared} round={round} count={bonusTriggeredCount}");
             string[] names = { "得分 x1.1", "本轮 +2s", "炸弹 +1" };
             for (int i = 0; i < 3; i++)
@@ -1195,13 +1233,38 @@ namespace DevSim
 
         private void ChooseBonus(int slot)
         {
-            int id = bonusIds[Mathf.Clamp(slot, 0, 2)];
+            if (bonusChoiceLocked) return;
+            StartCoroutine(ChooseBonusRoutine(slot));
+        }
+
+        private IEnumerator ChooseBonusRoutine(int slot)
+        {
+            bonusChoiceLocked = true;
+            slot = Mathf.Clamp(slot, 0, 2);
+            Play(clickClip);
+            float t = 0f;
+            while (t < 0.16f)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, t / 0.16f);
+                if (bonusGroups[slot] != null)
+                    bonusGroups[slot].transform.localScale =
+                        Vector3.Lerp(Vector3.one, new Vector3(1.12f, 1.12f, 1f), k);
+                yield return null;
+            }
+            int id = bonusIds[slot];
             if (id == 0) multiplier += 1;
             else if (id == 1) bonusTime += 2;
             else inventory[0]++;
             bonusOpen = false;
             bonusPanel.SetActive(false);
             bonusPanel.transform.localScale = Vector3.one;
+            for (int i = 0; i < 3; i++)
+            {
+                if (bonusGroups[i] == null) continue;
+                bonusGroups[i].alpha = 1f;
+                bonusGroups[i].transform.localScale = Vector3.one;
+            }
             paused = false;
             RefreshItemLabels();
             CheckRound();
