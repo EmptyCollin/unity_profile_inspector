@@ -32,7 +32,12 @@ def main() -> int:
     r = unity("profiler_record", "--frames", str(a.frames),
               "--output-path", str(out), "--timeout-seconds", str(a.timeout),
               "--deep-profile", "true")
-    print(json.dumps({"start": r.get("success"), "error": r.get("errors")},
+    started = ((r.get("data") or {}).get("result") or {})
+    if started.get("status") not in {"recording", "completed"}:
+        print(json.dumps({"started": started, "error": r.get("errors")},
+                         ensure_ascii=False, indent=2)[:1200])
+        return 1
+    print(json.dumps({"start": r.get("success"), "status": started},
                      ensure_ascii=False)[:800])
     deadline = time.time() + a.timeout + 15
     status = None
