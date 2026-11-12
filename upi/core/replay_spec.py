@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 CommandType = Literal[
     "start_game", "load_scene", "spawn", "rotate", "move", "zoom",
-    "swap", "wait", "stop", "open_shop",
+    "swap", "wait", "stop", "open_shop", "set_board", "resolve",
 ]
 
 
@@ -26,6 +26,9 @@ class ReplayCommand(BaseModel):
     scene: Optional[str] = None
     from_cell: Optional[tuple[int, int]] = None
     to_cell: Optional[tuple[int, int]] = None
+    board_n: Optional[int] = None
+    colors: Optional[list[int]] = None
+    layers: Optional[list[int]] = None
 
     @model_validator(mode="after")
     def _required(self):
@@ -37,6 +40,7 @@ class ReplayCommand(BaseModel):
             "zoom": ("zoom", self.zoom),
             "load_scene": ("scene", self.scene),
             "swap": ("from_cell", self.from_cell),
+            "set_board": ("board_n", self.board_n),
         }
         if self.type in need:
             name, val = need[self.type]
@@ -44,6 +48,12 @@ class ReplayCommand(BaseModel):
                 raise ValueError(f"{self.type} 缺少 {name}")
         if self.type == "swap" and self.to_cell is None:
             raise ValueError("swap 缺少 to_cell")
+        if self.type == "set_board":
+            n = int(self.board_n or 0)
+            if n <= 0 or not self.colors or len(self.colors) != n * n:
+                raise ValueError("set_board 需要 board_n 和 n*n 的 colors")
+            if self.layers is not None and len(self.layers) != n * n:
+                raise ValueError("set_board layers 长度必须是 n*n")
         if self.seconds is not None and self.seconds < 0:
             raise ValueError("seconds 不能为负")
         if self.count is not None and self.count <= 0:

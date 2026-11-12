@@ -24,12 +24,13 @@ PROJECT = ROOT / "sim/project"
 CASE = ROOT / "sim/cases/c01"
 replay = load_replay(ROOT / "sim/replay/c01.json")
 manifest = json.loads((CASE / "manifest.json").read_text(encoding="utf-8"))
-ok("replay 载入", replay.replay_id == "c01" and len(replay.commands) == 7, replay)
+ok("replay 载入", replay.replay_id == "c01" and len(replay.commands) == 8, replay)
 ok("replay 绑定 base", replay.base_hash == tree_hash(PROJECT) == manifest["base_hash"],
    (replay.base_hash, tree_hash(PROJECT), manifest["base_hash"]))
-ok("命令序列含起停/交换", replay.commands[0].type == "start_game"
+ok("命令序列含起停/棋盘", replay.commands[0].type == "start_game"
    and replay.commands[-1].type == "stop"
-   and sum(c.type == "swap" for c in replay.commands) == 2)
+   and any(c.type == "set_board" for c in replay.commands)
+   and sum(c.type == "resolve" for c in replay.commands) == 2)
 ok("oracle 文件存在且 evaluator_only",
    json.loads((ROOT / "sim/oracle/c01.json").read_text(encoding="utf-8"))["evaluator_only"] is True)
 try:
@@ -53,7 +54,8 @@ ok("组合 replay 只有一个起停",
    and sum(c.type == "start_game" for c in merged.commands) == 1
    and sum(c.type == "stop" for c in merged.commands) == 1)
 ok("组合 replay 保留各 case 命令",
-   sum(c.type == "swap" for c in merged.commands) == 2
+   sum(c.type == "set_board" for c in merged.commands) == 1
+   and sum(c.type == "resolve" for c in merged.commands) == 2
    and sum(c.type == "wait" for c in merged.commands) == 5)
 
 print(f"\n==== c01 replay/oracle 测试: {len(PASS)} 通过, {len(FAIL)} 失败")

@@ -6,42 +6,106 @@
       "type": "start_game"
     },
     {
-      "type": "wait",
-      "seconds": 2.0
-    },
-    {
-      "type": "swap",
-      "from_cell": [
+      "type": "set_board",
+      "board_n": 6,
+      "colors": [
         0,
+        0,
+        0,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
         0
       ],
-      "to_cell": [
-        0,
+      "layers": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
         1
       ]
     },
     {
       "type": "wait",
-      "seconds": 2.0
+      "seconds": 0.5
     },
     {
-      "type": "swap",
-      "from_cell": [
-        1,
-        1
-      ],
-      "to_cell": [
-        1,
-        2
-      ]
+      "type": "resolve"
     },
     {
       "type": "wait",
-      "seconds": 2.0
+      "seconds": 0.5
+    },
+    {
+      "type": "resolve"
+    },
+    {
+      "type": "wait",
+      "seconds": 0.5
     },
     {
       "type": "stop"
     }
   ],
-  "notes": "c01: 稳定触发 FindMatches/CountByColor 的匹配分配"
+  "notes": "c01: deterministic 6x6 board with a forced match; resolve twice"
 }

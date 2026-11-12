@@ -9,7 +9,8 @@ from typing import Any
 
 from upi.core.replay_spec import ReplayCommand, ReplaySpec
 
-SUPPORTED = {"start_game", "load_scene", "swap", "wait", "open_shop", "stop"}
+SUPPORTED = {"start_game", "load_scene", "swap", "wait", "open_shop", "stop",
+             "set_board", "resolve"}
 
 
 class UnsupportedCommand(ValueError):
@@ -57,6 +58,18 @@ class ReplayExecutor:
                 f'return g.DebugSwap({fr[0]},{fr[1]},{to[0]},{to[1]});')
         return self.eval(code)
 
+    def set_board(self, n: int, colors: list[int], layers: list[int] | None) -> Any:
+        cols = ",".join(str(int(x)) for x in colors)
+        lays = ",".join(str(int(x)) for x in (layers or [1] * len(colors)))
+        code = (self._game() +
+                f'return g.DebugSetBoard({int(n)},new int[]{{{cols}}},'
+                f'new int[]{{{lays}}});')
+        return self.eval(code)
+
+    def resolve(self) -> Any:
+        code = self._game() + 'return g.DebugResolveStep();'
+        return self.eval(code)
+
     def open_shop(self) -> Any:
         code = (self._game() +
                 'var m=g.GetType().GetMethod("OpenShop",'
@@ -89,6 +102,11 @@ class ReplayExecutor:
             return {"type": "start_game", "state": self.start_game()}
         if cmd.type == "swap":
             return {"type": "swap", "state": self.swap(cmd.from_cell, cmd.to_cell)}
+        if cmd.type == "set_board":
+            return {"type": "set_board",
+                    "state": self.set_board(cmd.board_n or 0, cmd.colors or [], cmd.layers)}
+        if cmd.type == "resolve":
+            return {"type": "resolve", "state": self.resolve()}
         if cmd.type == "open_shop":
             return {"type": "open_shop", "state": self.open_shop()}
         raise UnsupportedCommand(cmd.type)
