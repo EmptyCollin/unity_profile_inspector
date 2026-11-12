@@ -72,18 +72,9 @@ public static class UpiEvidenceV1
                     for (int i = 0; i < n; i++)
                     {
                         string name = view.GetSampleName(i);
-                        if (string.IsNullOrEmpty(name) || !IsProjectName(name)) continue;
-                        long ns = (long)view.GetSampleTimeNs(i);
-                        string key = frame + "|" + name;
-                        long[] agg;
-                        if (!funcs.TryGetValue(key, out agg))
-                        {
-                            agg = new long[2];
-                            funcs[key] = agg;
-                        }
-                        agg[0]++;
-                        agg[1] += ns;
+                        if (string.IsNullOrEmpty(name)) continue;
 
+                        // GC.Alloc 的样本名不叫工程符号；先处理调用栈，再过滤函数名。
                         if (name == "GC.Alloc" && stacks.Count < 16)
                         {
                             var ptrs = new List<ulong>();
@@ -118,7 +109,20 @@ public static class UpiEvidenceV1
                             allocs.Add("{\"frame_idx\":" + frame + ",\"bytes\":" + bytes
                                        + ",\"count\":1,\"stack\":[" + string.Join(",", stackFrames.ToArray()) + "]"
                                        + ",\"data_tier\":\"A2\"}");
+                            continue;
                         }
+
+                        if (!IsProjectName(name)) continue;
+                        long ns = (long)view.GetSampleTimeNs(i);
+                        string key = frame + "|" + name;
+                        long[] agg;
+                        if (!funcs.TryGetValue(key, out agg))
+                        {
+                            agg = new long[2];
+                            funcs[key] = agg;
+                        }
+                        agg[0]++;
+                        agg[1] += ns;
                     }
                 }
             }
