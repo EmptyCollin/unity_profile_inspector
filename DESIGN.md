@@ -921,12 +921,115 @@ DELETE /api/projects/{id}          # 有历史则拒绝，提示归档
 |---|---|---|
 | **I7a** | 本设计修正：Issue/Opportunity 分离、CLEAN 退出产品、去夹具化边界 | 文档评审通过；旧 verified 口径降级 |
 | **I7b** | `ProjectRegistry` + 顶栏切换器 + 管理页 | 无 JSON 手编即可新增/切换/恢复；不保留旧 profile/API 兼容 |
+| **I7b2** | 真实开发模拟工程（devsim） | 统一入口/默认场景、多个日常子 case、replay + UI 跳转、oracle 隔离 |
 | **I7c** | `OpportunityFinding` + floor/budget/static 检测源 | 无 clean 也能产出机会；无参考则 insufficient_evidence |
 | **I7d** | 通用 planner：从当前源码生成 diff，移除 profile-id 门与按行切片 | 未见工程可生成/拒绝；测试夹具 oracle 只留在测试 |
 | **I7e** | GPU/ANIM/LOAD 机会 E2E + 负对照 | 不再只测 CPU；无机会工程不硬造 plan；zero-to-zero=unassessed |
 | **I7f** | 真实用户工程接入/回归/发布 | 用户工程上完成选择→基线→机会→修复→验证 |
 
-优先级：**I7b 先做**（用户明确要求；也是后续真实工程的前置），再 I7c/I7d；
+优先级：**I7b 先做**（用户明确要求；也是后续真实工程的前置），再 I7b2/I7c/I7d；
 I7e 可以在 I7b 后并行补。I7 完成前，不再把夹具 verified 当产品泛化结论。
+
+### 14.12 真实开发模拟工程（devsim，I7b2）
+
+#### 14.12.1 定位
+
+`devsim` 不是缺陷夹具，而是一个**看起来像真实开发产物**的 Unity 工程：
+
+- 一个综合工程，从 UI 选择；
+- 一个统一入口/默认场景；
+- 多个子 case，每个 case 有 1..N 个优化机会，也允许 0 个；
+- 优化点来自“图省事/忘记配置/沿用旧写法”，不是刻意破坏；
+- case 的答案（oracle）**不放进工程路径**，避免工具运行时读到。
+
+#### 14.12.2 目录与隔离
+
+```text
+sim/
+  project/                 # 选中的 Unity 工程；只放正常开发产物
+    Assets/DevSim/...
+    Assets/Scenes/00_Bootstrap.unity
+    Assets/Scenes/10_Lobby.unity
+    Assets/Scenes/20_Shop.unity
+    ...
+  oracle/                  # 仅评测；不进入 project，不给工具
+    cases/index.json
+    cases/c01.json ...
+  replay/                  # 外部 replay 入口；只把 case 路由到工程
+```
+
+硬规则：
+
+- `sim/oracle/` **不在** `sim/project/` 下，也不在工具的工作区根内；
+- 工具只接收 `project_path + default_scene + replay 入口`，**不接收 oracle 路径**；
+- 本地运行时把工具的 workspace 限定到 `sim/project`，启动时校验 realpath；
+- 工程内禁止出现 `oracle`、`_refs`、`defect`、`F-CPU`、`case_id`、预期指标等答案痕迹；
+- `sim/project` 必须通过 `check_no_oracle_leak`（新增校验脚本）；
+- 评测/CI 使用独立进程/挂载，工具进程看不到 oracle 目录。
+
+#### 14.12.3 默认场景与 UI 跳转
+
+- 默认场景：`00_Bootstrap`（启动/主菜单），是唯一入口；
+- UI 菜单使用**正常游戏语言**，不叫“缺陷 case”：
+  `开始游戏 / 商店 / 背包 / 战斗 / 设置`；
+- 每个子 case 是普通场景/模块，通过 UI 按钮进入；也可 additive 加载；
+- 同一套路由给 replay 用：UI 按钮和 `--case` 走同一个 `CaseRouter`；
+- 工程内不出现“case 1/2/3”这类暴露评测意图的命名；case 编号只存在 oracle 与外部 replay 映射。
+
+#### 14.12.4 case 设计原则
+
+**像开发者会写的东西**，而不是“故意写坏”：
+
+| 类型 | 例子 | 可能的优化点 |
+|---|---|---|
+| UI 热路径 | 商店列表每帧重建文本/字符串拼接 | 缓存、脏标记、对象池 |
+| 组件查找 | `Update` 里反复 `GetComponent` | 缓存 |
+| 材质/合批 | 每个商品道具单独 `.material` | 共享材质 + MPB |
+| 加载 | 打开商店时同步 `Resources.Load` 全量 | 分帧/异步/预加载 |
+| Canvas | 每帧改布局/尺寸导致 rebuild | 分离动静、减少 layout |
+| 渲染 | 半透明特效大面积重叠 | 降 overdraw/合并 |
+| 动画 | 每帧无条件写 Animator 参数 | 判等/状态缓存 |
+| 资源导入 | 纹理未压缩/开 mipmap/音频 decompress on load | 导入设置/加载策略 |
+| 物理 | 未裁剪碰撞层 | 碰撞矩阵/层设置 |
+| 对象生命周期 | 频繁 Instantiate/Destroy | 对象池 |
+
+每个 case：
+
+- 1..N 个机会，允许 0 个（负对照）；
+- 机会有 `reference_kind/value/ref`（floor/budget/peer/history/static），不依赖 CLEAN；
+- 机会可能“看起来像 bug”，也可能只是“没做但能做”；
+- 不写“这里是缺陷”的注释，不用 `F-`/`DEFECT`/`fixture` 命名。
+
+#### 14.12.5 replay 入口
+
+```text
+python -m upi dev devsim-replay --project sim/project --case c04
+```
+
+- 外部 runner 只把 `case` 路由到工程入口，不把 oracle 传给工具；
+- 进入默认场景 → 按同一 `CaseRouter` 路由 → Play → 探针采样 → 退出；
+- 支持默认 UI 手动跳转；replay 与 UI 走同一路径，避免“自动化能到、用户点不到”；
+- case id 对工具是 opaque 的，不附带 expected findings；
+- 失败（场景缺失/入口不可达）如实报错。
+
+#### 14.12.6 评测
+
+- oracle 记录：`case_id`、入口、replay 步骤、expected opportunities（pattern/metric/reference/allowed fix/risk）、负对照标记；
+- 工具产出 `OpportunityFinding` 后，**由评测器**与 oracle 比对：
+  - recall / precision / 无机会 case 的 FP；
+  - 机会是否落在正确代码锚点；
+  - 修复后 `gap_closed`，不是“verified”；
+- oracle 不参与工具推理，也不得出现在工具日志/报告中；
+- 工具若“猜到 case id 对应什么”不算能力，评测只看证据和代码锚点。
+
+#### 14.12.7 验收（I7b2）
+
+1. `sim/project` 可被 UI 选中，默认场景能打开；
+2. 默认场景 UI 能进入每个 case；replay 也能进入同一 case；
+3. 工程内无 oracle/答案痕迹（自动校验）；
+4. 至少 10 个日常 case + 2 个负对照；
+5. 每个 case 至少有 1 个可解释机会或明确 0 机会；
+6. 工具运行时 workspace 不含 oracle，仍能产出机会；
+7. 评测报告能区分“漏报/误报/正确机会”，不把 0 机会 case 当失败。
 
 ---
