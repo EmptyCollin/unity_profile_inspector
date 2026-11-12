@@ -1,9 +1,11 @@
 --- a/Assets/DevSim/Runtime/ChromaGame.cs
 +++ b/Assets/DevSim/Runtime/ChromaGame.cs
-@@ -925,2 +924,0 @@
+@@ -90 +89,0 @@
+-        private int[] lastItemCounts;
+@@ -925,2 +923,0 @@
 -            if (lastItemCounts == null || lastItemCounts.Length != itemCountLabels.Length)
 -                lastItemCounts = new int[itemCountLabels.Length];
-@@ -928,5 +926 @@
+@@ -928,5 +925 @@
 -                if (itemCountLabels[i] != null && lastItemCounts[i] != inventory[i])
 -                {
 -                    lastItemCounts[i] = inventory[i];
