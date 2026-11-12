@@ -15,6 +15,8 @@ namespace DevSim
         public int Colors { get; }
         public int[,] Color { get; private set; }
         public int[,] Layers { get; private set; }
+        private bool[,] _hitBuffer;
+        private int[] _perColorBuffer;
 
         public BoardModel(int n, int colors)
         {
@@ -124,7 +126,10 @@ namespace DevSim
 
         public bool[,] FindMatches()
         {
-            var hit = new bool[N, N];
+            if (_hitBuffer == null || _hitBuffer.GetLength(0) != N)
+                _hitBuffer = new bool[N, N];
+            else Array.Clear(_hitBuffer, 0, _hitBuffer.Length);
+            var hit = _hitBuffer;
             for (int r = 0; r < N; r++)
             {
                 int run = 1;
@@ -172,7 +177,10 @@ namespace DevSim
         /// <summary>被匹配的格子各扣 1 层；返回按颜色统计的命中数。</summary>
         public int[] CountByColor(bool[,] hit)
         {
-            var per = new int[Colors];
+            if (_perColorBuffer == null || _perColorBuffer.Length != Colors)
+                _perColorBuffer = new int[Colors];
+            else Array.Clear(_perColorBuffer, 0, _perColorBuffer.Length);
+            var per = _perColorBuffer;
             for (int r = 0; r < N; r++)
                 for (int c = 0; c < N; c++)
                     if (hit[r, c] && Color[r, c] >= 0) per[Color[r, c]]++;

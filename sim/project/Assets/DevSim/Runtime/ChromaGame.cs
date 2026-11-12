@@ -83,6 +83,11 @@ namespace DevSim
         private int _fxCursor;
 
         private bool busy, dragging;
+        private int lastHudRound = int.MinValue;
+        private int lastHudTarget = int.MinValue;
+        private int lastHudScore = int.MinValue;
+        private int lastHudCoins = int.MinValue;
+        private int[] lastItemCounts;
         private int dragR = -1, dragC = -1, hoverR = -1, hoverC = -1;
         private int selectedR = -1, selectedC = -1;
         private int bonusTriggeredCount;
@@ -889,9 +894,9 @@ namespace DevSim
         private void UpdateHudBody()
         {
             if (roundText == null) return;
-            roundText.text = "ROUND " + round;
-            targetText.text = "TARGET " + target;
-            scoreText.text = "SCORE " + totalScore;
+            if (round != lastHudRound) { roundText.text = "ROUND " + round; lastHudRound = round; }
+            if (target != lastHudTarget) { targetText.text = "TARGET " + target; lastHudTarget = target; }
+            if (totalScore != lastHudScore) { scoreText.text = "SCORE " + totalScore; lastHudScore = totalScore; }
             timeText.text = Mathf.Max(0, timeLeft).ToString("0.0") + "s";
             if (timeFill != null)
             {
@@ -905,7 +910,7 @@ namespace DevSim
                     Vector3.one * (1f + 0.08f * Mathf.Sin(Time.unscaledTime * 12f));
                 else timeText.rectTransform.localScale = Vector3.one;
             }
-            coinText.text = "COINS " + coins;
+            if (coins != lastHudCoins) { coinText.text = "COINS " + coins; lastHudCoins = coins; }
             RefreshItemLabels();
         }
 
@@ -917,8 +922,14 @@ namespace DevSim
         private void RefreshItemLabelsBody()
         {
             if (itemCountLabels == null) return;
+            if (lastItemCounts == null || lastItemCounts.Length != itemCountLabels.Length)
+                lastItemCounts = new int[itemCountLabels.Length];
             for (int i = 0; i < itemCountLabels.Length; i++)
-                if (itemCountLabels[i] != null) itemCountLabels[i].text = "x" + inventory[i];
+                if (itemCountLabels[i] != null && lastItemCounts[i] != inventory[i])
+                {
+                    lastItemCounts[i] = inventory[i];
+                    itemCountLabels[i].text = "x" + inventory[i];
+                }
         }
 
         // ───────────────────────── board ─────────────────────────
