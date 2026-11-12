@@ -45,6 +45,14 @@ namespace DevSim
         private readonly Text[] bonusLabels = new Text[3];
         private Text roundText, targetText, scoreText, timeText, coinText, statusText, highText;
         private Text shopCoins, overText;
+        private Image timeFill;
+        private GameObject helpPanel, caseMenu;
+        private Text caseButtonLabel;
+        private Sprite tileSprite;
+        private bool busy, dragging;
+        private int dragR = -1, dragC = -1;
+        private readonly Vector2[,] tileBase = new Vector2[N, N];
+        private int bonusTriggeredCount;
         private int[,] board = new int[N, N];
         private int[,] armor = new int[N, N];
         private readonly int[] inventory = new int[8];
@@ -158,8 +166,32 @@ namespace DevSim
             var b = rt.gameObject.AddComponent<Button>();
             b.targetGraphic = img;
             var t = MakeLabel(rt, text, 0, 0, w, h, size, new Color(0.92f, 0.97f, 1f), TextAnchor.MiddleCenter);
-            b.onClick.AddListener(() => click());
+            if (click != null) b.onClick.AddListener(() => click());
             return b;
+        }
+
+        private Sprite MakeTileSprite()
+        {
+            const int S = 64, R = 14;
+            var tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
+            var px = new Color32[S * S];
+            for (int y = 0; y < S; y++)
+            {
+                for (int x = 0; x < S; x++)
+                {
+                    float dx = Mathf.Max(0, Mathf.Max(R - x, x - (S - 1 - R)));
+                    float dy = Mathf.Max(0, Mathf.Max(R - y, y - (S - 1 - R)));
+                    bool inside = dx * dx + dy * dy <= R * R;
+                    if (!inside) { px[y * S + x] = new Color32(255, 255, 255, 0); continue; }
+                    float g = Mathf.Lerp(0.78f, 1f, y / (float)S);
+                    byte a = 255;
+                    if (x < 2 || y < 2) a = 210;
+                    px[y * S + x] = new Color32(255, 255, 255, (byte)(a * g));
+                }
+            }
+            tex.SetPixels32(px); tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f),
+                                 64f, 0, SpriteMeshType.FullRect, new Vector4(R, R, R, R));
         }
 
         private void FullPanel(string name, Color color)
@@ -214,7 +246,8 @@ namespace DevSim
 
         private void BuildUI()
         {
-            FullPanel("Bg", new Color(0.035f, 0.05f, 0.075f));
+            tileSprite = MakeTileSprite();
+            FullPanel("Bg", new Color(0.027f, 0.039f, 0.059f));
             // soft top/bottom bands
             MakePanel(canvas.transform, 0, 0, 1920, 96, new Color(0.06f, 0.09f, 0.13f, 0.95f), "TopBand");
             MakePanel(canvas.transform, 0, 980, 1920, 100, new Color(0.06f, 0.09f, 0.13f, 0.95f), "BottomBand");
@@ -230,6 +263,12 @@ namespace DevSim
             targetText = MakeLabel(gameRoot.transform, "TARGET 600", 740, 20, 210, 36, 22, new Color(0.7f, 0.85f, 1f));
             scoreText = MakeLabel(gameRoot.transform, "SCORE 0", 960, 20, 230, 36, 22, Color.white);
             timeText = MakeLabel(gameRoot.transform, "30.0s", 1210, 18, 150, 40, 30, new Color(1f, 0.75f, 0.4f), TextAnchor.MiddleLeft);
+            var barBg = MakePanel(gameRoot.transform, 1210, 62, 220, 12, new Color(0.1f, 0.15f, 0.21f), "TimeBg");
+            var fillGo = MakePanel(barBg.transform, 0, 0, 220, 12, new Color(0.33f, 0.78f, 1f), "TimeFill");
+            timeFill = fillGo;
+            timeFill.type = Image.Type.Filled;
+            timeFill.fillMethod = Image.FillMethod.Horizontal;
+            timeFill.fillOrigin = (int)Image.OriginHorizontal.Left;
             coinText = MakeLabel(gameRoot.transform, "COINS 0", 1370, 20, 180, 36, 22, new Color(1f, 0.86f, 0.45f));
             statusText = MakeLabel(gameRoot.transform, "SWAP ADJACENT TILES", 60, 92, 700, 34, 18, new Color(0.65f, 0.76f, 0.9f));
 
@@ -241,9 +280,20 @@ namespace DevSim
                 {
                     int rr = r, cc = c;
                     var b = MakeButton(boardRoot, "", c * (Tile + Gap) + 6, r * (Tile + Gap) + 6,
-                                   Tile, Tile, () => OnTile(rr, cc), Palette[0]);
+                                   Tile, Tile, null, Palette[0]);
                     tileButtons[r, c] = b;
                     tileImages[r, c] = b.GetComponent<Image>();
+                    tileImages[r, c].sprite = tileSprite;
+                    tileImages[r, c].type = Image.Type.Sliced;
+                    var shadow = tileImages[r, c].gameObject.AddComponent<Shadow>();
+                    shadow.effectColor = new Color(0f, 0f, 0f, 0.35f);
+                    shadow.effectDistance = new Vector2(0f, -4f);
+                    var rim = tileImages[r, c].gameObject.AddComponent<Outline>();
+                    rim.effectColor = new Color(1f, 1f, 1f, 0.12f);
+                    rim.effectDistance = new Vector2(1f, -1f);
+                    var drag = b.gameObject.AddComponent<TileDrag>();
+                    drag.game = this; drag.row = r; drag.col = c;
+                    tileBase[r, c] = b.GetComponent<RectTransform>().anchoredPosition;
                     tileArmor[r, c] = MakeLabel(b.transform, "", 0, 0, Tile, Tile, 24,
                                             new Color(0.08f, 0.08f, 0.1f), TextAnchor.MiddleCenter);
                 }
@@ -281,22 +331,100 @@ namespace DevSim
             var rt = lobbyRoot.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
             rt.offsetMin = rt.offsetMax = Vector2.zero;
-            MakePanel(lobbyRoot.transform, 0, 0, 1920, 1080, new Color(0.035f, 0.05f, 0.075f, 1f), "LobbyBg");
-            MakePanel(lobbyRoot.transform, 160, 140, 1600, 800, new Color(0.06f, 0.09f, 0.14f, 0.96f), "LobbyCard");
+            MakePanel(lobbyRoot.transform, 0, 0, 1920, 1080, new Color(0.027f, 0.039f, 0.059f, 1f), "LobbyBg");
+            MakePanel(lobbyRoot.transform, 160, 140, 1600, 800, new Color(0.055f, 0.085f, 0.13f, 0.97f), "LobbyCard");
             MakeLabel(lobbyRoot.transform, "CHROMA", 230, 190, 700, 90, 76, new Color(1f, 0.82f, 0.42f));
             MakeLabel(lobbyRoot.transform, "ROGUE", 230, 270, 700, 80, 76, new Color(0.55f, 0.8f, 1f));
             MakeLabel(lobbyRoot.transform, "A tiny match-3 roguelite. Clear fast, bank the overflow, break the armor.",
                   230, 370, 900, 38, 20, new Color(0.72f, 0.82f, 0.95f));
-            MakeButton(lobbyRoot.transform, "开始游戏", 230, 470, 300, 66, StartGame, new Color(0.18f, 0.42f, 0.32f), 24);
-            MakeButton(lobbyRoot.transform, "商店练习", 230, 552, 300, 56, () => { StartGame(); OpenShop(); },
-                   new Color(0.22f, 0.28f, 0.42f), 20);
-            MakeButton(lobbyRoot.transform, "背包 / 说明", 230, 622, 300, 56, ShowHelp,
+            MakeButton(lobbyRoot.transform, "开始游戏", 230, 470, 300, 66, StartDefaultGame,
+                   new Color(0.18f, 0.42f, 0.32f), 24);
+            MakeButton(lobbyRoot.transform, "说明", 230, 552, 300, 56, ShowHelp,
                    new Color(0.18f, 0.23f, 0.3f), 20);
+            var caseBtn = MakeButton(lobbyRoot.transform, "", 230, 634, 420, 56,
+                   ToggleCaseMenu, new Color(0.12f, 0.18f, 0.26f), 18);
+            caseButtonLabel = caseBtn.GetComponentInChildren<Text>();
+            caseButtonLabel.text = "专项测试  c18 · 混合  ▾";
             MakeLabel(lobbyRoot.transform, "LOCAL ARCADE", 1260, 470, 360, 30, 20, new Color(0.9f, 0.75f, 0.4f));
             MakeLabel(lobbyRoot.transform, "Top scores are stored on this machine.", 1260, 506, 380, 60, 17,
                   new Color(0.65f, 0.76f, 0.88f));
-            MakeLabel(lobbyRoot.transform, "v0.1 vertical slice · no network · 30s rounds", 230, 840, 800, 30, 16,
+            MakeLabel(lobbyRoot.transform, "v0.2 visual baseline · no network · drag to swap", 230, 840, 900, 30, 16,
                   new Color(0.4f, 0.5f, 0.62f));
+            BuildCaseMenu();
+            BuildHelp();
+        }
+
+        private void BuildCaseMenu()
+        {
+            caseMenu = new GameObject("CaseMenu", typeof(RectTransform));
+            caseMenu.transform.SetParent(lobbyRoot.transform, false);
+            var rt = caseMenu.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0, 1);
+            rt.pivot = new Vector2(0, 1);
+            rt.anchoredPosition = new Vector2(230, -610);
+            rt.sizeDelta = new Vector2(980, 440);
+            MakePanel(caseMenu.transform, 0, 0, 980, 440, new Color(0.04f, 0.07f, 0.11f, 0.99f), "CaseBg");
+            MakeLabel(caseMenu.transform, "专项测试（选中即启动，等价于 replay --case）", 20, 12, 900, 28, 16,
+                  new Color(0.75f, 0.85f, 0.95f));
+            for (int i = 0; i < DevSimScenarios.Ids.Length; i++)
+            {
+                int idx = i;
+                string id = DevSimScenarios.Ids[i];
+                float x = 20 + (i % 2) * 480;
+                float y = 48 + (i / 2) * 32;
+                MakeButton(caseMenu.transform, DevSimScenarios.Label(id), x, y, 450, 28,
+                       () => StartCase(id), new Color(0.1f, 0.16f, 0.23f), 14);
+            }
+            caseMenu.SetActive(false);
+        }
+
+        private void BuildHelp()
+        {
+            helpPanel = new GameObject("Help", typeof(RectTransform));
+            helpPanel.transform.SetParent(lobbyRoot.transform, false);
+            var rt = helpPanel.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            MakePanel(helpPanel.transform, 0, 0, 1920, 1080, new Color(0f, 0f, 0f, 0.8f), "HelpDim");
+            MakePanel(helpPanel.transform, 380, 170, 1160, 740, new Color(0.06f, 0.1f, 0.15f, 1f), "HelpCard");
+            MakeLabel(helpPanel.transform, "说明", 440, 210, 300, 50, 36, new Color(1f, 0.82f, 0.42f));
+            MakeLabel(helpPanel.transform,
+                  "• 拖拽相邻色块交换；3 连消除。\n" +
+                  "• 每轮 30 秒，达到目标分；超出部分结转到下一轮。\n" +
+                  "• 一次交换/连锁消除 ≥5 个色块 → BONUS 三选一（暂停倒计时）。\n" +
+                  "• 每 5 轮进商店，用 coins 买炸弹/改色/锤子/洗牌。\n" +
+                  "• 商店后难度提升；带数字的高级色块会锁住，交换其他块可减 1。\n" +
+                  "• 本地 Top 10 存在这台机器上。",
+                  440, 290, 1020, 360, 21, new Color(0.8f, 0.88f, 0.98f));
+            MakeButton(helpPanel.transform, "关闭", 820, 800, 280, 56,
+                   () => helpPanel.SetActive(false), new Color(0.18f, 0.3f, 0.42f), 20);
+            helpPanel.SetActive(false);
+        }
+
+        private void ToggleCaseMenu()
+        {
+            if (caseMenu != null) caseMenu.SetActive(!caseMenu.activeSelf);
+        }
+
+        private void StartDefaultGame()
+        {
+            cfg = new CaseConfig
+            {
+                case_id = "default", seed = 20261112,
+                round_seconds = 30f, target_base = 600,
+            };
+            WriteFeatureState(cfg);
+            caseButtonLabel.text = "专项测试  c18 · 混合  ▾";
+            StartGame();
+        }
+
+        private void StartCase(string id)
+        {
+            cfg = DevSimScenarios.For(id);
+            WriteFeatureState(cfg);
+            caseButtonLabel.text = "专项测试  " + DevSimScenarios.Label(id) + "  ▾";
+            if (caseMenu != null) caseMenu.SetActive(false);
+            StartGame();
         }
 
         private void BuildShop()
@@ -369,10 +497,13 @@ namespace DevSim
         private void ShowLobby()
         {
             playing = false; paused = true; overOpen = false;
+            busy = false; dragging = false; dragR = dragC = -1;
             if (gameRoot) gameRoot.SetActive(false);
             if (shopPanel) shopPanel.SetActive(false);
             if (bonusPanel) bonusPanel.SetActive(false);
             if (overPanel) overPanel.SetActive(false);
+            if (caseMenu) caseMenu.SetActive(false);
+            if (helpPanel) helpPanel.SetActive(false);
             if (lobbyRoot) lobbyRoot.SetActive(true);
             RefreshHighScores();
         }
@@ -380,10 +511,14 @@ namespace DevSim
         private void StartGame()
         {
             playing = true; paused = false; bonusOpen = false; overOpen = false;
+            busy = false; dragging = false; dragR = dragC = -1;
             round = 1; target = cfg.target_base; totalScore = 0; coins = 0; tier = cfg.start_tier;
             multiplier = 1; timeLeft = cfg.round_seconds; bonusTime = 0;
+            bonusTriggeredCount = 0;
             for (int i = 0; i < inventory.Length; i++) inventory[i] = 0;
             if (lobbyRoot) lobbyRoot.SetActive(false);
+            if (caseMenu) caseMenu.SetActive(false);
+            if (helpPanel) helpPanel.SetActive(false);
             if (gameRoot) gameRoot.SetActive(true);
             if (shopPanel) shopPanel.SetActive(false);
             if (bonusPanel) bonusPanel.SetActive(false);
@@ -430,6 +565,16 @@ namespace DevSim
             targetText.text = "TARGET " + target;
             scoreText.text = "SCORE " + totalScore + (totalScore >= target ? "  +" + (totalScore - target) : "");
             timeText.text = Mathf.Max(0, timeLeft).ToString("0.0") + "s";
+            if (timeFill != null)
+            {
+                float ratio = Mathf.Clamp01(timeLeft / Mathf.Max(1f, cfg.round_seconds));
+                timeFill.fillAmount = ratio;
+                timeFill.color = ratio > 0.5f ? new Color(0.33f, 0.78f, 1f)
+                    : ratio > 0.2f ? new Color(1f, 0.75f, 0.4f)
+                    : new Color(1f, 0.36f, 0.36f);
+                if (ratio < 0.2f) timeText.rectTransform.localScale =
+                    Vector3.one * (1f + 0.08f * Mathf.Sin(Time.unscaledTime * 12f));
+            }
             coinText.text = "COINS " + coins;
             RefreshItemLabels();
         }
@@ -521,27 +666,73 @@ namespace DevSim
             TrySwap(ar, ac, r, c);
         }
 
+        public void BeginDrag(int r, int c)
+        {
+            if (!playing || paused || busy) return;
+            dragging = true;
+            dragR = r; dragC = c;
+            selectedR = r; selectedC = c;
+            RefreshTiles();
+        }
+
+        public void EndDrag(int r, int c, Vector2 delta)
+        {
+            if (!dragging) return;
+            dragging = false;
+            selectedR = selectedC = -1;
+            RefreshTiles();
+            if (delta.magnitude < 20f) return;
+            int tr = r, tc = c;
+            if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+                tc += delta.x > 0 ? 1 : -1;
+            else
+                tr += delta.y > 0 ? 1 : -1;
+            if (tr < 0 || tr >= N || tc < 0 || tc >= N) return;
+            TrySwap(r, c, tr, tc);
+        }
+
         private void TrySwap(int r1, int c1, int r2, int c2)
         {
+            if (busy || !playing || paused) return;
             if (armor[r1, c1] > 0 || armor[r2, c2] > 0)
             {
                 statusText.text = "带数字的高级色块被锁住：先用交换/道具破甲";
                 RefreshTiles();
                 return;
             }
+            StartCoroutine(SwapRoutine(r1, c1, r2, c2));
+        }
+
+        private IEnumerator SwapRoutine(int r1, int c1, int r2, int c2)
+        {
+            busy = true;
+            var a = tileButtons[r1, c1].GetComponent<RectTransform>();
+            var b = tileButtons[r2, c2].GetComponent<RectTransform>();
+            Vector2 pa = tileBase[r1, c1], pb = tileBase[r2, c2];
+            const float T = 0.12f;
+            for (float t = 0; t < T; t += Time.deltaTime)
+            {
+                float k = Mathf.SmoothStep(0f, 1f, t / T);
+                a.anchoredPosition = Vector2.Lerp(pa, pb, k);
+                b.anchoredPosition = Vector2.Lerp(pb, pa, k);
+                yield return null;
+            }
+            a.anchoredPosition = pa; b.anchoredPosition = pb;
             SwapCells(r1, c1, r2, c2);
             if (!HasMatch())
             {
                 SwapCells(r1, c1, r2, c2);
                 statusText.text = "这次交换没有形成消除";
                 RefreshTiles();
-                return;
+                busy = false;
+                yield break;
             }
             for (int r = 0; r < N; r++)
                 for (int c = 0; c < N; c++)
                     if (armor[r, c] > 0) armor[r, c]--;
             if (cfg.legacy_match_alloc) { var waste = new List<int>(); for (int i = 0; i < 64; i++) waste.Add(i); }
-            ResolveBoard();
+            yield return StartCoroutine(ResolveRoutine());
+            busy = false;
         }
 
         private void SwapCells(int r1, int c1, int r2, int c2)
@@ -604,7 +795,7 @@ namespace DevSim
             return n;
         }
 
-        private void ResolveBoard()
+        private IEnumerator ResolveRoutine()
         {
             int chain = 0, totalCleared = 0;
             while (true)
@@ -614,21 +805,77 @@ namespace DevSim
                 if (n == 0) break;
                 chain++;
                 totalCleared += n;
+                yield return StartCoroutine(AnimateClear(hit));
                 for (int r = 0; r < N; r++)
                     for (int c = 0; c < N; c++)
-                        if (hit[r, c]) { board[r, c] = -1; armor[r, c] = 0; }
+                        if (hit[r, c])
+                        {
+                            if (cfg.legacy_particle) Burst(r, c, board[r, c]);
+                            board[r, c] = -1; armor[r, c] = 0;
+                        }
                 totalScore += n * 10 * multiplier * chain;
-                if (cfg.legacy_particle)
-                    for (int r = 0; r < N; r++)
-                        for (int c = 0; c < N; c++)
-                            if (hit[r, c]) Burst(r, c, board[r, c]);
                 DropAndRefill();
+                RefreshTiles();
+                yield return StartCoroutine(AnimateDrop());
             }
             RefreshTiles();
             UpdateHud();
-            if (totalCleared > 0) statusText.text = "CLEARED " + totalCleared + (chain > 1 ? "  CHAIN x" + chain : "");
-            if (totalCleared >= 5 && !bonusOpen) { ShowBonus(); return; }
-            CheckRound();
+            if (totalCleared > 0)
+                statusText.text = "CLEARED " + totalCleared + (chain > 1 ? "  CHAIN x" + chain : "");
+            busy = false;
+            if (totalCleared >= 5 && !bonusOpen) ShowBonus(totalCleared);
+            else CheckRound();
+        }
+
+        private IEnumerator AnimateClear(bool[,] hit)
+        {
+            float t = 0f;
+            while (t < 0.18f)
+            {
+                t += Time.deltaTime;
+                float k = t / 0.18f;
+                for (int r = 0; r < N; r++)
+                    for (int c = 0; c < N; c++)
+                        if (hit[r, c] && tileImages[r, c] != null)
+                        {
+                            float s = k < 0.4f ? Mathf.Lerp(1f, 1.18f, k / 0.4f)
+                                              : Mathf.Lerp(1.18f, 0.05f, (k - 0.4f) / 0.6f);
+                            tileImages[r, c].rectTransform.localScale = new Vector3(s, s, 1f);
+                            tileImages[r, c].color = Color.Lerp(Palette[board[r, c]], Color.white, 0.45f * k);
+                        }
+                yield return null;
+            }
+            for (int r = 0; r < N; r++)
+                for (int c = 0; c < N; c++)
+                    if (hit[r, c] && tileImages[r, c] != null)
+                        tileImages[r, c].rectTransform.localScale = Vector3.one;
+        }
+
+        private IEnumerator AnimateDrop()
+        {
+            for (int r = 0; r < N; r++)
+                for (int c = 0; c < N; c++)
+                    if (tileImages[r, c] != null)
+                        tileImages[r, c].rectTransform.anchoredPosition = tileBase[r, c] + new Vector2(0, 80);
+            float t = 0f;
+            while (t < 0.26f)
+            {
+                t += Time.deltaTime;
+                for (int r = 0; r < N; r++)
+                    for (int c = 0; c < N; c++)
+                        if (tileImages[r, c] != null)
+                        {
+                            float k = Mathf.Clamp01((t - c * 0.015f) / 0.26f);
+                            k = Mathf.SmoothStep(0f, 1f, k);
+                            tileImages[r, c].rectTransform.anchoredPosition =
+                                Vector2.Lerp(tileBase[r, c] + new Vector2(0, 80), tileBase[r, c], k);
+                        }
+                yield return null;
+            }
+            for (int r = 0; r < N; r++)
+                for (int c = 0; c < N; c++)
+                    if (tileImages[r, c] != null)
+                        tileImages[r, c].rectTransform.anchoredPosition = tileBase[r, c];
         }
 
         private void Burst(int r, int c, int color)
@@ -660,6 +907,7 @@ namespace DevSim
                 if (bonusOpen) { ChooseBonus(0); continue; }
                 if (shopPanel != null && shopPanel.activeSelf) { CloseShop(); continue; }
                 if (!playing || paused) continue;
+                if (TryAutoSwap()) continue;
                 for (int k = 0; k < 8; k++)
                 {
                     int r = rng.Next(N), c = rng.Next(N);
@@ -671,6 +919,31 @@ namespace DevSim
                     break;
                 }
             }
+        }
+
+        private bool TryAutoSwap()
+        {
+            for (int r = 0; r < N; r++)
+                for (int c = 0; c < N; c++)
+                {
+                    if (armor[r, c] > 0) continue;
+                    int[] dr = { 1, 0 };
+                    int[] dc = { 0, 1 };
+                    for (int k = 0; k < 2; k++)
+                    {
+                        int r2 = r + dr[k], c2 = c + dc[k];
+                        if (r2 >= N || c2 >= N || armor[r2, c2] > 0) continue;
+                        SwapCells(r, c, r2, c2);
+                        bool hit = HasMatch();
+                        SwapCells(r, c, r2, c2);
+                        if (hit)
+                        {
+                            TrySwap(r, c, r2, c2);
+                            return true;
+                        }
+                    }
+                }
+            return false;
         }
 
         private void DropAndRefill()
@@ -802,9 +1075,11 @@ namespace DevSim
         private string[] bonusNames = { "得分 x1.1", "本轮 +2s", "炸弹 +1" };
         private int[] bonusIds = new int[3];
 
-        private void ShowBonus()
+        private void ShowBonus(int cleared)
         {
             bonusOpen = true; paused = true;
+            bonusTriggeredCount++;
+            Debug.Log($"BONUS triggered: cleared={cleared} round={round} count={bonusTriggeredCount}");
             string[] names = { "得分 x1.1", "本轮 +2s", "炸弹 +1" };
             for (int i = 0; i < 3; i++)
             {
@@ -813,7 +1088,23 @@ namespace DevSim
                 if (bonusLabels[i] != null) bonusLabels[i].text = names[id];
             }
             bonusPanel.SetActive(true);
+            bonusPanel.transform.localScale = new Vector3(0.86f, 0.86f, 1f);
+            StartCoroutine(BonusIntro());
             statusText.text = "BONUS — choose one";
+        }
+
+        private IEnumerator BonusIntro()
+        {
+            float t = 0f;
+            while (t < 0.3f)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, t / 0.3f);
+                bonusPanel.transform.localScale = Vector3.Lerp(
+                    new Vector3(0.86f, 0.86f, 1f), Vector3.one, k);
+                yield return null;
+            }
+            bonusPanel.transform.localScale = Vector3.one;
         }
 
         private void ChooseBonus(int slot)
@@ -824,6 +1115,7 @@ namespace DevSim
             else inventory[0]++;
             bonusOpen = false;
             bonusPanel.SetActive(false);
+            bonusPanel.transform.localScale = Vector3.one;
             paused = false;
             RefreshItemLabels();
             CheckRound();
@@ -862,7 +1154,8 @@ namespace DevSim
             else ShuffleBoard();
             selectedR = selectedC = -1;
             RefreshItemLabels();
-            ResolveBoard();
+            busy = true;
+            StartCoroutine(ResolveRoutine());
         }
 
         private void ShuffleBoard()
@@ -884,8 +1177,7 @@ namespace DevSim
 
         private void ShowHelp()
         {
-            statusText.text = "3 连消除；5 连开 BONUS；每 5 轮商店；带数字色块锁住";
-            if (lobbyRoot) lobbyRoot.SetActive(true);
+            if (helpPanel != null) helpPanel.SetActive(true);
         }
 
         [Serializable] private class ScoreEntry { public int score; public int round; public string date; }
