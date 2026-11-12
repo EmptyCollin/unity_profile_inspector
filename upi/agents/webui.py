@@ -16,6 +16,7 @@ import json
 import os
 import re
 import secrets
+import tempfile
 import threading
 import time
 import urllib.request
@@ -81,6 +82,33 @@ def _projects_payload() -> dict:
     except Exception as e:  # noqa: BLE001
         return {"active": None, "recent": [], "entries": [],
                 "error": f"{type(e).__name__}: {e}"}
+
+
+def _build_opportunity_ticket():
+    """从当前工程静态机会建工单；有 devsim 运行期 feature 文件时只报活路径。"""
+    from upi.config.project_profile import active_profile
+    from upi.core.opportunity import scan
+    from upi.core.ticket import TicketStore, build_opportunity_ticket
+
+    prof = active_profile()
+    flags = None
+    feat = Path(tempfile.gettempdir()) / "devsim_active_features.json"
+    if feat.exists():
+        try:
+            d = json.loads(feat.read_text(encoding="utf-8"))
+            fp = Path(str(d.get("project_path") or "")).resolve()
+            if fp == prof.abs_project.resolve():
+                flags = {k for k, v in d.items() if v is True}
+        except Exception:  # noqa: BLE001
+            flags = None
+    findings = scan(prof.abs_project, project_id=prof.profile_id, active_flags=flags)
+    if not findings:
+        raise ValueError("当前工程没有可用机会（先运行 replay/扫描，或检查 active_features）")
+    t = build_opportunity_ticket(findings, prof.abs_project,
+                                 project_id=prof.profile_id)
+    store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+    store.save(t)
+    return t
 
 
 def _project_switch_blocked() -> Optional[str]:
@@ -430,7 +458,8 @@ _INDEX_HTML = r"""<!doctype html>
       <h1>批量工单</h1>
       <p class="sub">一次列多个候选、按顺序执行；执行一次只落一个 patch。常驻结论只 <b>unverified</b>；批量批准不绕过单个 patch 的权限闸。</p>
       <div style="margin:10px 0 14px"><button id="buildTicketBtn" style="background:#14314a;color:#dbe7f3;border:1px solid #2a4a63;border-radius:8px;padding:9px 14px;cursor:pointer">从当前 cluster 生成工单</button>
-        <span id="ticketHint" style="color:var(--dim);font-size:12px;margin-left:10px">I3a：建单/审批可用；Unity 执行接线在 I3b。</span></div>
+        <button id="oppTicketBtn" style="background:#1b3a2d;color:#dbe7f3;border:1px solid #2a6348;border-radius:8px;padding:9px 14px;cursor:pointer;margin-left:6px">从机会生成工单</button>
+        <span id="ticketHint" style="color:var(--dim);font-size:12px;margin-left:10px">I3a：建单/审批可用；机会工单来自当前源码扫描。</span></div>
       <div class="panel">
         <h2>工单 <span id="batchMeta">—</span></h2>
         <table>
@@ -650,6 +679,13 @@ async function genReport(sid){
     await post(`/api/regression/suites/${encodeURIComponent(sid)}/report`, {});
     window.open(q(`/api/regression/suites/${encodeURIComponent(sid)}/report`), "_blank");
   }catch(e){ alert("生成报告失败：" + e.message); }
+}
+async function buildOpportunityTicket(){
+  try{
+    const r = await post("/api/tickets/opportunities", {});
+    await refresh();
+    if(r.ticket){ showTicketDetail(r.ticket); }
+  }catch(e){ alert("机会建单失败：" + e.message); }
 }
 async function buildTicket(){
   try{
@@ -926,6 +962,8 @@ document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev 
 }));
 const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
+const oppBtn = $("oppTicketBtn");
+if(oppBtn) oppBtn.addEventListener("click", buildOpportunityTicket);
 const createSuiteBtn = $("createSuiteBtn");
 if(createSuiteBtn) createSuiteBtn.addEventListener("click", createSuite);
 const projectSelect = $("projectSelect");
@@ -1151,6 +1189,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(409, {"ok": False, "error": str(e)})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        if parsed.path == "/api/tickets/opportunities":
+            try:
+                t = _build_opportunity_ticket()
+                self._send_json(200, {"ok": True, "ticket": t.model_dump(),
+                                      "summary": t.summary()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(409, {"ok": False, "error": str(e)[:240]})
             return
 
         if parsed.path == "/api/tickets/build":

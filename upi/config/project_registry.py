@@ -84,6 +84,13 @@ class ProjectEntry(BaseModel):
             "defect_signature": "",
             "conformance_tier": "none",
         }
+        # 默认场景若符合 scenes_dir/scene_template，就作为可执行 scene 的 subject。
+        scene = self.default_scene.replace("\\", "/")
+        prefix = "Assets/Scenes/"
+        if scene.startswith(prefix) and scene.endswith(".unity"):
+            subject = scene[len(prefix):-len(".unity")]
+            if subject and "/" not in subject:
+                data["fix_subject"] = subject
         data.update(self.profile_overrides or {})
         data["profile_id"] = self.project_id
         return ProjectProfile(**data)
