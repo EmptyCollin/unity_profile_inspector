@@ -8,6 +8,7 @@ using UnityEditor;
 using UnityEditorInternal;
 using UnityEditor.Profiling;
 using UnityEngine.Profiling;
+using Unity.Profiling;
 
 UpiEvidenceV1.Main();
 return UpiEvidenceV1.LastLine;
@@ -18,6 +19,12 @@ public static class UpiEvidenceV1
     public static string LastLine = "";
     static int _ticks;
     static bool _done;
+    static readonly Dictionary<string, ProfilerRecorder> _rec = new Dictionary<string, ProfilerRecorder>();
+    static readonly string[] MarkerNames = {
+        "ChromaGame.Update", "ChromaGame.UpdateHud",
+        "ChromaGame.RefreshItemLabels", "ChromaGame.UpdateBody",
+        "ChromaGame.ResolvePendingWhenIdle"
+    };
 
     public static string Main()
     {
@@ -26,6 +33,15 @@ public static class UpiEvidenceV1
         try { ProfilerDriver.profileEditor = true; } catch (Exception) { }
         try { ProfilerDriver.deepProfiling = true; } catch (Exception) { }
         try { Profiler.enableAllocationCallstacks = true; } catch (Exception) { }
+        foreach (var name in MarkerNames)
+        {
+            try
+            {
+                var r = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, name, 128);
+                if (r.Valid) _rec[name] = r;
+            }
+            catch (Exception) { }
+        }
         _done = false;
         _ticks = 0;
         EditorApplication.update += Tick;
@@ -129,6 +145,17 @@ public static class UpiEvidenceV1
         }
 
         var fs = new List<string>();
+        // ProfilerRecorder 补小 marker：它们的单次耗时太短，可能进不了 RawFrameDataView。
+        foreach (var kv in _rec)
+        {
+            long ns = 0;
+            try { ns = (long)kv.Value.LastValue; } catch (Exception) { }
+            if (ns <= 0) continue;
+            fs.Add("{\"frame_idx\":" + last + ",\"symbol\":" + Q(kv.Key)
+                   + ",\"calls\":0,\"total_ms\":" + (ns / 1e6).ToString("0.000")
+                   + ",\"self_ms\":" + (ns / 1e6).ToString("0.000")
+                   + ",\"data_tier\":\"A2\"}");
+        }
         foreach (var kv in funcs)
         {
             int sep = kv.Key.IndexOf('|');
@@ -155,6 +182,8 @@ public static class UpiEvidenceV1
            .Append(threads).Append(",\"frame_first\":").Append(first).Append(",\"frame_last\":").Append(last).Append("}}");
         Directory.CreateDirectory(Path.GetDirectoryName(Out));
         File.WriteAllText(Out, sb2.ToString(), new UTF8Encoding(false));
+        foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }
+        _rec.Clear();
         LastLine = "captured frames=" + frames.Count + " threads=" + threads
                    + " functions=" + fs.Count + " callstacks=" + stacks.Count;
     }
