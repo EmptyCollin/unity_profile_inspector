@@ -22,11 +22,16 @@ def call(*args):
 
 
 def status():
-    r = call("command", "editor", "status")
-    if not r.get("success"):
-        return None
-    s = ((r.get("data") or {}).get("result") or {})
-    return s if s.get("status") else None
+    last = None
+    for _ in range(3):
+        r = call("command", "editor", "status")
+        if r.get("success"):
+            s = ((r.get("data") or {}).get("result") or {})
+            if s.get("status"):
+                return s
+        last = r
+        time.sleep(0.8)
+    return None
 
 
 def unity_windows() -> list[dict]:
