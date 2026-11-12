@@ -80,7 +80,10 @@ class UnityTicketExecutor:
 
     def _keep_commit(self, snap: Snapshot, ticket: BatchTicket, item: TicketItem) -> None:
         """把已 applied 的 patch 提交，保证下一 patch 的快照仍然干净。"""
-        root = Path(snap.root).resolve()
+        raw_root = getattr(snap, "root", None)
+        if not raw_root:
+            return  # 测试替身/无 git 快照：没有可提交的根
+        root = Path(raw_root).resolve()
         try:
             rel = self.project.resolve().relative_to(root).as_posix()
         except ValueError:
