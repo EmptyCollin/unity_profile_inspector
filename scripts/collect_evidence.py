@@ -18,6 +18,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
     ap.add_argument("--events", default="")
+    ap.add_argument("--evidence", default="")
     ap.add_argument("--run-id", default="")
     ap.add_argument("--scene", default="")
     ap.add_argument("--protocol", default="")
@@ -27,14 +28,25 @@ def main() -> int:
     project = Path(a.project).resolve()
     events_path = Path(a.events) if a.events else None
     log = EventLog(events_path) if events_path else EventLog()
-    events, bad = log.read_all(compat=events_path is None)
     run_id = a.run_id or ("evidence-" + __import__("time").strftime("%Y%m%d_%H%M%S"))
 
-    bundle = from_probe_events(
-        events, run_id=run_id, project_id=project.name, scene=a.scene,
-        protocol_fingerprint=a.protocol,
-        raw_refs=[str(log.path)] if log.path.exists() else [],
-    )
+    if a.evidence:
+        raw = json.loads(Path(a.evidence).read_text(encoding="utf-8"))
+        bundle = EvidenceBundleV2(**raw)
+        bundle.run_id = run_id
+        bundle.project_id = project.name
+        bundle.scene = a.scene or bundle.scene
+        if a.protocol:
+            bundle.protocol_fingerprint = a.protocol
+        bundle.raw_refs.append(str(Path(a.evidence)))
+        events, bad = [], 0
+    else:
+        events, bad = log.read_all(compat=events_path is None)
+        bundle = from_probe_events(
+            events, run_id=run_id, project_id=project.name, scene=a.scene,
+            protocol_fingerprint=a.protocol,
+            raw_refs=[str(log.path)] if log.path.exists() else [],
+        )
     idx = SourceIndex.build(project)
     for f in bundle.functions:
         if f.source is None:
