@@ -188,7 +188,7 @@ def unity(*args, timeout=120) -> dict:
 
 
 def editor_status() -> dict:
-    d = unity("editor", "status")
+    d = unity("editor status")
     if not d.get("success"):
         return {"ok": False, "error": "Unity pipeline 不可达；不自动开新窗口",
                 "detail": d.get("errors") or d.get("raw")}
@@ -280,6 +280,16 @@ def capture_candidates() -> dict:
     es = editor_status()
     if not es.get("ok") or es.get("playMode") != "playing":
         return {"ok": False, "error": "Unity 需要在 Play Mode", "editor": es}
+    # 采样子窗口：用 autoplay 把 HUD/item/Board 都跑起来，避免 replay 结束后
+    # 只剩低信息量的 shop 帧。
+    code = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
+            'if(g==null) return "no-game";'
+            'g.DebugLoadConfig("{\\"seed\\":20261112,\\"autoplay\\":true,\\"round_seconds\\":30}");'
+            'g.DebugStartRun(); return "ok";')
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--code", code, "--format", "json"], capture_output=True,
+                   text=True, encoding="utf-8", errors="replace", timeout=60)
+    time.sleep(2.0)
     ev = ROOT / "runs" / "_probe" / "evidence_v1.json"
     try:
         ev.unlink()

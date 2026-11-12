@@ -69,6 +69,8 @@ def tree_hash(root: Path, *, subdirs=("Assets", "ProjectSettings")) -> str:
             continue
         for f in sorted(base.rglob("*")):
             if f.is_file():
+                if any(part.startswith("_Recovery") for part in f.parts):
+                    continue
                 h.update(str(f.relative_to(root)).replace("\\", "/").encode())
                 h.update(f.read_bytes())
     return h.hexdigest()[:16]
