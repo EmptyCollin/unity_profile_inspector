@@ -52,6 +52,10 @@ def _probe_status() -> dict:
 
 def _project_status() -> dict:
     try:
+        from upi.config.project_registry import ProjectRegistry
+        reg = ProjectRegistry()
+        if reg.active_id() is None:
+            return {"id": None, "name": "（未选择工程）", "path": ""}
         from upi.config.project_profile import active_profile
 
         p = active_profile()
@@ -63,6 +67,37 @@ def _project_status() -> dict:
         }
     except Exception as e:  # noqa: BLE001 - 状态页不得因档案坏而 500
         return {"id": None, "name": "（档案不可用）", "error": str(e)[:180]}
+
+
+def _projects_payload() -> dict:
+    try:
+        from upi.config.project_registry import ProjectRegistry
+        reg = ProjectRegistry()
+        return {
+            "active": reg.active_id(),
+            "recent": [e.project_id for e in reg.recent()],
+            "entries": [e.model_dump(mode="json") for e in reg.entries(include_archived=True)],
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"active": None, "recent": [], "entries": [],
+                "error": f"{type(e).__name__}: {e}"}
+
+
+def _project_switch_blocked() -> Optional[str]:
+    """运行中禁止切换/归档工程，避免把 A 的数据写到 B。"""
+    try:
+        running, _ = E.daemon_running()
+        if running:
+            return "守护进程运行中"
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from upi.core.scheduler import get_scheduler
+        if get_scheduler().status().get("running"):
+            return "后台巡检运行中"
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 def _daemon_status() -> dict:
@@ -172,6 +207,7 @@ def build_status() -> dict:
         "mode": "resident",
         "daemon": _daemon_status(),
         "project": _project_status(),
+        "projects": _projects_payload(),
         "probe": probe,
         "probe_events": pevents,
         "clusters": [c.summary() for c in clusters[:20]],
@@ -217,6 +253,8 @@ _INDEX_HTML = r"""<!doctype html>
   .spacer{flex:1}
   .top .stat{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
   .top .stat b{color:var(--text);font-weight:600}
+  .top select{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:5px;padding:3px 6px;font-size:12px;max-width:190px}
   .wrap{display:grid;grid-template-columns:188px 1fr;min-height:calc(100vh - 54px)}
   .nav{border-right:1px solid var(--line);padding:14px 10px;background:var(--panel2)}
   .nav a{display:flex;gap:9px;align-items:center;padding:9px 11px;border-radius:8px;
@@ -304,6 +342,9 @@ _INDEX_HTML = r"""<!doctype html>
   <span class="tag">UI = 唯一人机通道</span>
   <div class="spacer"></div>
   <div class="stat">形态 <b id="mode">常驻</b></div>
+  <div class="stat">工程
+    <select id="projectSelect" title="切换修复对象工程"></select>
+  </div>
   <div class="stat">探针 <b id="probeTop">—</b></div>
   <div class="stat">待我处理 <b id="ticketTop">0</b></div>
 </header>
@@ -315,6 +356,7 @@ _INDEX_HTML = r"""<!doctype html>
     <a href="#" data-page="regression"><span class="k">↻</span>回归</a>
     <a href="#" data-page="library"><span class="k">◈</span>指纹库</a>
     <a href="#" data-page="reports"><span class="k">▥</span>报告</a>
+    <a href="#" data-page="projects"><span class="k">▦</span>工程</a>
     <a href="#" data-page="settings"><span class="k">⚙</span>设置</a>
   </nav>
   <main class="main">
@@ -433,6 +475,29 @@ _INDEX_HTML = r"""<!doctype html>
           <thead><tr><th>套件</th><th>基线</th><th>verified</th><th>最近 verdict</th><th>操作</th></tr></thead>
           <tbody id="reportBody"><tr><td colspan="5" class="empty">还没有回归套件。</td></tr></tbody>
         </table>
+      </div>
+    </section>
+    <section id="page-projects" style="display:none">
+      <h1>工程</h1>
+      <p class="sub">修复对象只能从这里选；选择后所有探针/工单/回归/报告都绑定它。没有工程时不会回退夹具。</p>
+      <div class="panel">
+        <h2>已注册工程 <span id="projectListMeta">—</span></h2>
+        <table>
+          <thead><tr><th>工程</th><th>路径</th><th>场景</th><th>状态</th><th>最近</th><th>操作</th></tr></thead>
+          <tbody id="projectBody"><tr><td colspan="6" class="empty">暂无工程，请在下方新增。</td></tr></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>新增工程</h2>
+        <div class="form">
+          <label>工程目录（Unity 工程根）<input id="newProjectPath" placeholder="D:\MyGame"></label>
+          <label>显示名<input id="newProjectName" placeholder="留空用目录名"></label>
+          <label>默认场景（相对工程）<input id="newProjectScene" placeholder="Assets/Scenes/Main.unity"></label>
+          <label>质量档<input id="newProjectQuality" value="urp-balanced"></label>
+          <label>Replay 命令（可空）<input id="newProjectReplay" placeholder="python tools/replay.py"></label>
+          <button class="pbtn" id="addProjectBtn">新增并校验</button>
+        </div>
+        <div class="small" id="projectMsg"></div>
       </div>
     </section>
     <section id="page-settings" style="display:none">
@@ -692,6 +757,63 @@ async function ticketAction(tid, act, iid){
   openApproval(tid, act, iid);
 }
 
+function renderProjects(s){
+  const ps = s.projects || {}, entries = ps.entries || [], active = ps.active;
+  const sel = $("projectSelect");
+  if(sel){
+    const selectable = entries.filter(e => e.status !== "archived");
+    sel.innerHTML = selectable.length
+      ? `<option value="">选择工程…</option>` + selectable.map(e =>
+          `<option value="${esc(e.project_id)}"${e.project_id === active ? " selected" : ""}>${esc(e.display_name)}</option>`).join("")
+      : `<option value="">未注册工程</option>`;
+  }
+  $("projectListMeta").textContent = `${entries.length} 个 · 当前 ${active || "无"}`;
+  $("projectBody").innerHTML = entries.length ? entries.map(e => {
+    const v = e.validation || {};
+    const state = e.status === "archived" ? "已归档" : (v.ok ? "有效" : "校验失败");
+    const ops = [
+      e.status !== "archived" ? `<button class="prjbtn" data-pact="activate" data-pid="${esc(e.project_id)}">切换</button>` : "",
+      `<button class="prjbtn" data-pact="validate" data-pid="${esc(e.project_id)}">校验</button>`,
+      e.status !== "archived" ? `<button class="prjbtn" data-pact="archive" data-pid="${esc(e.project_id)}">归档</button>` : "",
+      `<button class="prjbtn" data-pact="delete" data-pid="${esc(e.project_id)}">删除</button>`,
+    ].join("");
+    return `<tr><td>${esc(e.display_name)}<div class="mono" style="color:var(--dim);font-size:10.5px">${esc(e.project_id)}</div></td>` +
+      `<td class="mono small">${esc(e.project_path)}</td><td class="mono small">${esc(e.default_scene || "—")}</td>` +
+      `<td>${esc(state)}${v.errors && v.errors.length ? `<div class="small" style="color:var(--amber)">${esc(v.errors.join("; "))}</div>` : ""}</td>` +
+      `<td class="mono small">${esc(e.last_used_at || "—")}</td><td>${ops}</td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">暂无工程，请在下方新增。</td></tr>`;
+}
+async function activateProject(pid){
+  if(!pid) return;
+  try{
+    await post(`/api/projects/${encodeURIComponent(pid)}/activate`, {});
+    await refresh();
+  }catch(e){ alert("切换失败：" + e.message); }
+}
+async function projectAction(act, pid){
+  if(act === "delete" && !confirm(`确认删除工程 ${pid}？有历史 run 会被拒绝，只能归档。`)) return;
+  try{
+    await post(`/api/projects/${encodeURIComponent(pid)}/${act}`, {});
+    await refresh();
+  }catch(e){ alert("操作失败：" + e.message); }
+}
+async function addProject(){
+  const project_path = $("newProjectPath").value.trim();
+  if(!project_path){ $("projectMsg").textContent = "工程目录必填"; return; }
+  $("projectMsg").textContent = "校验中…";
+  try{
+    const r = await post("/api/projects", {
+      project_path,
+      display_name: $("newProjectName").value.trim(),
+      default_scene: $("newProjectScene").value.trim(),
+      quality_tier: $("newProjectQuality").value.trim() || "urp-balanced",
+      replay_command: $("newProjectReplay").value.trim(),
+    });
+    $("projectMsg").textContent = `已新增：${(r.project || {}).display_name || ""}`;
+    await refresh();
+  }catch(e){ $("projectMsg").textContent = "新增失败：" + e.message; }
+}
+
 function setClass(el, cls){ el.className = "val " + (cls || ""); }
 
 function render(s){
@@ -770,6 +892,7 @@ function render(s){
   renderTickets(s);
   renderRegression(s);
   renderReports(s);
+  renderProjects(s);
   renderSettings(s);
 }
 
@@ -787,8 +910,9 @@ function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
   const home = $("page-home"), issues = $("page-issues"), library = $("page-library"),
         tickets = $("page-tickets"), regression = $("page-regression"),
-        reports = $("page-reports"), settings = $("page-settings"), other = $("page-other");
-  const pages = {home, issues, library, tickets, regression, reports, settings};
+        reports = $("page-reports"), projects = $("page-projects"),
+        settings = $("page-settings"), other = $("page-other");
+  const pages = {home, issues, library, tickets, regression, reports, projects, settings};
   Object.values(pages).forEach(p => { if(p) p.style.display = "none"; });
   if(other) other.style.display = "none";
   if(pages[page]){ pages[page].style.display = ""; return; }
@@ -804,6 +928,10 @@ const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
 const createSuiteBtn = $("createSuiteBtn");
 if(createSuiteBtn) createSuiteBtn.addEventListener("click", createSuite);
+const projectSelect = $("projectSelect");
+if(projectSelect) projectSelect.addEventListener("change", ev => activateProject(ev.target.value));
+const addProjectBtn = $("addProjectBtn");
+if(addProjectBtn) addProjectBtn.addEventListener("click", addProject);
 const appConfirm = $("appConfirm");
 if(appConfirm) appConfirm.addEventListener("click", confirmApproval);
 const appCancel = $("appCancel");
@@ -821,6 +949,8 @@ document.addEventListener("click", (ev) => {
   if(gb){ genReport(gb.dataset.gid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
+  const prj = ev.target.closest && ev.target.closest(".prjbtn");
+  if(prj){ projectAction(prj.dataset.pact, prj.dataset.pid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
   if(!b) return;
   const tid = b.dataset.tid, act = b.dataset.act;
@@ -900,6 +1030,9 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/events":
             self._sse()
             return
+        if parsed.path == "/api/projects":
+            self._send_json(200, {"ok": True, **_projects_payload()})
+            return
         m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/report$",
                      parsed.path)
         if m:
@@ -960,6 +1093,64 @@ class _Handler(BaseHTTPRequestHandler):
             body = self._body_json()
         except Exception as e:  # noqa: BLE001
             self._send_json(400, {"ok": False, "error": f"bad json: {e}"})
+            return
+
+        if parsed.path == "/api/projects":
+            try:
+                from upi.config.project_registry import ProjectRegistry
+                reg = ProjectRegistry()
+                tags = body.get("tags") or []
+                if isinstance(tags, str):
+                    tags = [t.strip() for t in tags.split(",") if t.strip()]
+                e = reg.add(
+                    project_path=str(body.get("project_path") or ""),
+                    display_name=str(body.get("display_name") or ""),
+                    default_scene=str(body.get("default_scene") or ""),
+                    quality_tier=str(body.get("quality_tier") or "urp-balanced"),
+                    replay_mode=str(body.get("replay_mode") or "none"),
+                    replay_command=str(body.get("replay_command") or ""),
+                    tags=list(tags), notes=str(body.get("notes") or ""))
+                self._send_json(200, {"ok": True, "project": e.model_dump(mode="json"),
+                                      **_projects_payload()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(400, {"ok": False, "error": str(e)})
+            return
+
+        m = re.match(r"^/api/projects/([A-Za-z0-9_\-]+)/(activate|validate|archive|delete|update)$",
+                     parsed.path)
+        if m:
+            pid, action = m.group(1), m.group(2)
+            try:
+                if action in {"activate", "archive", "delete"}:
+                    block = _project_switch_blocked()
+                    if block:
+                        self._send_json(409, {"ok": False, "error": f"{block}，不能切换/归档工程"})
+                        return
+                from upi.config.project_registry import ProjectRegistry
+                reg = ProjectRegistry()
+                if action == "activate":
+                    e = reg.activate(pid)
+                elif action == "validate":
+                    e = reg.update(pid)
+                elif action == "archive":
+                    e = reg.archive(pid)
+                elif action == "delete":
+                    reg.delete(pid, force=bool(body.get("force", False)))
+                    self._send_json(200, {"ok": True, **_projects_payload()})
+                    return
+                else:
+                    fields = {k: body.get(k) for k in (
+                        "display_name", "default_scene", "quality_tier",
+                        "replay_mode", "replay_command", "tags", "notes")}
+                    if isinstance(fields.get("tags"), str):
+                        fields["tags"] = [t.strip() for t in fields["tags"].split(",") if t.strip()]
+                    e = reg.update(pid, **fields)
+                self._send_json(200, {"ok": True, "project": e.model_dump(mode="json"),
+                                      **_projects_payload()})
+            except ValueError as e:
+                self._send_json(409, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
 
         if parsed.path == "/api/tickets/build":

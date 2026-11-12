@@ -417,7 +417,7 @@ def get_active_profile_id() -> Optional[str]:
     return s or None
 
 
-def set_active_profile_id(pid: str) -> Path:
+def set_active_profile_id(pid: str, root: Optional[Path | str] = None) -> Path:
     """写激活指针（注册向导成功后调用）。
 
     走事件层 atomic_write 而不是手写 tmp+replace：那个原语用**唯一临时名**，
@@ -426,8 +426,9 @@ def set_active_profile_id(pid: str) -> Path:
     在仓库里写三份迟早漂移，所以复用唯一入口。
     """
     from upi.core import events as E
-    E.atomic_write(active_pointer_path(), pid)
-    return active_pointer_path()
+    target = (Path(root) / ".active") if root is not None else active_pointer_path()
+    E.atomic_write(target, pid)
+    return target
 
 
 def load_profile(pid: Optional[str] = None) -> ProjectProfile:
@@ -443,6 +444,19 @@ def load_profile(pid: Optional[str] = None) -> ProjectProfile:
     """
     pid = (pid or os.environ.get(PROFILE_ENV)
            or get_active_profile_id() or DEFAULT_PROFILE_ID)
+    # I7b：registry 是 UI 新增工程的唯一事实源；旧 projects/*.json 只给既有
+    # 测试/夹具链路用，不参与 UI 的工程选择。
+    try:
+        from upi.config.project_registry import ProjectRegistry
+        reg_entry = ProjectRegistry().get(pid)
+    except Exception as e:  # noqa: BLE001 - registry 坏了必须 fail-closed
+        raise ProfileError(f"工程 registry 读不出来：{type(e).__name__}: {e}") from e
+    if reg_entry is not None:
+        try:
+            return reg_entry.to_profile()
+        except Exception as e:  # noqa: BLE001
+            raise ProfileError(
+                f"工程 registry 条目 {pid!r} 无法转为运行档案：{e}") from e
     if pid in _BUILTIN:
         return _BUILTIN[pid]
     fp = profile_file(pid)
