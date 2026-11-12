@@ -520,15 +520,18 @@ def _meta_metrics_q(c: sqlite3.Connection, db: Path | str) -> dict:
     # 质量轴：检出/FP 来自 detections；成功率来自 outcomes_view（patterns.db）
     det_by = dict(q("SELECT verdict, COUNT(*) FROM detections GROUP BY verdict"))
     selfcheck = _fp_selfcheck()
+    learn = _learning_metrics()
     quality = {
         "detector_verdicts": det_by,
         "recall_pairs": _recall_pairs(db),       # 检出率×FP 成对（G15）
         "fp_selfcheck": selfcheck,
         "success_rate": _success_rate(),         # 与 n_effective/CI 同屏
-        "needs_human_share": None, "ece": None,  # 见 missing
+        "needs_human_share": None,
+        "ece": learn["ece"],                     # 可算才算；覆盖率同屏
+        "ece_coverage": learn["ece_coverage"],
         "realized_over_expected": None,
         "potential_ratification_rate": None,     # M3.5 未建 ⇒ 无追认对象
-        "shadow_agreement": None,                # 影子模式未建
+        "shadow_agreement": learn["shadow"],     # 影子模式：自动 vs 人工
     }
     stability = {
         "rollback_count": q("SELECT COUNT(*) FROM spans WHERE stage='review' "
@@ -565,13 +568,20 @@ def _meta_metrics_q(c: sqlite3.Connection, db: Path | str) -> dict:
                             GROUP BY {grp}
                             HAVING COUNT(*) >= 2"""))
     missing = {
-        "ece": f"需校准曲线：置信度分箱后与结局对齐，可配对观测仅 {n_verdict} 个"
-               f"（每轮只有被采纳的 Top1 假设才有结局，其余假设的反事实不可观测）",
+        "ece": ("已计算（覆盖率见 quality.ece_coverage）"
+                if learn["ece"] is not None else
+                f"可配对观测 {learn['ece_coverage']['n_with_outcome']} 条；"
+                f"落选假设 {learn['ece_coverage']['n_not_adopted']} 条"
+                "无反事实，不计入（已显式记录，不再称'结构性不可算'）"),
         "realized_over_expected": (
             f"outcomes 表 {roe_tot} 行里 {roe_null} 行的该列为 NULL"
             if roe_tot else "特征库尚无 outcome 记录"),
         "potential_ratification_rate": "M3.5 未建，无 potential 可追认",
-        "shadow_agreement": "影子模式未启用",
+        "shadow_agreement": (
+            f"影子决策 {learn['shadow']['n_decided']} 条、一致 "
+            f"{learn['shadow']['n_agreed']} 条"
+            if learn["shadow"]["n_decided"] else
+            "尚无影子决策（pattern 尚未升入 shadow，或还没有人工决定）"),
         "cross_run_verdict_consistency": (
             f"{runs_group_label(c)}且 ≥2 轮判定的可比组共 {n_cmp_groups} 组"
             + ("（协议指纹缺失的轮次不计，按 G7 不拿夹具同名冒充可比）"
@@ -622,6 +632,65 @@ def _recall_pairs_q(c: sqlite3.Connection) -> dict:
                   for det, ver, n, n_det, nr in rows],
         "excluded_no_detector_field": n_skipped,
         "note": "n_obs = 夹具×轮次观测数；CLEAN 自比自的误报另见 fp_selfcheck（D6 口径）"}
+
+
+def _learning_metrics(kb: Path | str | None = None) -> dict:
+    """影子一致率 + 校准度覆盖率：都从特征库现算，缺表按"未产生样本"处理。"""
+    kb = Path(KB_DB if kb is None else kb)
+    out = {"shadow": {"n_decided": 0, "n_agreed": 0, "rate": None},
+           "ece": None,
+           "ece_coverage": {"n_hypotheses": 0, "n_with_outcome": 0,
+                            "n_not_adopted": 0, "coverage": None}}
+    if not kb.exists():
+        return out
+    with closing(sqlite3.connect(f"file:{kb.as_posix()}?mode=ro", uri=True)) as k:
+        try:
+            n, agreed = k.execute(
+                "SELECT COUNT(*), COALESCE(SUM(agreed),0) FROM shadow_decisions"
+                " WHERE agreed IS NOT NULL").fetchone()
+            out["shadow"] = {"n_decided": int(n), "n_agreed": int(agreed),
+                             "rate": (agreed / n) if n else None}
+        except sqlite3.OperationalError:
+            pass
+        try:
+            total, with_outcome, not_adopted = k.execute(
+                "SELECT COUNT(*),"
+                " SUM(CASE WHEN outcome IN ('resolved','not_significant','regressed')"
+                " THEN 1 ELSE 0 END),"
+                " SUM(CASE WHEN outcome='not_adopted' THEN 1 ELSE 0 END)"
+                " FROM hypotheses").fetchone()
+            total, with_outcome = int(total or 0), int(with_outcome or 0)
+            out["ece_coverage"] = {
+                "n_hypotheses": total, "n_with_outcome": with_outcome,
+                "n_not_adopted": int(not_adopted or 0),
+                "coverage": (with_outcome / total) if total else None}
+            rows = k.execute(
+                "SELECT confidence, outcome FROM hypotheses"
+                " WHERE outcome IN ('resolved','not_significant','regressed')"
+            ).fetchall()
+            pairs = [(float(c), 1.0 if o == "resolved" else 0.0) for c, o in rows]
+            out["ece"] = _ece(pairs) if pairs else None
+        except sqlite3.OperationalError:
+            pass
+    return out
+
+
+def _ece(pairs: list[tuple[float, float]], bins: int = 10) -> float:
+    """Expected Calibration Error：|平均置信度 − 实际成功率| 按箱加权。"""
+    if not pairs:
+        return 0.0
+    buckets: dict[int, list[tuple[float, float]]] = {}
+    for conf, ok in pairs:
+        b = min(bins - 1, max(0, int(conf * bins)))
+        buckets.setdefault(b, []).append((conf, ok))
+    total = len(pairs)
+    ece = 0.0
+    for items in buckets.values():
+        n = len(items)
+        avg_conf = sum(c for c, _ in items) / n
+        avg_ok = sum(o for _, o in items) / n
+        ece += (n / total) * abs(avg_conf - avg_ok)
+    return round(ece, 4)
 
 
 def _success_rate(kb: Path | str | None = None) -> Optional[dict]:

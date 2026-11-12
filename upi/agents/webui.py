@@ -260,6 +260,14 @@ def build_status() -> dict:
         capture_cfg = CC.load()
     except Exception as e:  # noqa: BLE001
         capture_cfg = {"error": f"{type(e).__name__}: {e}"}
+    try:
+        from upi.core.knowledge import KnowledgeStore, default_path
+        _ks = KnowledgeStore(default_path())
+        learning = {"shadow_agreement": _ks.shadow_agreement(),
+                    "ece_coverage": _ks.ece_coverage()}
+        _ks.close()
+    except Exception as e:  # noqa: BLE001
+        learning = {"error": f"{type(e).__name__}: {e}"}
     return {
         "ok": True,
         "time": E.now(),
@@ -278,6 +286,7 @@ def build_status() -> dict:
         "regression_suites": regression_suites,
         "settings": settings,
         "capture_config": capture_cfg,
+        "learning": learning,
         "resident_scheduler": get_scheduler().status(),
         "tickets": _open_tickets(),
         "events": _recent_events(),
@@ -629,6 +638,7 @@ function renderTickets(s){
     `<td><button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="view">明细</button>` +
     (t.status === "awaiting_approval"
       ? `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="approve">批准</button>` +
+        `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="request_changes">退回修改</button>` +
         `<button data-tid="${esc(t.ticket_id)}" class="tbtn" data-act="reject">驳回</button>`
       : "") +
     (t.status === "approved" && t.pending > 0
@@ -796,12 +806,16 @@ function showTicketDetail(t){
     `<div class="small">· ${esc(h.ts)} ${esc(h.action)} ${esc(h.actor || "")}` +
     `${h.metric ? " · " + esc(h.metric) : ""}${h.note ? " · " + esc(h.note) : ""}</div>`).join("");
   $("batchDetail").innerHTML = `<div style="padding:10px 15px;color:var(--muted);font-size:12px">` +
-    `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b></div>` +
+    `工单 <b class="mono">${esc(t.ticket_id)}</b> · 状态 ${esc(t.status)} · 校验码 <b class="mono">${esc(t.approve_token || "—")}</b>` +
+    (t.change_request ? ` · <span class="bad">退回意见：${esc(t.change_request)}</span>` : "") +
+    `</div>` +
     (items.length ? `<table><thead><tr><th>指标</th><th>波形</th><th>指纹</th><th>playbook</th><th>权限</th><th>状态</th><th>计划</th><th>单条批准</th><th>原因</th></tr></thead><tbody>` +
       items.map(i => {
         const files = (i.plan_files || []).join(", ");
         const ap = i.human_approved ? "已单批"
-          : (i.approve_token ? `<button class="itemBtn" data-tid="${esc(t.ticket_id)}" data-iid="${esc(i.item_id)}">批准 ${esc(i.approve_token)}</button>` : "—");
+          : (i.status === "rejected" ? "已驳回"
+          : (i.approve_token ? `<button class="itemBtn" data-tid="${esc(t.ticket_id)}" data-iid="${esc(i.item_id)}">批准 ${esc(i.approve_token)}</button>` +
+             `<button class="itemRejBtn" data-tid="${esc(t.ticket_id)}" data-iid="${esc(i.item_id)}">驳回</button>` : "—"));
         return `<tr><td class="mono">${esc(i.metric)}</td><td>${esc(i.shape)}</td>` +
         `<td>${i.fingerprint_hit ? "命中" : "未命中"}</td><td class="mono">${esc(i.playbook_id || "—")}</td>` +
         `<td>${esc(i.tier)}</td><td>${esc(i.status)}</td>` +
@@ -809,7 +823,7 @@ function showTicketDetail(t){
         `${(i.plan_diffs || []).map(d => `<div class="diff"><b>${esc(d.file)}</b>` +
           `${d.why ? "<br><i>" + esc(d.why) + "</i>" : ""}` +
           `<pre>- ${esc(d.find || "")}\n+ ${esc(d.replace || "")}</pre></div>`).join("")}</details></td>` +
-        `<td>${ap}</td><td class="small">${esc(i.error || "—")}</td></tr>`;
+        `<td>${ap}</td><td class="small">${esc(i.error || "—")}${i.change_request ? " · 上轮意见：" + esc(i.change_request) : ""}</td></tr>`;
       }).join("") +
       `</tbody></table>` : `<div class="empty">无候选。</div>`) +
     (tl ? `<div style="padding:8px 15px;border-top:1px solid #182333"><b class="small">执行时间线</b>${tl}</div>` : "") +
@@ -835,14 +849,16 @@ async function probeAction(act){
 let approvalCtx = null;
 function openApproval(tid, act, iid){
   const t = batchCache[tid] || {};
-  const isItem = act === "item-approve";
+  const isItem = act === "item-approve" || act === "item-reject";
   const it = isItem ? (t.item_list || []).find(x => x.item_id === iid) : null;
-  approvalCtx = isItem ? {kind:"item", tid, iid} : {kind:"ticket", tid, act};
+  approvalCtx = isItem ? {kind: act === "item-reject" ? "item-reject" : "item",
+                          tid, iid} : {kind:"ticket", tid, act};
   $("approvalTitle").textContent = isItem
     ? `${act} · ${(it && it.metric) || iid}` : `${act} · ${tid}`;
   $("appName").value = ""; $("appNote").value = ""; $("appError").textContent = "";
   $("appToken").value = isItem ? ((it && it.approve_token) || "") : (t.approve_token || "");
-  $("appTokenRow").style.display = act === "reject" ? "none" : "";
+  $("appTokenRow").style.display = (act === "reject" || act === "item-reject"
+    || act === "request_changes") ? "none" : "";
   $("approvalPanel").style.display = "";
   $("approvalPanel").scrollIntoView({behavior:"smooth", block:"nearest"});
   $("appName").focus();
@@ -854,18 +870,25 @@ async function confirmApproval(){
   const note = $("appNote").value.trim();
   const token = $("appToken").value.trim();
   if(!approver || !note){ $("appError").textContent = "批准人和批语必填"; return; }
-  if(approvalCtx.kind !== "item" && approvalCtx.act !== "reject" && !token){
-    $("appError").textContent = "校验码必填"; return;
-  }
+  const noToken = (approvalCtx.kind === "item-reject"
+    || approvalCtx.act === "reject" || approvalCtx.act === "request_changes");
+  if(!noToken && !token){ $("appError").textContent = "校验码必填"; return; }
   try{
     let r;
     if(approvalCtx.kind === "item"){
       r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/items/${encodeURIComponent(approvalCtx.iid)}/approve`,
                      {approver, note, token});
       if(r.ticket) showTicketDetail(r.ticket);
+    }else if(approvalCtx.kind === "item-reject"){
+      r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/items/${encodeURIComponent(approvalCtx.iid)}/reject`,
+                     {approver, note});
+      if(r.ticket) showTicketDetail(r.ticket);
     }else if(approvalCtx.act === "approve"){
       r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/approve`,
                      {approver, note, token});
+    }else if(approvalCtx.act === "request_changes"){
+      r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/request_changes`,
+                     {approver, note});
     }else{
       r = await post(`/api/tickets/${encodeURIComponent(approvalCtx.tid)}/reject`,
                      {approver, note});
@@ -1082,6 +1105,8 @@ document.addEventListener("click", (ev) => {
   if(gb){ genReport(gb.dataset.gid); return; }
   const ib = ev.target.closest && ev.target.closest(".itemBtn");
   if(ib){ ticketAction(ib.dataset.tid, "item-approve", ib.dataset.iid); return; }
+  const irb = ev.target.closest && ev.target.closest(".itemRejBtn");
+  if(irb){ ticketAction(irb.dataset.tid, "item-reject", irb.dataset.iid); return; }
   const prj = ev.target.closest && ev.target.closest(".prjbtn");
   if(prj){ projectAction(prj.dataset.pact, prj.dataset.pid); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
@@ -1091,7 +1116,7 @@ document.addEventListener("click", (ev) => {
   if(act === "view"){
     const t = batchCache[tid];
     if(t) showTicketDetail(t);
-  }else if(act === "approve" || act === "reject"){
+  }else if(act === "approve" || act === "reject" || act === "request_changes"){
     ticketAction(tid, act);
   }
 });
@@ -1475,27 +1500,38 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
 
-        m = re.match(r"^/api/tickets/(bt-[A-Za-z0-9_\-]+)/(approve|reject)$",
+        m = re.match(r"^/api/tickets/(bt-[A-Za-z0-9_\-]+)/(approve|reject|request_changes)$",
                      parsed.path)
         if m:
             tid, action = m.group(1), m.group(2)
             try:
-                from upi.core.ticket import TicketStore, approve, reject
+                from upi.core.ticket import TicketStore, approve, reject, request_changes
+                from upi.core.knowledge import KnowledgeStore, default_path
                 store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+                ks = KnowledgeStore(default_path())
                 t = store.load(tid)
                 if t is None:
+                    ks.close()
                     self._send_json(404, {"ok": False, "error": "ticket not found"})
                     return
                 if action == "approve":
                     ok, msg = approve(t, approver=str(body.get("approver", "")),
                                       note=str(body.get("note", "")),
                                       token=str(body.get("token", "")))
+                elif action == "request_changes":
+                    ok, msg = request_changes(
+                        t, approver=str(body.get("approver", "")),
+                        note=str(body.get("note", "")))
                 else:
                     ok, msg = reject(t, approver=str(body.get("approver", "")),
-                                     note=str(body.get("note", "")))
+                                     note=str(body.get("note", "")),
+                                     knowledge_store=ks)
                 if ok:
                     store.save(t)
+                shadow = ks.shadow_agreement() if ok else None
+                ks.close()
                 self._send_json(200 if ok else 400, {"ok": ok, "message": msg,
+                                                     "shadow_agreement": shadow,
                                                      "ticket": t.model_dump()})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -1507,14 +1543,43 @@ class _Handler(BaseHTTPRequestHandler):
             tid, iid = m.group(1), m.group(2)
             try:
                 from upi.core.ticket import TicketStore, approve_item
+                from upi.core.knowledge import KnowledgeStore, default_path
+                store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+                ks = KnowledgeStore(default_path())
+                t = store.load(tid)
+                if t is None:
+                    ks.close()
+                    self._send_json(404, {"ok": False, "error": "ticket not found"})
+                    return
+                ok, msg = approve_item(
+                    t, iid, approver=str(body.get("approver", "")),
+                    note=str(body.get("note", "")), token=str(body.get("token", "")),
+                    knowledge_store=ks)
+                if ok:
+                    store.save(t)
+                shadow = ks.shadow_agreement() if ok else None
+                ks.close()
+                self._send_json(200 if ok else 400, {"ok": ok, "message": msg,
+                                                     "shadow_agreement": shadow,
+                                                     "ticket": t.model_dump()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/tickets/(bt-[A-Za-z0-9_\-]+)/items/"
+                     r"(it-[A-Za-z0-9_\-]+)/reject$", parsed.path)
+        if m:
+            tid, iid = m.group(1), m.group(2)
+            try:
+                from upi.core.ticket import TicketStore, reject_item
                 store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
                 t = store.load(tid)
                 if t is None:
                     self._send_json(404, {"ok": False, "error": "ticket not found"})
                     return
-                ok, msg = approve_item(
+                ok, msg = reject_item(
                     t, iid, approver=str(body.get("approver", "")),
-                    note=str(body.get("note", "")), token=str(body.get("token", "")))
+                    note=str(body.get("note", "")))
                 if ok:
                     store.save(t)
                 self._send_json(200 if ok else 400, {"ok": ok, "message": msg,

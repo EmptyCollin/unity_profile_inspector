@@ -111,6 +111,9 @@ try:
     ok("状态含取证配置（与 I8 Lab 共用）",
        isinstance(data.get("capture_config"), dict)
        and data["capture_config"].get("evidence_threads") == 8)
+    ok("状态含学习闭环指标", isinstance(data.get("learning"), dict)
+       and "shadow_agreement" in data["learning"]
+       and "ece_coverage" in data["learning"])
 
     # 取证参数：用临时路径，避免测试污染仓库里的 config/i8_lab.json
     from pathlib import Path as _Path
@@ -178,6 +181,28 @@ try:
     ok("POST 批准 200", code == 200 and appr.get("ticket", {}).get("status") == "approved")
     code, ex = post_json(base + f"/api/tickets/{tid}/execute?token=test-token", {})
     ok("无可执行 plan 返回 409（诚实边界）", code == 409 and ex.get("ok") is False)
+
+    # 退回修改：再建一单，带意见退回
+    code, built2 = post_json(base + "/api/tickets/build?token=test-token", {})
+    t2 = built2.get("ticket") or {}
+    tid2 = t2.get("ticket_id")
+    code, rc = post_json(base + f"/api/tickets/{tid2}/request_changes?token=test-token",
+                         {"approver": "测试", "note": "先补证据"})
+    ok("POST 退回修改 200 且状态 changes_requested",
+       code == 200 and rc.get("ticket", {}).get("status") == "changes_requested"
+       and rc.get("ticket", {}).get("change_request") == "先补证据")
+
+    # 单条驳回：用已批准的工单
+    items0 = (appr.get("ticket") or {}).get("items") or []
+    if items0:
+        iid = items0[0].get("item_id")
+        code, rj = post_json(
+            base + f"/api/tickets/{tid}/items/{iid}/reject?token=test-token",
+            {"approver": "测试", "note": "这条不改"})
+        ok("POST 单条驳回 200 且只改该条",
+           code == 200 and any(
+               i.get("item_id") == iid and i.get("status") == "rejected"
+               for i in (rj.get("ticket") or {}).get("items") or []))
     code, _hdr, body = get(base + "/api/status?token=test-token")
     data2 = json.loads(body.decode("utf-8"))
     ok("状态含批量工单", any(x.get("ticket_id") == tid

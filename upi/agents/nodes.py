@@ -304,6 +304,20 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                "source": f"calibration:{det.calibration_file or 'inline'}",
                "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"}
         hs = [h.model_copy(update={"expected_effect": exp}) for h in hs]
+        # 假设台账：Top1 记 adopted，其余记 not_adopted（不是失败，但要有结局字段）。
+        # 台账写失败不打断诊断，但必须留痕，否则"落选假设没有记录"会静默复发。
+        try:
+            from upi.core.knowledge import KnowledgeStore, default_path
+            _ks = KnowledgeStore(knowledge_db or default_path())
+            _ks.record_hypotheses(
+                run_dir.name, _issue_key(issue_d),
+                [{"root_cause": h.root_cause, "confidence": h.confidence}
+                 for h in hs])
+            _ks.close()
+        except Exception as e:  # noqa: BLE001
+            E.atomic_write_text(
+                run_dir / "hypotheses_error.txt",
+                f"假设台账写入失败：{type(e).__name__}: {e}\n")
         from upi.core.attribution import route as attr_route
         decision = attr_route(hs)
         if decision == "needs_human":
@@ -537,10 +551,27 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                               playbook_id=top.get("playbook_id", PB))
             v = st["verdict"]
             st_status = v["status"] if isinstance(v, dict) else v.status
+            # 协议指纹：账本侧也要能回答"这两次是不是同一把尺子"（G7）。
+            try:
+                from upi.core.protocol import build as _fp_build, digest as _fp_digest
+                sp = st.get("sampling_protocol") or {}
+                pfp = _fp_digest(_fp_build(
+                    scene=st.get("scene", ""),
+                    quality_tier=st.get("quality_tier", ""),
+                    data_tier=sp.get("data_tier", ""),
+                    editor_mode=(st.get("editor") or {}).get("mode", ""),
+                    replay_script_hash=st.get("replay_script_hash", "none-v0"),
+                    scale_factor=sp.get("scale_factor", 1),
+                    poll_rate=sp.get("poll_rate", 0),
+                ))
+            except Exception:  # noqa: BLE001
+                pfp = ""
             ks.record_outcome(pid, run_dir.name, st["issue"]["fixture"],
                               st["quality_tier"], st_status,
                               metric_delta=(v.get("target", {}).get("delta")
-                                            if isinstance(v, dict) else None))
+                                            if isinstance(v, dict) else None),
+                              protocol_fp=pfp)
+            ks.record_hypothesis_outcome(_issue_key(st["issue"]), st_status)
             # §1.7：record 的完整职责是"写入 + 提出升维建议"。建议**只落盘不执行**
             # （权限变更须人工批准，I3）。
             # M6' 接入后体检表不再是"算不出就传 None"：能算的项附实际数值，
@@ -689,6 +720,14 @@ def _pattern_id(issue_d: dict, top: dict) -> str:
     import hashlib
     sig = f"{issue_d['metric']}|{top['root_cause']}|{PB}"
     return "pat-" + hashlib.sha256(sig.encode()).hexdigest()[:10]
+
+
+def _issue_key(issue_d: dict) -> str:
+    """假设台账的 issue 主键：diagnose 与 record 两处必须算出同一个值。"""
+    if issue_d.get("issue_id"):
+        return str(issue_d["issue_id"])
+    rel = issue_d.get("rel_frame", issue_d.get("rel", ""))
+    return f"{issue_d.get('detector', '')}:{rel}"
 
 
 def _snap_from(st: dict):

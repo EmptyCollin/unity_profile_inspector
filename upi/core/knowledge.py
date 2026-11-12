@@ -53,7 +53,36 @@ CREATE TABLE IF NOT EXISTS detector_stats(
   n_alerts INTEGER DEFAULT 0, n_reproduced INTEGER DEFAULT 0, n_fp INTEGER DEFAULT 0,
   PRIMARY KEY(detector_id, detector_version)
 );
+CREATE TABLE IF NOT EXISTS shadow_decisions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern_id TEXT NOT NULL,
+  ticket_id TEXT DEFAULT '', item_id TEXT DEFAULT '', run_id TEXT DEFAULT '',
+  auto_decision TEXT NOT NULL,            -- apply | skip：升维后"如果自动会怎么做"
+  human_decision TEXT DEFAULT '',         -- approve | reject
+  agreed INTEGER,                        -- NULL=未决；1=一致；0=不一致
+  created_at REAL, decided_at REAL
+);
+CREATE TABLE IF NOT EXISTS hypotheses(
+  id TEXT PRIMARY KEY,
+  run_id TEXT DEFAULT '', issue_id TEXT DEFAULT '', pattern_id TEXT DEFAULT '',
+  root_cause TEXT DEFAULT '', confidence REAL DEFAULT 0,
+  is_top1 INTEGER DEFAULT 0,
+  status TEXT NOT NULL,                   -- adopted | not_adopted
+  outcome TEXT DEFAULT 'unknown',         -- resolved|not_significant|regressed|not_adopted|unknown
+  protocol_fp TEXT DEFAULT '',
+  created_at REAL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS tier_changes(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern_id TEXT NOT NULL, from_tier TEXT, to_tier TEXT,
+  actor TEXT DEFAULT '', reason TEXT DEFAULT '', created_at REAL
+);
 """
+
+
+def default_path() -> Path:
+    """特征库默认位置（与 nodes.py 的 `knowledge/patterns.db` 一致）。"""
+    return Path(__file__).resolve().parents[2] / "knowledge" / "patterns.db"
 
 
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
@@ -131,6 +160,8 @@ class KnowledgeStore:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(outcomes)")}
         if "profile" not in cols:
             self.db.execute("ALTER TABLE outcomes ADD COLUMN profile TEXT")
+        if "protocol_fp" not in cols:
+            self.db.execute("ALTER TABLE outcomes ADD COLUMN protocol_fp TEXT")
         from upi.config.project_profile import owner_profile_id
         self.db.execute("UPDATE outcomes SET profile=? WHERE profile IS NULL",
                         (owner_profile_id({}),))
@@ -167,6 +198,7 @@ class KnowledgeStore:
                        realized_over_expected: float | None = None,
                        review_rounds: int | None = None,
                        profile: str | None = None,
+                       protocol_fp: str = "",
                        introduced_new_issue_rolled_back: bool = False) -> None:
         """attempt 结果入账。引入新问题被回滚 → 立即降 semi + 复盘标记（硬降级，§1.7）。
 
@@ -180,9 +212,10 @@ class KnowledgeStore:
         self.db.execute(
             "INSERT INTO outcomes(issue_id, pattern_id, run_id, fixture, quality_tier,"
             " profile, state, metric_delta, guards_json, realized_over_expected,"
-            " review_rounds, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            " review_rounds, protocol_fp, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (None, pattern_id, run_id, fixture, quality_tier, profile, state,
-             metric_delta, None, realized_over_expected, review_rounds, time.time()))
+             metric_delta, None, realized_over_expected, review_rounds,
+             protocol_fp, time.time()))
         if introduced_new_issue_rolled_back:
             self.db.execute(
                 "UPDATE patterns SET tier='semi', n_new_issue=n_new_issue+1,"
@@ -251,6 +284,151 @@ class KnowledgeStore:
         a, r, fp = row
         return {"n_alerts": a, "n_reproduced": r, "n_fp": fp,
                 "fp_rate": (fp / a) if a else None}
+
+    # ---------- 影子模式（升维后的安全放量第一步）----------
+
+    def set_tier(self, pattern_id: str, tier: str, *, actor: str = "",
+                 reason: str = "") -> dict:
+        """人工批准后的档位变更（semi→shadow→auto）。只改状态并留痕，不执行修复。"""
+        if tier not in ("semi", "shadow", "auto"):
+            raise ValueError(f"非法档位：{tier}")
+        row = self.db.execute("SELECT tier FROM patterns WHERE id=?",
+                              (pattern_id,)).fetchone()
+        if not row:
+            raise KeyError(f"unknown pattern {pattern_id}")
+        old = row[0]
+        now = time.time()
+        self.db.execute("UPDATE patterns SET tier=?, updated_at=? WHERE id=?",
+                        (tier, now, pattern_id))
+        self.db.execute(
+            "INSERT INTO tier_changes(pattern_id, from_tier, to_tier, actor, reason,"
+            " created_at) VALUES(?,?,?,?,?,?)",
+            (pattern_id, old, tier, actor, reason, now))
+        self.db.commit()
+        return {"pattern_id": pattern_id, "from": old, "to": tier}
+
+    def tier_of(self, pattern_id: str) -> str | None:
+        row = self.db.execute("SELECT tier FROM patterns WHERE id=?",
+                              (pattern_id,)).fetchone()
+        return row[0] if row else None
+
+    def record_shadow_decision(self, pattern_id: str, *, auto_decision: str,
+                               ticket_id: str = "", item_id: str = "",
+                               run_id: str = "") -> int:
+        """影子模式只记录"如果自动会怎么做"；执行仍走人工。"""
+        if auto_decision not in ("apply", "skip"):
+            raise ValueError(f"非法 auto_decision：{auto_decision}")
+        cur = self.db.execute(
+            "INSERT INTO shadow_decisions(pattern_id, ticket_id, item_id, run_id,"
+            " auto_decision, created_at) VALUES(?,?,?,?,?,?)",
+            (pattern_id, ticket_id, item_id, run_id, auto_decision, time.time()))
+        self.db.commit()
+        return int(cur.lastrowid)
+
+    def resolve_shadow_decision(self, item_id: str, human_decision: str) -> int:
+        """人工决定落账：agreed = 自动意图与人工决定是否一致。返回更新行数。"""
+        if human_decision not in ("approve", "reject"):
+            raise ValueError(f"非法 human_decision：{human_decision}")
+        rows = self.db.execute(
+            "SELECT id, auto_decision FROM shadow_decisions"
+            " WHERE item_id=? AND human_decision=''", (item_id,)).fetchall()
+        now = time.time()
+        for rid, auto in rows:
+            agreed = 1 if ((auto == "apply" and human_decision == "approve")
+                           or (auto == "skip" and human_decision == "reject")) else 0
+            self.db.execute(
+                "UPDATE shadow_decisions SET human_decision=?, agreed=?, decided_at=?"
+                " WHERE id=?", (human_decision, agreed, now, rid))
+        self.db.commit()
+        return len(rows)
+
+    def record_shadow_outcome(self, pattern_id: str, item_id: str, *,
+                              auto_decision: str, human_decision: str,
+                              ticket_id: str = "", run_id: str = "") -> int:
+        """影子模式的一条已决记录：自动意图 vs 人工决定，直接算一致率。"""
+        if auto_decision not in ("apply", "skip"):
+            raise ValueError(f"非法 auto_decision：{auto_decision}")
+        if human_decision not in ("approve", "reject"):
+            raise ValueError(f"非法 human_decision：{human_decision}")
+        agreed = 1 if ((auto_decision == "apply" and human_decision == "approve")
+                       or (auto_decision == "skip" and human_decision == "reject")) else 0
+        now = time.time()
+        self.db.execute(
+            "INSERT INTO shadow_decisions(pattern_id, ticket_id, item_id, run_id,"
+            " auto_decision, human_decision, agreed, created_at, decided_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (pattern_id, ticket_id, item_id, run_id, auto_decision,
+             human_decision, agreed, now, now))
+        self.db.commit()
+        return agreed
+
+    def shadow_agreement(self, pattern_id: str | None = None) -> dict:
+        """自动决策与人工决策的一致率；未决行不计入分母。"""
+        where, args = "agreed IS NOT NULL", ()
+        if pattern_id:
+            where += " AND pattern_id=?"
+            args = (pattern_id,)
+        row = self.db.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(agreed),0) FROM shadow_decisions"
+            f" WHERE {where}", args).fetchone()
+        n, agreed = int(row[0]), int(row[1])
+        return {"n_decided": n, "n_agreed": agreed,
+                "rate": (agreed / n) if n else None,
+                "pattern_id": pattern_id or ""}
+
+    # ---------- 假设台账（落选假设也要有结局字段）----------
+
+    def record_hypotheses(self, run_id: str, issue_id: str,
+                          items: list[dict], *, protocol_fp: str = "") -> int:
+        """每个假设都入账：Top1 记 adopted，其余记 not_adopted（不是失败）。"""
+        now = time.time()
+        n = 0
+        for i, h in enumerate(items):
+            hid = f"hy-{run_id}-{issue_id}-{i}"
+            self.db.execute(
+                "INSERT OR REPLACE INTO hypotheses(id, run_id, issue_id, pattern_id,"
+                " root_cause, confidence, is_top1, status, outcome, protocol_fp,"
+                " created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (hid, run_id, issue_id, str(h.get("pattern_id", "")),
+                 str(h.get("root_cause", "")), float(h.get("confidence", 0) or 0),
+                 1 if i == 0 else 0, "adopted" if i == 0 else "not_adopted",
+                 "unknown" if i == 0 else "not_adopted", protocol_fp, now, now))
+            n += 1
+        self.db.commit()
+        return n
+
+    def record_hypothesis_outcome(self, issue_id: str, outcome: str) -> int:
+        """把判定结局写回该 issue 的 Top1；落选假设保持 not_adopted（不可观测）。"""
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(hypotheses)")}
+        if "outcome" not in cols:
+            return 0
+        cur = self.db.execute(
+            "UPDATE hypotheses SET outcome=?, updated_at=? WHERE issue_id=? AND is_top1=1",
+            (outcome, time.time(), issue_id))
+        self.db.commit()
+        return cur.rowcount
+
+    def ece_pairs(self) -> list[dict]:
+        """校准度样本：只收有真实结局的假设（落选假设无反事实，不伪造）。"""
+        rows = self.db.execute(
+            "SELECT confidence, outcome FROM hypotheses"
+            " WHERE outcome IN ('resolved','not_significant','regressed')").fetchall()
+        return [{"confidence": float(c),
+                 "success": 1.0 if o == "resolved" else 0.0}
+                for c, o in rows]
+
+    def ece_coverage(self) -> dict:
+        """覆盖率必须与 ECE 同屏：n_hypotheses 里有多少条真的能算。"""
+        row = self.db.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN outcome IN"
+            " ('resolved','not_significant','regressed') THEN 1 ELSE 0 END),"
+            " SUM(CASE WHEN outcome='not_adopted' THEN 1 ELSE 0 END)"
+            " FROM hypotheses").fetchone()
+        total, with_outcome, not_adopted = (int(row[0] or 0), int(row[1] or 0),
+                                            int(row[2] or 0))
+        return {"n_hypotheses": total, "n_with_outcome": with_outcome,
+                "n_not_adopted": not_adopted,
+                "coverage": (with_outcome / total) if total else None}
 
     # ---------- 升维提案（只提案，不执行）----------
 

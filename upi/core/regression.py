@@ -196,6 +196,8 @@ class RegressionVerdict(BaseModel):
     guard_regressions: list[str] = Field(default_factory=list)
     unassessed_guards: list[str] = Field(default_factory=list)
     reason: str = ""
+    # G7：判定自带的协议指纹，避免"巡检链路判定轮次指纹为空"导致跨 run 不可比
+    protocol_fingerprint: str = ""
 
 
 class VerifiedRecord(BaseModel):
@@ -219,12 +221,15 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
                  guards_before: Optional[dict] = None,
                  guards_after: Optional[dict] = None,
                  rel_tol: int = 15) -> RegressionVerdict:
+    def _mk(**kw):
+        kw.setdefault("protocol_fingerprint", matrix.protocol())
+        return RegressionVerdict(**kw)
     if not matrix.runs:
-        return RegressionVerdict(status="insufficient", verification_status="failed",
+        return _mk(status="insufficient", verification_status="failed",
                                  target_cluster_id=target.cluster_id,
                                  reason="no baseline runs")
     if _norm_protocol(after_protocol) != matrix.protocol():
-        return RegressionVerdict(status="protocol_mismatch",
+        return _mk(status="protocol_mismatch",
                                  verification_status="failed",
                                  target_cluster_id=target.cluster_id,
                                  reason="protocol fingerprint mismatch")
@@ -260,7 +265,7 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
                 regs.append(k)
 
     if present:
-        return RegressionVerdict(status="target_present",
+        return _mk(status="target_present",
                                  verification_status="unverified",
                                  target_cluster_id=target.cluster_id,
                                  target_present=True,
@@ -268,14 +273,14 @@ def verify_after(matrix: BaselineMatrix, target: IssueCluster,
                                  unassessed_guards=unassessed,
                                  reason="target cluster still present")
     if new:
-        return RegressionVerdict(status="new_cluster",
+        return _mk(status="new_cluster",
                                  verification_status="unverified",
                                  target_cluster_id=target.cluster_id,
                                  new_clusters=new, guard_regressions=regs,
                                  unassessed_guards=unassessed,
                                  reason="new cluster(s) appeared")
     if regs:
-        return RegressionVerdict(status="guard_regressed",
+        return _mk(status="guard_regressed",
                                  verification_status="unverified",
                                  target_cluster_id=target.cluster_id,
                                  guard_regressions=regs,

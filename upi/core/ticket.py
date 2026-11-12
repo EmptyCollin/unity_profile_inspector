@@ -31,9 +31,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = ROOT / "runs" / "_resident" / "tickets"
 
 ItemStatus = Literal["pending", "needs_human", "applied_unverified",
-                     "rolled_back", "failed", "skipped"]
+                     "rolled_back", "failed", "skipped", "rejected"]
 TicketStatus = Literal["draft", "awaiting_approval", "approved",
-                       "executing", "done", "rejected"]
+                       "executing", "done", "rejected", "changes_requested"]
 
 
 class TicketItem(BaseModel):
@@ -56,6 +56,12 @@ class TicketItem(BaseModel):
     human_approved: bool = False
     approver: str = ""
     approval_note: str = ""
+    # 影子模式：tier=shadow 的 pattern 只记录"如果自动会怎么做"，执行仍要人工。
+    pattern_tier: str = ""
+    shadow: bool = False
+    shadow_auto: bool = False
+    # 上一轮“退回修改”的人工意见；只作约束/上下文，不改代码。
+    change_request: str = ""
 
     def edit_plan(self) -> Optional[EditPlan]:
         return EditPlan(**self.plan) if self.plan else None
@@ -74,6 +80,9 @@ class BatchTicket(BaseModel):
     current_index: int = 0
     results: list[dict] = Field(default_factory=list)
     history: list[dict] = Field(default_factory=list)
+    # 整单“退回修改”的人工意见：下一轮建单时按 item 签名回填
+    change_request: str = ""
+    change_signatures: list[dict] = Field(default_factory=list)
 
     def summary(self) -> dict:
         return {
@@ -105,6 +114,8 @@ class BatchTicket(BaseModel):
                     "replace": str(d.get("replace", ""))[:400],
                 } for d in (i.plan or {}).get("diffs", [])[:4]],
                 "human_approved": i.human_approved,
+                "shadow": i.shadow,
+                "change_request": i.change_request,
                 "approve_token": (i.item_approve_token
                                   if i.status == "needs_human" and i.plan else ""),
             } for i in self.items[:8]],
@@ -145,7 +156,8 @@ PlanProvider = Callable[[IssueCluster, str], Optional[EditPlan]]
 def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[FingerprintStore] = None,
                  plan_provider: Optional[PlanProvider] = None,
                  mode: Literal["resident", "regression"] = "resident",
-                 limit: int = 8) -> BatchTicket:
+                 limit: int = 8, knowledge_store=None,
+                 previous_notes: Optional[list[dict]] = None) -> BatchTicket:
     tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-" + secrets.token_hex(3)
     items: list[TicketItem] = []
     for c in clusters[:max(1, limit)]:
@@ -173,7 +185,29 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
                 playbook = plan.playbook_id or playbook
                 if tier != "auto":
                     err = f"tier={tier}: plan requires individual approval"
-        status: ItemStatus = "pending" if plan is not None and tier == "auto" else "needs_human"
+        # 影子模式：knowledge 里 pattern 处于 shadow 时，即使可自动也不落地，
+        # 只把"如果自动会怎么做"记下来，等人工作出同样决定后比对一致率。
+        pattern_tier = ""
+        if knowledge_store is not None and hit is not None and hit.record is not None:
+            try:
+                pattern_tier = knowledge_store.tier_of(hit.record.pattern_id) or ""
+            except Exception:  # noqa: BLE001
+                pattern_tier = ""
+        shadow = pattern_tier == "shadow"
+        would_auto = plan is not None and tier == "auto"
+        # 上一轮“退回修改”的意见按机制签名回填（不按 cluster/ticket id，跨轮可迁移）
+        prev_note = ""
+        for pn in (previous_notes or []):
+            if (pn.get("metric") == c.metric and pn.get("shape") == c.shape
+                    and pn.get("kind") == c.kind):
+                prev_note = str(pn.get("note", ""))
+                break
+        if prev_note:
+            err = ((err + " · ") if err else "") + "带上一轮退回意见（见 change_request）"
+        status: ItemStatus = "pending" if (would_auto and not shadow) else "needs_human"
+        if shadow:
+            err = ((err + " · ") if err else "") + \
+                "shadow: 只记录自动意图，执行仍需人工（影子模式）"
         iid = "it-" + secrets.token_hex(4)
         items.append(TicketItem(
             item_id=iid, cluster_id=c.cluster_id,
@@ -185,6 +219,8 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
             plan=(plan.model_dump() if plan is not None else None),
             status=status, error=err,
             item_approve_token=_item_token(tid, iid),
+            pattern_tier=pattern_tier, shadow=shadow, shadow_auto=would_auto,
+            change_request=prev_note,
         ))
     try:
         from upi.config.project_profile import active_profile
@@ -284,6 +320,20 @@ class TicketStore:
                 continue
         return out
 
+    def recent_change_requests(self, limit: int = 50) -> list[dict]:
+        """最近“退回修改”的人工意见：按机制签名供下一轮建单回填。"""
+        out: list[dict] = []
+        for t in self.list(limit):
+            if not t.change_request:
+                continue
+            for sig in (t.change_signatures or []):
+                out.append({"ticket_id": t.ticket_id,
+                            "metric": sig.get("metric", ""),
+                            "shape": sig.get("shape", ""),
+                            "kind": sig.get("kind", ""),
+                            "note": t.change_request})
+        return out
+
 
 def approve(ticket: BatchTicket, *, approver: str, note: str, token: str) -> tuple[bool, str]:
     if ticket.status != "awaiting_approval":
@@ -301,7 +351,8 @@ def approve(ticket: BatchTicket, *, approver: str, note: str, token: str) -> tup
     return True, "approved"
 
 
-def reject(ticket: BatchTicket, *, approver: str, note: str) -> tuple[bool, str]:
+def reject(ticket: BatchTicket, *, approver: str, note: str,
+           knowledge_store=None) -> tuple[bool, str]:
     if ticket.status != "awaiting_approval":
         return False, f"状态不是 awaiting_approval（{ticket.status}）"
     if not approver.strip() or not note.strip():
@@ -309,14 +360,47 @@ def reject(ticket: BatchTicket, *, approver: str, note: str) -> tuple[bool, str]
     ticket.status = "rejected"
     ticket.approver = approver.strip()
     ticket.note = note.strip()
+    # 影子模式：整单驳回也算一条人工决定，和自动意图比对。
+    if knowledge_store is not None:
+        for it in ticket.items:
+            if it.shadow and it.pattern_id:
+                try:
+                    knowledge_store.record_shadow_outcome(
+                        it.pattern_id, it.item_id,
+                        auto_decision="apply" if it.shadow_auto else "skip",
+                        human_decision="reject", ticket_id=ticket.ticket_id)
+                except Exception:  # noqa: BLE001
+                    pass
     ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "action": "reject_ticket",
                            "actor": ticket.approver, "note": ticket.note})
     return True, "rejected"
 
 
+def request_changes(ticket: BatchTicket, *, approver: str, note: str) -> tuple[bool, str]:
+    """退回修改：不批也不驳，带着人工意见回到下一轮（整单有效）。"""
+    if ticket.status != "awaiting_approval":
+        return False, f"状态不是 awaiting_approval（{ticket.status}）"
+    if not approver.strip() or not note.strip():
+        return False, "退回人和意见必填"
+    ticket.status = "changes_requested"
+    ticket.approver = approver.strip()
+    ticket.note = note.strip()
+    ticket.change_request = note.strip()
+    # 记录这批候选的机制签名，下一轮按签名把意见带回去（不按 ticket/cluster id）
+    ticket.change_signatures = [
+        {"metric": i.metric, "shape": i.shape, "kind": i.kind}
+        for i in ticket.items
+    ]
+    ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                           "action": "request_changes",
+                           "actor": ticket.approver, "note": ticket.note,
+                           "signatures": ticket.change_signatures})
+    return True, "changes_requested"
+
+
 def approve_item(ticket: BatchTicket, item_id: str, *, approver: str,
-                 note: str, token: str) -> tuple[bool, str]:
+                 note: str, token: str, knowledge_store=None) -> tuple[bool, str]:
     """单条批准 blocked/semi patch；批量批准不替代这一步。"""
     if ticket.status not in ("approved", "executing", "done"):
         return False, f"工单状态 {ticket.status} 不接受单条批准"
@@ -342,7 +426,39 @@ def approve_item(ticket: BatchTicket, item_id: str, *, approver: str,
     if item.status == "needs_human":
         item.status = "pending"
         item.error = ""
+    # 影子模式：人工批准 = 与"自动会 apply"一致；落账后影子一致率才可算。
+    if knowledge_store is not None and item.shadow and item.pattern_id:
+        try:
+            knowledge_store.record_shadow_outcome(
+                item.pattern_id, item.item_id,
+                auto_decision="apply" if item.shadow_auto else "skip",
+                human_decision="approve", ticket_id=ticket.ticket_id)
+        except Exception:  # noqa: BLE001
+            pass
     return True, "item approved"
+
+
+def reject_item(ticket: BatchTicket, item_id: str, *, approver: str,
+                note: str) -> tuple[bool, str]:
+    """单条驳回：只否掉这一条，不影响同单其他候选。"""
+    if ticket.status not in ("approved", "executing", "done"):
+        return False, f"工单状态 {ticket.status} 不接受单条驳回"
+    if not approver.strip() or not note.strip():
+        return False, "驳回人和批语必填"
+    item = next((i for i in ticket.items if i.item_id == item_id), None)
+    if item is None:
+        return False, "item not found"
+    if item.status not in ("needs_human", "pending"):
+        return False, f"item 状态 {item.status} 不接受驳回"
+    item.status = "rejected"
+    item.error = "human rejected"
+    item.approver = approver.strip()
+    item.approval_note = note.strip()
+    ticket.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                           "action": "reject_item", "item_id": item.item_id,
+                           "metric": item.metric, "actor": item.approver,
+                           "note": item.approval_note})
+    return True, "item rejected"
 
 
 class TicketExecutor:
