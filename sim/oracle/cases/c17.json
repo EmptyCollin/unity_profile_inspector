@@ -1,0 +1,26 @@
+{
+  "case_id": "c17",
+  "display_name": "material + hint",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c17",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_instance_material",
+      "metric": "drawCalls",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard",
+      "reference_kind": "static",
+      "reference_ref": "64 个格子不应各持一个 Material 实例",
+      "risk": "medium"
+    },
+    {
+      "pattern_id": "idle_hint_scan_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "空闲时每帧全盘扫描提示",
+      "risk": "low"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "case_id": "c15",
+  "display_name": "texture + canvas",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c15",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_tile_texture",
+      "metric": "total_used_memory",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard",
+      "reference_kind": "static",
+      "reference_ref": "不应为每格创建独立 Texture2D/Sprite",
+      "risk": "medium"
+    },
+    {
+      "pattern_id": "canvas_layout_churn",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "每帧改变侧栏尺寸会触发 Canvas rebuild",
+      "risk": "low"
+    }
+  ]
+}

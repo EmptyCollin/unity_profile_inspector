@@ -1,0 +1,18 @@
+{
+  "case_id": "c02",
+  "display_name": "per-tile materials",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c02",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_instance_material",
+      "metric": "drawCalls",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard",
+      "reference_kind": "static",
+      "reference_ref": "64 个格子不应各持一个 Material 实例",
+      "risk": "medium"
+    }
+  ]
+}

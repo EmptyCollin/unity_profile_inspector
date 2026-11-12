@@ -1,0 +1,26 @@
+{
+  "case_id": "c16",
+  "display_name": "HUD + sync load",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c16",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "ui_text_rebuild_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "reference_kind": "static",
+      "reference_ref": "HUD 应脏标记，不应每帧重建文本",
+      "risk": "low"
+    },
+    {
+      "pattern_id": "sync_resources_load_on_shop",
+      "metric": "frame_time_ms",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::OpenShop",
+      "reference_kind": "budget",
+      "reference_ref": "商店打开不应同步加载 24 个资源",
+      "risk": "medium"
+    }
+  ]
+}

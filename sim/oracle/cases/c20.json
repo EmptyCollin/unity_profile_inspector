@@ -1,0 +1,9 @@
+{
+  "case_id": "c20",
+  "display_name": "clean control A",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c20",
+  "mixed": false,
+  "negative_control": true,
+  "expected_opportunities": []
+}

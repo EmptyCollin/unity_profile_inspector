@@ -1,0 +1,18 @@
+{
+  "case_id": "c08",
+  "display_name": "idle hint scan",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c08",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "idle_hint_scan_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "空闲时每帧全盘扫描提示",
+      "risk": "low"
+    }
+  ]
+}

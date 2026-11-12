@@ -1,0 +1,18 @@
+{
+  "case_id": "c03",
+  "display_name": "match scan alloc",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c03",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "match_scan_allocation",
+      "metric": "gc_alloc_per_frame",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::FindMatches",
+      "reference_kind": "static",
+      "reference_ref": "匹配扫描不应每帧分配临时列表",
+      "risk": "low"
+    }
+  ]
+}

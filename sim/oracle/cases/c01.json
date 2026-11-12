@@ -1,0 +1,18 @@
+{
+  "case_id": "c01",
+  "display_name": "HUD every frame",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c01",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "ui_text_rebuild_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "reference_kind": "static",
+      "reference_ref": "HUD 应脏标记，不应每帧重建文本",
+      "risk": "low"
+    }
+  ]
+}

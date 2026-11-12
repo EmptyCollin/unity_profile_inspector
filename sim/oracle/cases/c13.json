@@ -1,0 +1,26 @@
+{
+  "case_id": "c13",
+  "display_name": "hint + HUD",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c13",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "idle_hint_scan_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "空闲时每帧全盘扫描提示",
+      "risk": "low"
+    },
+    {
+      "pattern_id": "ui_text_rebuild_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "reference_kind": "static",
+      "reference_ref": "HUD 应脏标记，不应每帧重建文本",
+      "risk": "low"
+    }
+  ]
+}

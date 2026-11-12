@@ -1,0 +1,18 @@
+{
+  "case_id": "c06",
+  "display_name": "canvas layout churn",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c06",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "canvas_layout_churn",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "每帧改变侧栏尺寸会触发 Canvas rebuild",
+      "risk": "low"
+    }
+  ]
+}

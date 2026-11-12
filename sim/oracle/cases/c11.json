@@ -1,0 +1,26 @@
+{
+  "case_id": "c11",
+  "display_name": "particle + canvas",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c11",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_clear_particle_instantiate",
+      "metric": "gc_alloc_per_frame",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Burst",
+      "reference_kind": "static",
+      "reference_ref": "每次消除不应 Instantiate/Destroy UI 粒子",
+      "risk": "low"
+    },
+    {
+      "pattern_id": "canvas_layout_churn",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Update",
+      "reference_kind": "static",
+      "reference_ref": "每帧改变侧栏尺寸会触发 Canvas rebuild",
+      "risk": "low"
+    }
+  ]
+}

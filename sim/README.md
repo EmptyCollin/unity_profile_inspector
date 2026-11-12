@@ -23,19 +23,25 @@ sim/
 python sim/replay/devsim_replay.py --case c18
 ```
 
-`c18` 场景配置在 `sim/replay/scenarios.json`，只含 seed/性能开关，不含答案。
-`sim/oracle/cases/c18.json` 只给评测器看，不传给工程或工具。
+`c18` 是混合 case，共 22 个 scenario（17 常规 + 2 混合 + 3 负对照），
+定义在 `sim/replay/scenarios.json`；`sim/oracle/cases/*.json` 只给评测器看，
+不传给工程或工具。
 
 ## 当前性能开关（用于 case 设计，不在 UI 暴露为“缺陷”）
 
 - `legacy_ui`：HUD 每帧刷新；
 - `legacy_material`：每块 UI 一个 Material 实例；
 - `legacy_match_alloc`：匹配扫描额外分配；
-- `sync_shop_load`：打开商店同步加载 24 个 Resources。
+- `sync_shop_load`：打开商店同步加载 24 个 Resources；
+- `legacy_particle`：每次消除 Instantiate/Destroy UI 粒子；
+- `legacy_canvas`：每帧改侧栏尺寸触发 rebuild；
+- `legacy_texture`：每格创建独立 Texture2D/Sprite；
+- `legacy_hint`：空闲时每帧全盘扫描提示；
+- `autoplay`/`round_seconds`：仅 replay 用的自动局面，不改变正常游戏。
 
 ## 尚未完成
 
-- 22 个 case 的完整矩阵（当前只有 c18/c20 的 scenario）；
+- 22 个 case 的 oracle 已生成，但还没有评测器逐项打分；
 - Addressables 分组/加载；
 - 音效、粒子、更完整的动画；
-- 自动点击 replay（当前只启动并截图，UI 可手动玩）。
+- 自动点击 replay 的完整“商店/BONUS”断言（当前可自动跑一局并截图）。

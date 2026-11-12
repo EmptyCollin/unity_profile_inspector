@@ -61,10 +61,11 @@ def main() -> int:
             print("playmode start 失败：", r.get("errors") or r)
             return 1
         time.sleep(max(0.5, ns.wait))
-        # 默认场景是 Lobby；点“开始游戏”进入实际游戏（坐标按 1280x720 Game view）
-        unity("command", "simulate_pointer", "--x", "253", "--y", "340",
-              "--action", "click", "--project-path", str(project))
-        time.sleep(1.0)
+        # 默认场景是 Lobby；未开 autoplay 的 case 用一次 UI 点击进入游戏
+        if not scenarios[ns.case].get("autoplay"):
+            unity("command", "simulate_pointer", "--x", "253", "--y", "320",
+                  "--action", "click", "--project-path", str(project))
+            time.sleep(1.0)
         r = unity("command", "capture game_view", "--output-path", str(out),
                   "--project-path", str(project))
         print("截图：", (r.get("data") or {}).get("result", {}).get("savedPath") or out)

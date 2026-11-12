@@ -14,6 +14,13 @@ namespace DevSim
         public bool legacy_material = false;
         public bool legacy_match_alloc = false;
         public bool sync_shop_load = false;
+        public bool legacy_particle = false;
+        public bool legacy_canvas = false;
+        public bool legacy_texture = false;
+        public bool legacy_hint = false;
+        public bool autoplay = false;
+        public float round_seconds = 30f;
+        public int target_base = 600;
         public int start_tier = 1;
 
         public static CaseConfig Load()

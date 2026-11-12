@@ -1,0 +1,26 @@
+{
+  "case_id": "c09",
+  "display_name": "HUD + match alloc",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c09",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "ui_text_rebuild_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "reference_kind": "static",
+      "reference_ref": "HUD 应脏标记，不应每帧重建文本",
+      "risk": "low"
+    },
+    {
+      "pattern_id": "match_scan_allocation",
+      "metric": "gc_alloc_per_frame",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::FindMatches",
+      "reference_kind": "static",
+      "reference_ref": "匹配扫描不应每帧分配临时列表",
+      "risk": "low"
+    }
+  ]
+}

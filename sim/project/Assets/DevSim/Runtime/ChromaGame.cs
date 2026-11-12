@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -33,10 +34,12 @@ namespace DevSim
         private Font font;
         private Canvas canvas;
         private GameObject gameRoot, lobbyRoot, shopPanel, bonusPanel, overPanel;
-        private RectTransform boardRoot;
+        private RectTransform boardRoot, sideRect;
         private readonly Image[,] tileImages = new Image[N, N];
         private readonly Text[,] tileArmor = new Text[N, N];
         private readonly Button[,] tileButtons = new Button[N, N];
+        private readonly List<Sprite> _sprites = new List<Sprite>();
+        private readonly Text[] bonusLabels = new Text[3];
         private Text roundText, targetText, scoreText, timeText, coinText, statusText, highText;
         private Text shopCoins, overText;
         private int[,] board = new int[N, N];
@@ -72,6 +75,7 @@ namespace DevSim
             BuildEventSystem();
             BuildUI();
             ShowLobby();
+            if (cfg.autoplay) StartGame();
         }
 
         // ───────────────────────── UI scaffolding ─────────────────────────
@@ -207,6 +211,7 @@ namespace DevSim
             }
 
             var side = MakePanel(gameRoot.transform, 704, 134, 1164, 624, new Color(0.055f, 0.08f, 0.115f, 0.98f), "SidePanel");
+            sideRect = side.rectTransform;
             MakeLabel(side.transform, "ITEMS", 24, 18, 300, 30, 20, new Color(0.9f, 0.8f, 0.5f));
             for (int i = 0; i < itemNames.Length; i++)
             {
@@ -292,11 +297,14 @@ namespace DevSim
             MakeLabel(bonusPanel.transform, "BONUS", 440, 290, 500, 56, 42, new Color(0.55f, 0.85f, 1f));
             MakeLabel(bonusPanel.transform, "Choose one. The run continues.", 440, 350, 700, 40, 20,
                   new Color(0.75f, 0.84f, 0.95f));
+            var bonusCard = bonusPanel.transform.Find("BonusCard");
             for (int i = 0; i < 3; i++)
             {
                 int slot = i;
-                MakeButton(bonusPanel.transform, "", 440 + i * 340, 430, 300, 180, () => ChooseBonus(slot),
+                var b = MakeButton(bonusCard, "", 60 + i * 340, 180, 300, 180, () => ChooseBonus(slot),
                        new Color(0.12f, 0.18f, 0.25f), 20);
+                bonusLabels[i] = b.GetComponentInChildren<Text>();
+                bonusLabels[i].fontSize = 22;
             }
         }
 
@@ -333,8 +341,8 @@ namespace DevSim
         private void StartGame()
         {
             playing = true; paused = false; bonusOpen = false; overOpen = false;
-            round = 1; target = 600; totalScore = 0; coins = 0; tier = cfg.start_tier;
-            multiplier = 1; timeLeft = 30f; bonusTime = 0;
+            round = 1; target = cfg.target_base; totalScore = 0; coins = 0; tier = cfg.start_tier;
+            multiplier = 1; timeLeft = cfg.round_seconds; bonusTime = 0;
             for (int i = 0; i < inventory.Length; i++) inventory[i] = 0;
             if (lobbyRoot) lobbyRoot.SetActive(false);
             if (gameRoot) gameRoot.SetActive(true);
@@ -344,10 +352,14 @@ namespace DevSim
             BuildBoard();
             UpdateHud();
             statusText.text = "ROUND 1 — reach " + target;
+            if (cfg.autoplay) StartCoroutine(AutoPlay());
         }
 
         private void Update()
         {
+            if (cfg.legacy_canvas && sideRect != null)
+                sideRect.sizeDelta = new Vector2(1164, 624 + (Time.frameCount % 2));
+            if (cfg.legacy_hint && playing && !paused) HasMatch();
             if (!playing || paused || overOpen) return;
             timeLeft -= Time.deltaTime;
             if (timeLeft <= 0f) { timeLeft = 0f; EndRound(); return; }
@@ -396,6 +408,17 @@ namespace DevSim
                 {
                     board[r, c] = rng.Next(Colors);
                     armor[r, c] = 0;
+                    if (cfg.legacy_texture && tileImages[r, c] != null)
+                    {
+                        var tex = new Texture2D(8, 8, TextureFormat.RGBA32, false);
+                        var px = new Color32[64];
+                        var col = (Color32)Palette[board[r, c]];
+                        for (int i = 0; i < px.Length; i++) px[i] = col;
+                        tex.SetPixels32(px); tex.Apply();
+                        var sp = Sprite.Create(tex, new Rect(0, 0, 8, 8), new Vector2(.5f, .5f), 8f);
+                        _sprites.Add(sp);
+                        tileImages[r, c].sprite = sp;
+                    }
                     if (tileImages[r, c] != null && cfg.legacy_material)
                     {
                         var sh = Shader.Find("UI/Default");
@@ -542,6 +565,10 @@ namespace DevSim
                     for (int c = 0; c < N; c++)
                         if (hit[r, c]) { board[r, c] = -1; armor[r, c] = 0; }
                 totalScore += n * 10 * multiplier * chain;
+                if (cfg.legacy_particle)
+                    for (int r = 0; r < N; r++)
+                        for (int c = 0; c < N; c++)
+                            if (hit[r, c]) Burst(r, c, board[r, c]);
                 DropAndRefill();
             }
             RefreshTiles();
@@ -549,6 +576,48 @@ namespace DevSim
             if (totalCleared > 0) statusText.text = "CLEARED " + totalCleared + (chain > 1 ? "  CHAIN x" + chain : "");
             if (totalCleared >= 5 && !bonusOpen) { ShowBonus(); return; }
             CheckRound();
+        }
+
+        private void Burst(int r, int c, int color)
+        {
+            var img = MakePanel(canvas.transform, 52 + 6 + c * (Tile + Gap), 134 + 6 + r * (Tile + Gap),
+                                30, 30, color >= 0 ? Palette[color] : Color.white, "fx");
+            StartCoroutine(FadeFx(img));
+        }
+
+        private IEnumerator FadeFx(Image img)
+        {
+            float t = 0f;
+            while (t < 0.25f && img != null)
+            {
+                t += Time.deltaTime;
+                var c = img.color; c.a = 1f - t / 0.25f; img.color = c;
+                img.rectTransform.localScale = Vector3.one * (1f + t * 1.5f);
+                yield return null;
+            }
+            if (img != null) Destroy(img.gameObject);
+        }
+
+        private IEnumerator AutoPlay()
+        {
+            while (playing)
+            {
+                yield return new WaitForSeconds(0.35f);
+                if (overOpen) yield break;
+                if (bonusOpen) { ChooseBonus(0); continue; }
+                if (shopPanel != null && shopPanel.activeSelf) { CloseShop(); continue; }
+                if (!playing || paused) continue;
+                for (int k = 0; k < 8; k++)
+                {
+                    int r = rng.Next(N), c = rng.Next(N);
+                    int dr = rng.Next(2) == 0 ? 1 : 0, dc = dr == 1 ? 0 : 1;
+                    int r2 = r + dr, c2 = c + dc;
+                    if (r2 >= N || c2 >= N) continue;
+                    if (armor[r, c] > 0 || armor[r2, c2] > 0) continue;
+                    TrySwap(r, c, r2, c2);
+                    break;
+                }
+            }
         }
 
         private void DropAndRefill()
@@ -595,8 +664,8 @@ namespace DevSim
         private void NextRound()
         {
             round++;
-            target = 600 + 300 * (round - 1);
-            timeLeft = 30f + bonusTime;
+            target = cfg.target_base + 300 * (round - 1);
+            timeLeft = cfg.round_seconds + bonusTime;
             bonusTime = 0;
             paused = false;
             statusText.text = "ROUND " + round + " — reach " + target;
@@ -659,21 +728,12 @@ namespace DevSim
         private void ShowBonus()
         {
             bonusOpen = true; paused = true;
-            // 使用固定按钮顺序（BuildBonus 生成 3 个）
-            var card = bonusPanel.transform.Find("BonusCard");
-            int idx = 0;
-            foreach (Transform child in card)
+            string[] names = { "得分 x1.1", "本轮 +2s", "炸弹 +1" };
+            for (int i = 0; i < 3; i++)
             {
-                if (child.name != "Btn") continue;
-                var t = child.GetComponentInChildren<Text>();
-                if (t != null && idx < 3)
-                {
-                    int id = rng.Next(3);
-                    bonusIds[idx] = id;
-                    string[] names = { "得分 x1.1", "本轮 +2s", "炸弹 +1" };
-                    t.text = names[id];
-                }
-                idx++;
+                int id = rng.Next(3);
+                bonusIds[i] = id;
+                if (bonusLabels[i] != null) bonusLabels[i].text = names[id];
             }
             bonusPanel.SetActive(true);
             statusText.text = "BONUS — choose one";

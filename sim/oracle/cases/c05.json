@@ -1,0 +1,18 @@
+{
+  "case_id": "c05",
+  "display_name": "per-clear particle",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c05",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_clear_particle_instantiate",
+      "metric": "gc_alloc_per_frame",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Burst",
+      "reference_kind": "static",
+      "reference_ref": "每次消除不应 Instantiate/Destroy UI 粒子",
+      "risk": "low"
+    }
+  ]
+}

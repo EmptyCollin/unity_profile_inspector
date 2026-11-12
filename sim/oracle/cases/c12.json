@@ -1,0 +1,26 @@
+{
+  "case_id": "c12",
+  "display_name": "sync load + material",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c12",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "sync_resources_load_on_shop",
+      "metric": "frame_time_ms",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::OpenShop",
+      "reference_kind": "budget",
+      "reference_ref": "商店打开不应同步加载 24 个资源",
+      "risk": "medium"
+    },
+    {
+      "pattern_id": "per_instance_material",
+      "metric": "drawCalls",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard",
+      "reference_kind": "static",
+      "reference_ref": "64 个格子不应各持一个 Material 实例",
+      "risk": "medium"
+    }
+  ]
+}
