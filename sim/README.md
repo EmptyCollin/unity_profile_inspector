@@ -32,7 +32,7 @@ python sim/replay/devsim_replay.py --case c18
 - `legacy_ui`：HUD 每帧刷新；
 - `legacy_material`：每块 UI 一个 Material 实例；
 - `legacy_match_alloc`：匹配扫描额外分配；
-- `sync_shop_load`：打开商店同步加载 24 个 Resources；
+- `sync_shop_load`：打开商店时 `WaitForCompletion` 同步等待 24 个 Addressables 资源；
 - `legacy_particle`：每次消除 Instantiate/Destroy UI 粒子；
 - `legacy_canvas`：每帧改侧栏尺寸触发 rebuild；
 - `legacy_texture`：每格创建独立 Texture2D/Sprite；
@@ -55,6 +55,6 @@ python sim/oracle/evaluate.py --case c18
 ## 尚未完成
 
 - 22 个 case 的 oracle 已生成，但还没有评测器逐项打分；
-- Addressables 分组/加载；
+- 静态扫描没有运行期门控，c20 会误报；
 - 音效、粒子、更完整的动画；
 - 自动点击 replay 的完整“商店/BONUS”断言（当前可自动跑一局并截图）。

@@ -43,6 +43,7 @@
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0",
     "com.unity.pipeline": "0.10.0-exp.1",
-    "com.unity.cinemachine": "3.1.7"
+    "com.unity.cinemachine": "3.1.7",
+    "com.unity.addressables": "4.2.0"
   }
 }

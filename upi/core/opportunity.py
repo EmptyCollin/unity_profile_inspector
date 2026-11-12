@@ -33,7 +33,7 @@ PATTERNS: tuple[Pattern, ...] = (
     Pattern("match_scan_allocation", "gc_alloc_per_frame", "cpu",
             r"new\s+List<\s*int\s*>", "热路径扫描不应每次分配临时 List"),
     Pattern("sync_resources_load_on_shop", "frame_time_ms", "loading",
-            r"Resources\.Load\s*<", "异步 Addressables/分帧加载优于同步 Resources.Load"),
+            r"WaitForCompletion\s*\(\s*\)", "异步 Addressables 优于 WaitForCompletion 同步等待"),
     Pattern("per_clear_particle_instantiate", "gc_alloc_per_frame", "cpu",
             r"StartCoroutine\s*\(\s*FadeFx", "消除特效应池化，不应每次 Instantiate/Destroy"),
     Pattern("canvas_layout_churn", "cpuMainThreadFrameTimeMs", "cpu",

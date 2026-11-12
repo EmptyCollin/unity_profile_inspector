@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
@@ -684,7 +686,20 @@ namespace DevSim
         {
             if (cfg.sync_shop_load)
             {
-                for (int i = 0; i < 24; i++) Resources.Load<TextAsset>("DevSim/payload_" + (i % 8));
+                // 故意保留同步等待路径：case 用它测“打开商店卡主线程”
+                int ok = 0;
+                for (int i = 0; i < 24; i++)
+                {
+                    var h = Addressables.LoadAssetAsync<TextAsset>("devsim/payload_" + (i % 8));
+                    h.WaitForCompletion();
+                    if (h.Status == AsyncOperationStatus.Succeeded) ok++;
+                    Addressables.Release(h);
+                }
+                Debug.Log("DevSim sync Addressables: " + ok + "/24");
+            }
+            else
+            {
+                StartCoroutine(LoadShopAsync());
             }
             paused = true;
             offers[0] = new Offer(0, 120, "3x3 消除；高级色块护甲 -1");
@@ -692,16 +707,27 @@ namespace DevSim
             offers[2] = new Offer(2, 100, "单格消除；护甲 -1");
             shopPanel.SetActive(true);
             shopCoins.text = "COINS " + coins + "  ·  TIER " + tier;
-            var card = shopPanel.transform.Find("ShopCard");
             for (int i = 0; i < 3; i++)
             {
-                var c = card.Find("Offer" + i);
+                var c = shopPanel.transform.Find("Offer" + i);
                 var texts = c.GetComponentsInChildren<Text>();
                 if (texts.Length >= 2)
                 {
                     texts[0].text = itemNames[offers[i].Item] + "  " + offers[i].Price;
                     texts[1].text = offers[i].Desc;
                 }
+            }
+        }
+
+        private IEnumerator LoadShopAsync()
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                var h = Addressables.LoadAssetAsync<TextAsset>("devsim/payload_" + i);
+                yield return h;
+                if (h.Status != AsyncOperationStatus.Succeeded)
+                    Debug.LogWarning("devsim addressable failed: " + i + " " + h.OperationException);
+                Addressables.Release(h);
             }
         }
 
