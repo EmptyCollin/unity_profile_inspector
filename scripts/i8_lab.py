@@ -276,20 +276,7 @@ def run_lab_replay() -> dict:
     return {"ok": True, "replay_id": spec.replay_id, "steps": slim}
 
 
-def capture_candidates() -> dict:
-    es = editor_status()
-    if not es.get("ok") or es.get("playMode") != "playing":
-        return {"ok": False, "error": "Unity 需要在 Play Mode", "editor": es}
-    # 采样子窗口：用 autoplay 把 HUD/item/Board 都跑起来，避免 replay 结束后
-    # 只剩低信息量的 shop 帧。
-    code = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
-            'if(g==null) return "no-game";'
-            'g.DebugLoadConfig("{\\"seed\\":20261112,\\"autoplay\\":true,\\"round_seconds\\":30}");'
-            'g.DebugStartRun(); return "ok";')
-    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
-                    "--code", code, "--format", "json"], capture_output=True,
-                   text=True, encoding="utf-8", errors="replace", timeout=60)
-    time.sleep(2.0)
+def _capture_once(tag: str) -> list[dict]:
     ev = ROOT / "runs" / "_probe" / "evidence_v1.json"
     try:
         ev.unlink()
@@ -303,8 +290,8 @@ def capture_candidates() -> dict:
     while time.time() < deadline and not ev.exists():
         time.sleep(0.2)
     if not ev.exists():
-        return {"ok": False, "error": "collector 没有写出证据"}
-    run_id = "lab"
+        return []
+    run_id = f"lab_{tag}"
     subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                     "--project", str(PROJECT), "--evidence", str(ev),
                     "--run-id", run_id, "--scene", "Assets/Scenes/00_Bootstrap.unity"],
@@ -318,12 +305,57 @@ def capture_candidates() -> dict:
                    cwd=str(ROOT), capture_output=True, text=True,
                    encoding="utf-8", errors="replace", timeout=60)
     if not out.exists():
-        return {"ok": False, "error": "候选生成失败"}
-    data = json.loads(out.read_text(encoding="utf-8"))
-    return {"ok": True, "path": str(out),
+        return []
+    return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+
+
+def capture_candidates() -> dict:
+    es = editor_status()
+    if not es.get("ok") or es.get("playMode") != "playing":
+        return {"ok": False, "error": "Unity 需要在 Play Mode", "editor": es}
+    # 窗口 A：autoplay，抓 HUD/item
+    code = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
+            'if(g==null) return "no-game";'
+            'g.DebugLoadConfig("{\\"seed\\":20261112,\\"autoplay\\":true,'
+            '\\"round_seconds\\":30}"); g.DebugStartRun(); return "ok";')
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--code", code, "--format", "json"], capture_output=True,
+                   text=True, encoding="utf-8", errors="replace", timeout=60)
+    time.sleep(2.0)
+    a = _capture_once("autoplay")
+    # 窗口 B：强制棋盘 + resolve，抓 BoardModel
+    colors = [0, 0, 0] + [((i // 6 + i % 6) % 5) for i in range(3, 36)]
+    layers = [1] * 36
+    force = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
+             'if(g==null) return "no-game";'
+             f'g.DebugSetBoard(6,new int[]{{{",".join(str(x) for x in colors)}}},'
+             f'new int[]{{{",".join(str(x) for x in layers)}}});'
+             'return g.DebugResolveStep();')
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--code", force, "--format", "json"], capture_output=True,
+                   text=True, encoding="utf-8", errors="replace", timeout=60)
+    b = _capture_once("board")
+    hud = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
+           'if(g==null) return "no-game"; return g.DebugSetScore(0);')
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--code", hud, "--format", "json"], capture_output=True,
+                   text=True, encoding="utf-8", errors="replace", timeout=60)
+    time.sleep(0.1)
+    c = _capture_once("hud")
+    merged = {}
+    for item in a + b + c:
+        key = item.get("root_cause", "")
+        if key not in merged or item.get("score", 0) > merged[key].get("score", 0):
+            merged[key] = item
+    out = sorted(merged.values(), key=lambda c: c.get("score", 0), reverse=True)[:8]
+    lab = ROOT / "runs" / "lab" / "evidence" / "candidates.json"
+    lab.parent.mkdir(parents=True, exist_ok=True)
+    lab.write_text(json.dumps({"candidates": out}, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    return {"ok": True, "path": str(lab),
             "candidates": [{"kind": c.get("kind"), "root_cause": c.get("root_cause"),
                             "score": c.get("score"), "evidence_n": c.get("evidence_n")}
-                           for c in data.get("candidates", [])[:8]]}
+                           for c in out]}
 
 
 HTML = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
