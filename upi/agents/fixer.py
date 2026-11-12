@@ -170,7 +170,16 @@ def execute(plan: EditPlan, snap: Optional[Snapshot], *,
         return rep
 
     try:
-        rep["applied"] = apply_diffs(plan, root=root)
+        # planner 的 file 可能是“工程内相对路径”；旧模板是“仓库根相对路径”。
+        # 两边都支持：默认 root 找不到、但在 project_path 下能找到时，改用工程根。
+        apply_root = root
+        if apply_root and project_path and plan.diffs:
+            rp = Path(apply_root)
+            pp = Path(project_path)
+            if all(not (rp / d["file"]).exists() and (pp / d["file"]).exists()
+                   for d in plan.diffs):
+                apply_root = pp
+        rep["applied"] = apply_diffs(plan, root=apply_root)
     except FixError as e:
         rep.update(status="diff_rejected", why=str(e)[:200],
                    rollback="未发生（整 plan 中止，无落盘残留）")
