@@ -1,0 +1,16 @@
+{
+  "oracle_id": "c02",
+  "case_id": "c02",
+  "version": 1,
+  "expected_root_causes": [
+    "ChromaGame.UpdateHudBody 每次重建静态 HUD 文本"
+  ],
+  "acceptable_files": [
+    "Assets/DevSim/Runtime/ChromaGame.cs"
+  ],
+  "repair_assertions": [
+    "HUD 内容不变",
+    "数值不变时不重复拼字符串"
+  ],
+  "evaluator_only": true
+}

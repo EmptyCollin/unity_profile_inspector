@@ -1,0 +1,10 @@
+{
+  "case_id": "c02",
+  "overlay": [
+    "Assets/DevSim/Runtime/ChromaGame.cs"
+  ],
+  "replay": "c02",
+  "oracle": "c02",
+  "base_hash": "e616c40678022314",
+  "notes": "HUD static text rebuilt every update"
+}
