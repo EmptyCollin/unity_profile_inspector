@@ -34,6 +34,17 @@ class CandidateV2(BaseModel):
     source_kind: str = "evidence"
 
 
+def _short_symbol(symbol: str) -> str:
+    """把原生/程序集符号归一成 `Type.Method`，避免同一函数重复占候选。"""
+    s = (symbol or "").strip()
+    if "!" in s:
+        s = s.split("!")[-1]
+    s = s.replace("::", ".")
+    s = s.replace("()", "").strip()
+    parts = s.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else s
+
+
 def _span_of(node_data: dict) -> Optional[SourceSpan]:
     s = node_data.get("source")
     return SourceSpan(**s) if s else None
@@ -59,6 +70,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
             continue
         sym = next((f.symbol for f in site.stack
                     if f.source and g.span_project(f.source)), span.symbol)
+        sym = _short_symbol(sym)
         key = (span.file, span.start_line)
         alloc_by_span[key]["bytes"] += site.bytes
         alloc_by_span[key]["count"] += site.count or 1
@@ -94,7 +106,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
     for i, fn in enumerate(bundle.functions):
         if fn.source is None or not g.span_project(fn.source):
             continue
-        key = (fn.symbol, fn.source.file, fn.source.start_line)
+        key = (_short_symbol(fn.symbol), fn.source.file, fn.source.start_line)
         e = fn_by_sym[key]
         e["total"] += fn.total_ms
         e["calls"] += fn.calls
@@ -128,7 +140,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
         for fr in cs.frames:
             if fr.source is None or not g.span_project(fr.source):
                 continue
-            key = (fr.symbol, fr.source.file, fr.source.start_line)
+            key = (_short_symbol(fr.symbol), fr.source.file, fr.source.start_line)
             e = stack_by_sym[key]
             e["weight"] += cs.weight
             e["span"] = fr.source

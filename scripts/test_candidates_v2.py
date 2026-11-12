@@ -80,6 +80,14 @@ ok("多帧 bootstrap 区间", mf_alloc.interval_basis == "bootstrap"
    and mf_alloc.score_interval_low <= mf_alloc.score <= mf_alloc.score_interval_high,
    mf_alloc)
 
+dup = bundle.model_copy(deep=True)
+dup.functions.append(FunctionStat(frame_idx=7,
+                                  symbol="Assembly-CSharp.dll!Foo::Update()",
+                                  calls=1, total_ms=1.0, source=span))
+dup_cs = generate_candidates(dup, project_root=proj)
+foo_fns = [c for c in dup_cs if c.kind == "function" and "Foo.Update" in c.root_cause]
+ok("符号归一不重复", len(foo_fns) == 1, [(c.kind, c.root_cause) for c in foo_fns])
+
 fp = FingerprintStore(tmp / "fp.db")
 fp.seed_builtin()
 with_fp = generate_candidates(bundle, g, project_root=proj, fingerprint_store=fp)
