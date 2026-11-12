@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core.candidates_v2 import generate_candidates  # noqa: E402
 from upi.core.evidence_graph import EvidenceGraph  # noqa: E402
-from upi.core.evidence_v2 import EvidenceBundleV2  # noqa: E402
+from upi.core.evidence_v2 import EvidenceBundleV2, clean_game_evidence  # noqa: E402
 
 
 def main() -> int:
@@ -24,7 +24,8 @@ def main() -> int:
     a = ap.parse_args()
 
     project = Path(a.project).resolve()
-    bundle = EvidenceBundleV2(**json.loads(Path(a.evidence).read_text(encoding="utf-8")))
+    raw = EvidenceBundleV2(**json.loads(Path(a.evidence).read_text(encoding="utf-8")))
+    bundle = clean_game_evidence(raw)
     g = EvidenceGraph.from_bundle(bundle, project)
     store = None
     if a.fingerprint_db:

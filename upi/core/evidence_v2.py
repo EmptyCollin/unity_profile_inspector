@@ -92,6 +92,43 @@ class BlindSpot(BaseModel):
     unlock: str = ""
 
 
+_EDITOR_MARKERS = (
+    "UnityEditor.", "EditorLoop", "GameView.", "HierarchyWindow",
+    "DockArea.", "UIElements.", "EditorApplication.",
+)
+
+
+def is_editor_symbol(symbol: str) -> bool:
+    return any(m in (symbol or "") for m in _EDITOR_MARKERS)
+
+
+def clean_game_evidence(bundle: EvidenceBundleV2) -> EvidenceBundleV2:
+    """剔除 Editor 发起的调用栈/分配；保留原始证据包不变。
+
+    真实游戏也可能被 Editor 驱动，所以不能悄悄删：丢失数量写 blindspot。
+    """
+    kept_cs = [cs for cs in bundle.callstacks
+               if not any(is_editor_symbol(f.symbol) for f in cs.frames)]
+    kept_alloc = [a for a in bundle.allocations
+                  if not any(is_editor_symbol(f.symbol) for f in a.stack)]
+    dropped_cs = len(bundle.callstacks) - len(kept_cs)
+    dropped_alloc = len(bundle.allocations) - len(kept_alloc)
+    b = bundle.model_copy(deep=True)
+    b.callstacks = kept_cs
+    b.allocations = kept_alloc
+    b.meta = dict(b.meta)
+    b.meta["editor_filter"] = {"dropped_callstacks": dropped_cs,
+                               "dropped_allocations": dropped_alloc}
+    if (dropped_cs or dropped_alloc) and not any(
+            x.code == "editor_contaminated" for x in b.blindspots):
+        b.blindspots.append(BlindSpot(
+            code="editor_contaminated",
+            reason=f"剔除了 {dropped_cs} 条 Editor 调用栈、{dropped_alloc} 个 Editor 分配点",
+            unlock="在 Play Mode 中由游戏输入驱动，而不是 Editor UI 驱动",
+        ))
+    return b
+
+
 class EvidenceBundleV2(BaseModel):
     """一次采集的完整证据包；空包必须带 blindspot，不允许静默空。"""
 

@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core.evidence_v2 import (AllocationSite, BlindSpot, CallStackFrame,  # noqa: E402
                                   CallStackSample, EvidenceBundleV2, EvidenceStore,
-                                  FunctionStat, RenderObjectStat, from_probe_events)
+                                  FunctionStat, RenderObjectStat, from_probe_events,
+                                  clean_game_evidence)
 from upi.core.source_index import SourceIndex  # noqa: E402
 
 PASS, FAIL = [], []
@@ -62,6 +63,16 @@ bundle = EvidenceBundleV2(
     allocations=[AllocationSite(frame_idx=10, bytes=4096, count=3,
                                 stack=[frame], source=s)],
 )
+editor_frame = CallStackFrame(symbol="UnityEditor.GameView.DoToolbarGUI")
+dirty = bundle.model_copy(deep=True)
+dirty.callstacks.append(CallStackSample(frame_idx=11, frames=[editor_frame]))
+dirty.allocations.append(AllocationSite(frame_idx=11, bytes=32, count=1,
+                                       stack=[editor_frame]))
+clean = clean_game_evidence(dirty)
+ok("Editor 调用栈被剔除", len(clean.callstacks) == 1 and len(clean.allocations) == 1)
+ok("Editor 剔除有 blindspot",
+   any(b.code == "editor_contaminated" for b in clean.blindspots))
+
 store = EvidenceStore(tmp / "runs")
 path = store.save(bundle)
 ok("证据落盘", path.exists())
