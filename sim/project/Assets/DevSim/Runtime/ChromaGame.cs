@@ -291,7 +291,6 @@ namespace DevSim
         [Serializable]
         private sealed class FeatureState
         {
-            public string case_id;
             public string project_path;
             public bool legacy_ui, legacy_material, legacy_match_alloc, sync_shop_load;
             public bool legacy_particle, legacy_canvas, legacy_texture, legacy_hint;
@@ -304,7 +303,6 @@ namespace DevSim
             {
                 var fs = new FeatureState
                 {
-                    case_id = c.case_id,
                     project_path = Path.GetDirectoryName(Application.dataPath).Replace("\\", "/"),
                     legacy_ui = c.legacy_ui,
                     legacy_material = c.legacy_material,
@@ -512,7 +510,7 @@ namespace DevSim
         {
             cfg = new CaseConfig
             {
-                case_id = "default", seed = 20261112,
+                seed = 20261112,
                 round_seconds = 30f, target_base = 600,
             };
             WriteFeatureState(cfg);

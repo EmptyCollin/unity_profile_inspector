@@ -9,7 +9,6 @@ namespace DevSim
     [Serializable]
     public sealed class CaseConfig
     {
-        public string case_id = "default";
         public int seed = 20261112;
         public bool legacy_ui = false;
         public bool legacy_material = false;

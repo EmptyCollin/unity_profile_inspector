@@ -47,7 +47,6 @@ namespace DevSim
         {
             var c = new CaseConfig
             {
-                case_id = id,
                 seed = 20261112 + System.Array.IndexOf(Ids, id),
                 start_tier = (id == "c18" || id == "c19" || id == "c24") ? 3 : 1,
                 round_seconds = 30f,
