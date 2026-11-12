@@ -1,0 +1,10 @@
+{
+  "case_id": "c01",
+  "overlay": [
+    "Assets/DevSim/Runtime/BoardModel.cs"
+  ],
+  "replay": "c01",
+  "oracle": "c01",
+  "base_hash": "1719125c6703e6ef",
+  "notes": "match allocation: per-call bool[N,N] and int[Colors]"
+}
