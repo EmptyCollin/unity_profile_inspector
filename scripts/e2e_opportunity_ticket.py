@@ -11,10 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from upi.agents import fixer  # noqa: E402
 from upi.core.opportunity import scan  # noqa: E402
 from upi.core.ticket import (TicketStore, approve,  # noqa: E402
                              build_opportunity_ticket)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
+from upi.tooling import snapshot as SN  # noqa: E402
 
 PROJECT = ROOT / "sim" / "project"
 SCENE = PROJECT / "Assets" / "Scenes" / "00_Bootstrap.unity"
@@ -59,6 +61,18 @@ def main() -> int:
            any(i.pattern_id == "sync_resources_load_on_shop"
                and i.plan is not None and i.permission_tier == "semi"
                and i.status == "needs_human" for i in ticket.items))
+
+        # sync 模板也用真实 apply+compile+rollback 验证（不依赖工单执行器）
+        sync_item = next((i for i in ticket.items
+                          if i.pattern_id == "sync_resources_load_on_shop"), None)
+        sp = sync_item.edit_plan() if sync_item else None
+        if sp is not None:
+            s2 = SN.snapshot("i7d-sync", PROJECT, SCENE, "devsim-i7d", root=ROOT)
+            rep3 = fixer.execute(sp, s2, project_path=PROJECT, scene_path=SCENE,
+                                 human_approved=True, approval_note="I7d sync E2E")
+            ok("sync apply+compile", rep3.get("status") == "applied", rep3)
+            SN.rollback(s2, PROJECT, SCENE)
+            git("tag", "-d", s2.git_ref)
         ok("工单 done", ticket.status == "done", ticket.status)
     finally:
         # 清掉本次 attempt tag + 回滚到原 HEAD
