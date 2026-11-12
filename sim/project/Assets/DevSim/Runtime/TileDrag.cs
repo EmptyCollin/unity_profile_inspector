@@ -10,6 +10,7 @@ namespace DevSim
         public ChromaGame game;
         public int row;
         public int col;
+        public int dragEvents;
         private RectTransform _rt;
         private Vector2 _start;
         private Vector2 _total;
@@ -26,6 +27,7 @@ namespace DevSim
             if (game == null || _rt == null) return;
             _start = _rt.anchoredPosition;
             _total = Vector2.zero;
+            dragEvents++;
             game.BeginDrag(row, col);
         }
 
@@ -33,6 +35,7 @@ namespace DevSim
         {
             if (game == null || _rt == null) return;
             _total += eventData.delta;
+            dragEvents++;
             float s = _canvas != null ? _canvas.scaleFactor : 1f;
             _rt.anchoredPosition = _start + _total / Mathf.Max(0.01f, s);
         }
@@ -40,6 +43,7 @@ namespace DevSim
         public void OnEndDrag(PointerEventData eventData)
         {
             if (game == null || _rt == null) return;
+            dragEvents++;
             if (_rt != null) _rt.anchoredPosition = _start;
             game.EndDrag(row, col, _total);
         }
