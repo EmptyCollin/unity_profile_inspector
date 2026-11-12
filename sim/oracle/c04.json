@@ -1,0 +1,16 @@
+{
+  "oracle_id": "c04",
+  "case_id": "c04",
+  "version": 1,
+  "expected_root_causes": [
+    "oversized shop payload load/allocation"
+  ],
+  "acceptable_files": [
+    "Assets/Resources/DevSim/payload_0.txt"
+  ],
+  "repair_assertions": [
+    "payload 大小回到基线",
+    "商店加载不劣化"
+  ],
+  "evaluator_only": true
+}

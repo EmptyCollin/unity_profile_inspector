@@ -51,6 +51,7 @@ python scripts/compose_cases.py --base sim/project \
 | c01 | BoardModel 每次匹配分配 | 整文件 overlay |
 | c02 | HUD 文本每次重建 | ChromaGame patch |
 | c03 | item label 每次重建 | ChromaGame patch（0 context） |
+| c04 | 商店 payload 放大 | 同路径资产 overlay + .meta |
 
 ## 验证边界
 

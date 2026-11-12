@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 CommandType = Literal[
     "start_game", "load_scene", "spawn", "rotate", "move", "zoom",
-    "swap", "wait", "stop",
+    "swap", "wait", "stop", "open_shop",
 ]
 
 

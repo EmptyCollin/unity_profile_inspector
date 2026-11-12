@@ -1,0 +1,24 @@
+{
+  "replay_id": "c04",
+  "base_hash": "e616c40678022314",
+  "commands": [
+    {
+      "type": "start_game"
+    },
+    {
+      "type": "wait",
+      "seconds": 1.0
+    },
+    {
+      "type": "open_shop"
+    },
+    {
+      "type": "wait",
+      "seconds": 2.0
+    },
+    {
+      "type": "stop"
+    }
+  ],
+  "notes": "open shop to load oversized payload"
+}
