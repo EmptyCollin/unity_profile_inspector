@@ -31,9 +31,10 @@
    - `_refs`/`defect_ref`/`fix_subject`/按行切片只允许测试；
    - 产品 planner 从当前源码+证据生成 diff，不得按 `profile_id` 分流。
 5. **工程选择/管理（UI）**
-   - `ProjectRegistry`：最近/收藏/状态/默认场景/质量档/历史；
+   - `ProjectRegistry` 是唯一事实源：路径/场景/质量档/replay/状态/历史；
    - 顶栏切换 + 管理页（新增/编辑/校验/归档/删除）；
-   - 活动工程绑定 `project_id`；运行中禁止切换；失效 fail-closed，不回退夹具。
+   - 活动工程绑定 `project_id`；运行中禁止切换；失效 fail-closed，不回退夹具；
+   - **不保留兼容性**：旧 `projects/*.json`、旧 API/CLI 可直接替换；不做迁移层/双读/fallback。
 6. **I7 计划**：I7b 工程管理优先，I7c 机会发现，I7d 通用 planner，
    I7e GPU/ANIM/LOAD + 负对照，I7f 真实工程。
 

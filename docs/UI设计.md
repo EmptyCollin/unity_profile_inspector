@@ -54,8 +54,8 @@
 ### 工程（Projects）
 - 列表：显示名、路径、Unity 版本、场景、状态（有效/警告/失效）、最近使用、
   tags、最近 run；支持搜索/固定。
-- 新增：选目录 → 读 Unity 版本/git root → 选 profile/默认场景/质量档 →
-  **校验** → 保存；支持从现有 `projects/*.json` 导入。
+- 新增：选目录 → 读 Unity 版本/git root → 选默认场景/质量档/replay 命令 →
+  **校验** → 保存；**不导入旧 `projects/*.json`（不保留兼容）**。
 - 编辑/复制/归档/删除：有历史 run 只允许归档；物理删除二次确认且不删文件。
 - 校验：路径、git root、场景、profile、scripts 是否 blocked、探针状态；
   失效工程保留历史但禁止运行。

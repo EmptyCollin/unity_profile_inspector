@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.17
+# DESIGN.md — 自动化性能优化管线（最小集）v0.18
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -10,7 +10,7 @@
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
 > v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
-> v0.17 变更（2026-11-12，**产品目标修正，权威**）：① 明确区分 **Issue（越界/回归）** 与 **Opportunity（相对可达参考的差距）**，工具的目标是逼近可达状态，不是消灭“CLEAN 理想态”；② **CLEAN 不再作为产品目标/负对照**，只允许作为测试装置；噪声来自同场景重复运行，合格线来自 floor/budget，机会参考来自 peer/history/static/algorithmic；③ **去夹具化**：`_refs`、`defect_ref`、`fix_subject`、按行切片模板只允许测试使用，产品 planner 必须从当前源码+证据生成 diff，禁止 profile-id 门；④ 新增 **工程选择与管理**（UI 切换、历史、校验、归档、快速设置），活动工程显式绑定所有操作；⑤ 新增 I7 计划（见 §14.9~§14.11 与 `docs/迭代计划.md`）。
+> v0.18 变更（2026-11-12）：**不保留兼容性，功能优先**。① 工具尚无使用者/历史包袱，旧 `projects/*.json`、旧 API/CLI、旧 profile 字段不做兼容读取、不做迁移层、不双读、不 fallback；② `ProjectRegistry` 成为工程事实源，旧 profile 只允许作为测试夹具；③ 明确“planner 从当前源码+证据生成 diff，禁止按 `profile_id` 分流”的人话解释；④ 安全约束（快照/审批/fail-closed/不回退夹具）保留，它们不是兼容性。
 > v0.15 变更（2026-11-11）：**渲染计数数据源改判（#27/#29，exp5/exp6/exp7 + 5298 行句柄全量表）**。① "注入读渲染计数恒 0"根因改判为句柄名口径错误（真名带 `Count` 后缀）+ `UI Toolkit` 同名遮蔽；双条件定位（名字==目标 且 类目==Render）修复后 A2 逐帧注入与轮询在 F-GPU-01 比值 1.00（n=300）——D1"不写插件 + 注入常驻采样器"恢复成立。② G16 重写：Draw/SetPass/Triangles/Vertices 双源可用（A2 主源 + 1Hz 轮询哨兵交叉核对，量级不符或注册失败即 fail-loud 拒收）；无头渲染恒 0 与 Play Mode 约束**维持不变**；batches 因 Render 类目无汇总句柄仍轮询单源。③ G19：渲染计数逐笔 spike detector 解禁；GPU 发作口径（A4 gpuFrameTime）与逐笔归因（转人工）**未被推翻**。④ `sampler_v3`→v3.1：Targets 全换实测真名 + 双条件定位 + 定位不到拒装报 skipped；`Mono Used Memory`/`Update Time`/`Frame Time` 短名经句柄表逐行证实不存在，移出 Targets 并记口径归属。⑤ G20 清单新增第 5 项（batches 注入等价性无从对表），item1 范围收窄为仅 GPU 归因，并封堵旧"detector 注册即 unlocked"的虚报检出入口（I1）。⑥ 换数据源 ⇒ `data_tier` A→A2 变更，既有标定/bundle 按 G7 不可比，#30 重标定是条文义务。⑦ exp7 作废留档：`QualitySettings.enableDynamicBatching` 在 Unity 6000 不存在（eval 内层 CS0117），同批撞出"eval 实验必须查内层 diagnostics，否则把编译失败当活代码"的方法学教训（§2.2.1 事实 12）。
 > v0.14 变更（2026-11-09）：M6 / M6' / M7 统计与报告层落地。① 新增 §7.1 聚合底座实装（SQLite 六表增量幂等 + G13 untraced 剔除 + `upi stats`）；② §7.3 A 形态落地为 `upi report` 单文件 HTML 七视图，G20 不可检出清单与检出率**同屏渲染**（代码层面保证拆不开）；③ §8.7 体检表六项改为可计算并已接进升维提案——阈值**从 `knowledge._CHECKLIST` 的判定函数反查**，报告与提案共用一份口径；实测 3 项达标、3 项受结构性样本不足限制；④ §8.1 的 tuning/holdout 隔离从"靠人工自觉"落为强制校验闸 `scripts/check_fixture_split.py`（S1/S2/S3 三条检查，并用变异测试证明其拦截力）。四处判据修正均由本轮实测撞出：聚合层**不得跨文件按时间戳猜配对**（run_id 是开始时刻、日志 ts 是结束时刻，实测只配上 1/13，会把有结论的轮次写成"0 检出"的静默轮 = 违反 B7）⇒ 改为只读轮次自身 `state.json`；未评估盲区只存在于**最后一条 `kind=verify` 记录**（顶层 `verdict.unevaluated` 为空）；检出率分母须排除缺 `detector` 字段的早期观测并显式报排除数（否则算出假 0）；留出泄漏判据以"可回溯至 CLEAN 重算"为主、"等于留出中位"仅作升级——单看后者会对跨夹具同值指标（gc_alloc_per_frame/triangles/vertices 等实测同值）产生假阳性。
 > v0.13 变更（2026-11-09）：真机全链实测 + 独立运行形态。新增 §2.5 运行形态（常驻守护 / 控制台 UI / 手动开关采样 / 优雅停止）；记忆体守护口径改两侧各自 fresh post-GC，不响应 GC 者（含同物理量双路径别名）降级未评估盲区；G11 预算护栏改节点感知（attempts 只拦 fix 入口、计数点在 verify 出判定处、作废崩溃不烧配额）；真实模型端到端归因首次实跑，保留通路实测 verdict=resolved；AGENTS 同步至 v0.8（§1.5 双分支 / G11 / G20 第四项）。
@@ -855,8 +855,7 @@ ProjectEntry:
   display_name
   project_path, git_root
   unity_version
-  profile_id
-  default_scene, quality_tier, replay_mode
+  default_scene, quality_tier, replay_mode, replay_command
   status ∈ active|archived|invalid
   tags[], notes
   last_used_at, created_at
@@ -869,18 +868,21 @@ ProjectRegistry (projects/registry.json):
   recent[]  (最近使用，最多 N)
 ```
 
-- `projects/<id>.json`（现有 profile）仍是管线读取的工程档案；registry 是 UI 索引/元数据，
-  不复制 profile 的字段真相；
-- 若 registry 不存在：从现有 `projects/*.json` 迁移生成，`active_project_id` 取最近修改；
-- 迁移必须可逆：不删除旧 profile；找不到工程时 fail-closed，**不得回退到夹具**。
+**Registry 是唯一事实源**：
+
+- 工程路径、默认场景、质量档、replay 模式、状态、历史全部在 registry；
+- 不再读取/合并 `projects/*.json`，不做旧格式迁移、不双读、不 fallback；
+- 旧 `projects/*.json` 只允许作为**测试夹具**，不进入运行时；
+- 读写 API 可以随时改；没有用户，不需要兼容旧 API/CLI；
+- **安全约束保留**：失效工程 fail-closed，禁止回退夹具；有历史 run 只允许归档。
 
 #### 14.10.3 UI 交互
 
 - **顶栏工程切换器**：当前工程名 + 状态下拉；最近工程置顶；可搜索/固定；
 - **工程管理页**：
-  - 新增：选目录 → 读 Unity 版本/git root → 选 profile/场景/质量档 → 校验 → 保存；
+  - 新增：选目录 → 读 Unity 版本/git root → 选默认场景/质量档/replay 命令 → 校验 → 保存；
   - 编辑/复制/归档/删除（有历史 run 只允许归档，物理删除需二次确认）；
-  - 校验：路径、git root、场景存在、profile 可解析、scripts 是否 blocked、探针状态；
+  - 校验：路径、git root、场景存在、scripts 是否 blocked、探针状态；
   - 打开工程目录；显示最近 run/工单/回归套件；
 - **快速开始**：选工程后自动带出上次的 scene/quality/replay；一键“开始巡检/跑基线”；
 - **活动工程绑定**：所有探针、建单、执行、回归、报告都带 `project_id`；
@@ -906,6 +908,7 @@ DELETE /api/projects/{id}          # 有历史则拒绝，提示归档
 
 #### 14.10.5 管理边界
 
+- **不保留兼容性**：旧 profile/API/CLI 可直接删除；不做迁移层、双读、fallback；
 - 不替用户移动/删除工程文件；只管理 registry 条目；
 - 路径失效 ⇒ `invalid`，保留历史但禁止运行；
 - 同一路径重复添加 ⇒ 合并提示，不产生两个 id；
@@ -917,7 +920,7 @@ DELETE /api/projects/{id}          # 有历史则拒绝，提示归档
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | **I7a** | 本设计修正：Issue/Opportunity 分离、CLEAN 退出产品、去夹具化边界 | 文档评审通过；旧 verified 口径降级 |
-| **I7b** | `ProjectRegistry` + 顶栏切换器 + 管理页 + 迁移 | 无 JSON 手编即可新增/切换/恢复；切换后所有操作绑定 project_id |
+| **I7b** | `ProjectRegistry` + 顶栏切换器 + 管理页 | 无 JSON 手编即可新增/切换/恢复；不保留旧 profile/API 兼容 |
 | **I7c** | `OpportunityFinding` + floor/budget/static 检测源 | 无 clean 也能产出机会；无参考则 insufficient_evidence |
 | **I7d** | 通用 planner：从当前源码生成 diff，移除 profile-id 门与按行切片 | 未见工程可生成/拒绝；测试夹具 oracle 只留在测试 |
 | **I7e** | GPU/ANIM/LOAD 机会 E2E + 负对照 | 不再只测 CPU；无机会工程不硬造 plan；zero-to-zero=unassessed |
