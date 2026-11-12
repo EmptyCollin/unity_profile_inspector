@@ -1,0 +1,16 @@
+{
+  "oracle_id": "c03",
+  "case_id": "c03",
+  "version": 1,
+  "expected_root_causes": [
+    "ChromaGame.RefreshItemLabelsBody 每次重建库存文本"
+  ],
+  "acceptable_files": [
+    "Assets/DevSim/Runtime/ChromaGame.cs"
+  ],
+  "repair_assertions": [
+    "库存文本不变",
+    "数量不变时不重复拼字符串"
+  ],
+  "evaluator_only": true
+}
