@@ -917,6 +917,10 @@ DELETE /api/projects/{id}          # 有历史则拒绝，提示归档
 
 ### 14.11 I7 计划（去夹具化 + 工程管理）
 
+> **2026-11-12 I8 修订**：`testlab` 双工程代理取消，**devsim 是唯一开发阶段测试基座**；
+> replay 从“配置表改运行分支”改为**项目指令序列**；oracle/replay 归评估者持有，
+> replay 对 UPI 工具可见、对 Agent 隔离；详见 `docs/通用诊断方案.md`。
+
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | **I7a** | 本设计修正：Issue/Opportunity 分离、CLEAN 退出产品、去夹具化边界 | 文档评审通过；旧 verified 口径降级 |
@@ -1133,6 +1137,10 @@ sim/
 不是把多个缺陷硬塞进一个文件。case 数量后续可扩到 30+。
 
 #### 14.12.6 replay 入口
+
+> **已被 I8 设计取代**：不再用 `--case` 配置表改运行逻辑；改为评估者持有的项目命令序列
+> （例：`start_game / load_scene / spawn_npc / camera_orbit / move_forward / camera_zoom`）。
+> UPI 工具执行 replay；Agent 不读 replay/oracle。详见 `docs/通用诊断方案.md` §7.3~§7.5。
 
 ```text
 python -m upi dev devsim-replay --project sim/project --case c04
