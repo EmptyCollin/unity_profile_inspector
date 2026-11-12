@@ -30,8 +30,9 @@ def main() -> int:
     ok("材质是 semi/needs_human",
        by["per_instance_material"].permission_tier == "semi"
        and by["per_instance_material"].status == "needs_human")
-    ok("sync 无 plan/needs_human",
-       by["sync_resources_load_on_shop"].plan is None
+    ok("sync 有 plan 但 semi/needs_human",
+       by["sync_resources_load_on_shop"].plan is not None
+       and by["sync_resources_load_on_shop"].permission_tier == "semi"
        and by["sync_resources_load_on_shop"].status == "needs_human")
     ok("工单 approval token 非空", len(t.approve_token) == 4, t.approve_token)
 

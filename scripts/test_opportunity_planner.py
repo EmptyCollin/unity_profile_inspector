@@ -39,20 +39,24 @@ def main() -> int:
        plan2.permission_tier if plan2 else None)
 
     sync = by.get("sync_resources_load_on_shop")
-    ok("同步加载无通用模板→None", sync is not None and plan_for(sync, PROJECT) is None)
+    ps = plan_for(sync, PROJECT) if sync else None
+    ok("sync 有异步模板（semi）", ps is not None and ps.permission_tier == "semi",
+       ps.permission_tier if ps else None)
 
     # 在当前源码的临时副本上验证 find/replace，不碰真实工程
-    if plan is not None:
+    for p, label in ((plan, "UI"), (ps, "sync")):
+        if p is None:
+            continue
         tmp = Path(tempfile.mkdtemp(prefix="upi_plan_"))
         try:
-            rel = plan.diffs[0]["file"]
+            rel = p.diffs[0]["file"]
             dst = tmp / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(PROJECT / rel, dst)
-            apply_diffs(plan, root=tmp)
+            apply_diffs(p, root=tmp)
             text = dst.read_text(encoding="utf-8")
-            ok("diff 已应用", plan.diffs[0]["find"] not in text
-               and plan.diffs[0]["replace"] in text)
+            ok(f"{label} diff 已应用", p.diffs[0]["find"] not in text
+               and p.diffs[0]["replace"] in text)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

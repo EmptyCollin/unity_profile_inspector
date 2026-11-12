@@ -55,8 +55,9 @@ def main() -> int:
            any(i.permission_tier == "semi" and i.status == "needs_human"
                for i in ticket.items),
            [(i.pattern_id, i.permission_tier, i.status) for i in ticket.items])
-        ok("无 plan 项 needs_human",
+        ok("sync semi 项 needs_human",
            any(i.pattern_id == "sync_resources_load_on_shop"
+               and i.plan is not None and i.permission_tier == "semi"
                and i.status == "needs_human" for i in ticket.items))
         ok("工单 done", ticket.status == "done", ticket.status)
     finally:

@@ -53,6 +53,32 @@ SPECS: dict[str, Spec] = {
         tier="auto",
         invariants=("匹配结果仍走 FindMatches/HasMatch",),
     ),
+    "sync_resources_load_on_shop": Spec(
+        find='''            if (cfg.sync_shop_load)
+            {
+                // 故意保留同步等待路径：case 用它测“打开商店卡主线程”
+                int ok = 0;
+                for (int i = 0; i < 24; i++)
+                {
+                    var h = Addressables.LoadAssetAsync<TextAsset>("devsim/payload_" + (i % 8));
+                    h.WaitForCompletion();
+                    if (h.Status == AsyncOperationStatus.Succeeded) ok++;
+                    Addressables.Release(h);
+                }
+                Debug.Log("DevSim sync Addressables: " + ok + "/24");
+            }
+            else
+            {
+                StartCoroutine(LoadShopAsync());
+            }
+''',
+        replace="            StartCoroutine(LoadShopAsync());\n",
+        why="商店改为异步 Addressables，移除主线程 WaitForCompletion",
+        playbook="PB-OP-ASYNC-SHOP",
+        side_effect="may_affect_perception",
+        tier="semi",
+        invariants=("商店仍可打开", "Addressables 句柄仍逐个 Release"),
+    ),
     "per_clear_particle_instantiate": Spec(
         find="            StartCoroutine(FadeFx(img));\n",
         replace="",
