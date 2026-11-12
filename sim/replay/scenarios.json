@@ -14,7 +14,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c02": {
     "case_id": "c02",
@@ -31,7 +40,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c03": {
     "case_id": "c03",
@@ -48,14 +66,23 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c04": {
     "case_id": "c04",
     "seed": 20261116,
     "start_tier": 1,
     "autoplay": true,
-    "round_seconds": 0.5,
+    "round_seconds": 0.2,
     "target_base": -100000,
     "legacy_ui": false,
     "legacy_material": false,
@@ -65,7 +92,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 0.2,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 0.05,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c05": {
     "case_id": "c05",
@@ -82,7 +118,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c06": {
     "case_id": "c06",
@@ -99,7 +144,16 @@
     "legacy_canvas": true,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c07": {
     "case_id": "c07",
@@ -116,7 +170,16 @@
     "legacy_canvas": false,
     "legacy_texture": true,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c08": {
     "case_id": "c08",
@@ -133,7 +196,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": true,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c09": {
     "case_id": "c09",
@@ -150,7 +222,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c10": {
     "case_id": "c10",
@@ -167,7 +248,16 @@
     "legacy_canvas": false,
     "legacy_texture": true,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c11": {
     "case_id": "c11",
@@ -184,7 +274,16 @@
     "legacy_canvas": true,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c12": {
     "case_id": "c12",
@@ -201,7 +300,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c13": {
     "case_id": "c13",
@@ -218,7 +326,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": true,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c14": {
     "case_id": "c14",
@@ -235,7 +352,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c15": {
     "case_id": "c15",
@@ -252,7 +378,16 @@
     "legacy_canvas": true,
     "legacy_texture": true,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c16": {
     "case_id": "c16",
@@ -269,7 +404,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c17": {
     "case_id": "c17",
@@ -286,7 +430,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": true,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c18": {
     "case_id": "c18",
@@ -303,7 +456,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c19": {
     "case_id": "c19",
@@ -320,7 +482,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c20": {
     "case_id": "c20",
@@ -337,7 +508,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c21": {
     "case_id": "c21",
@@ -354,7 +534,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c22": {
     "case_id": "c22",
@@ -371,7 +560,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": false
+    "legacy_anim": false,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c23": {
     "case_id": "c23",
@@ -388,7 +586,16 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": true
+    "legacy_anim": true,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   },
   "c24": {
     "case_id": "c24",
@@ -405,6 +612,15 @@
     "legacy_canvas": false,
     "legacy_texture": false,
     "legacy_hint": false,
-    "legacy_anim": true
+    "legacy_anim": true,
+    "round_seconds_step": 0.0,
+    "round_seconds_min": 8.0,
+    "target_step": 300,
+    "board_start": 10,
+    "board_min": 6,
+    "board_step_rounds": 2,
+    "preview_seconds": 2.5,
+    "shop_every": 3,
+    "shop_refresh_cost": 40
   }
 }

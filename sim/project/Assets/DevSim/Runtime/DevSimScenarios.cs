@@ -52,6 +52,12 @@ namespace DevSim
                 start_tier = (id == "c18" || id == "c19" || id == "c24") ? 3 : 1,
                 round_seconds = 30f,
                 target_base = 600,
+                target_step = 300,
+                board_start = 10,
+                board_min = 6,
+                board_step_rounds = 2,
+                shop_every = 3,
+                preview_seconds = 2.5f,
                 autoplay = false,
             };
             if (Flags.TryGetValue(id, out var flags))
