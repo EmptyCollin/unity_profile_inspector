@@ -182,6 +182,10 @@ def apply_to_base() -> dict:
     if st.get("failed"):
         restore_base()
         return {"ok": False, "error": "编译失败，已自动恢复 base", "compile": st}
+    ready = _wait_editor_ready(120)
+    if not ready.get("ok"):
+        return {"ok": False, "error": "应用后编辑器未就绪", "compile": st,
+                "editor": ready.get("last")}
     return {"ok": True, "touched": touched, "compile": st}
 
 
@@ -222,6 +226,22 @@ def _in_play() -> str:
     return ""
 
 
+def _wait_editor_ready(timeout: float = 120.0) -> dict:
+    """等编辑器结束编译/域重载。apply 一落盘就会触发重编译，此时 pipeline 会短暂失联。"""
+    deadline = time.time() + timeout
+    last: dict = {}
+    while time.time() < deadline:
+        d = unity("editor status")
+        if d.get("success"):
+            s = ((d.get("data") or {}).get("result") or {})
+            last = s
+            # Play Mode 下 status 会是 playing 而不是 ready；只以编译/域重载为阻塞判据。
+            if not s.get("compiling") and not s.get("domainReloadInProgress"):
+                return {"ok": True, **s}
+        time.sleep(1)
+    return {"ok": False, "error": "编辑器未就绪（编译或域重载未完成）", "last": last}
+
+
 def _auto_tick(enabled: bool = True) -> dict:
     """失焦时保持编辑器出帧；会话级设置，不做持久化残留。"""
     return unity("editor set_auto_tick", "--enabled", "true" if enabled else "false",
@@ -252,6 +272,7 @@ def _editor_mem() -> dict:
 
 def _ensure_play(wait: float = 25.0) -> dict:
     """需要时自动进 Play Mode；超时如实失败，不假设已进入。"""
+    _wait_editor_ready(90)
     es = editor_status()
     if not es.get("ok"):
         return {"ok": False, "error": "Unity pipeline 不可达", "editor": es}
@@ -297,35 +318,108 @@ def run_lab_replay() -> dict:
 
 # ─────────────────────────── 证据采集 ───────────────────────────
 
-def _run_probe_file(path: Path, ev: Path) -> dict:
-    """跑一个取证 .cs，并显式检查 eval 的外层/内层结果（失败必须原样报错）。"""
+PROFILER_OFF_CODE = (
+    "UnityEngine.Profiling.Profiler.enableAllocationCallstacks = false;"
+    "UnityEditorInternal.ProfilerDriver.deepProfiling = false;"
+    "UnityEditorInternal.ProfilerDriver.enabled = false;"
+    "UnityEngine.Profiling.Profiler.enabled = false;"
+    "UnityEditorInternal.ProfilerDriver.ClearAllFrames();"
+    "return \"off\";")
+
+
+PROFILER_ON_DEEP_CODE = (
+    "UnityEngine.Profiling.Profiler.enabled = true;"
+    "UnityEditorInternal.ProfilerDriver.enabled = true;"
+    "UnityEditorInternal.ProfilerDriver.profileEditor = true;"
+    "UnityEditorInternal.ProfilerDriver.deepProfiling = true;"
+    "UnityEngine.Profiling.Profiler.enableAllocationCallstacks = true;"
+    "return \"on\";")
+
+PROFILER_ON_SHALLOW_CODE = (
+    "UnityEngine.Profiling.Profiler.enabled = true;"
+    "UnityEditorInternal.ProfilerDriver.enabled = true;"
+    "UnityEditorInternal.ProfilerDriver.profileEditor = true;"
+    "UnityEditorInternal.ProfilerDriver.deepProfiling = false;"
+    "UnityEngine.Profiling.Profiler.enableAllocationCallstacks = false;"
+    "return \"on\";")
+
+
+def _force_profiler_off() -> dict:
+    """无条件收尾：无论取证成功、超时还是抛异常，都不允许 profiler 留在开启态。
+
+    单次深档采集若在回调里被打断（域重载/主线程被占），探针的 finally 不会执行，
+    实测可以把编辑器内存推到 17GB 并让 pipeline 失联 —— 这一层是硬兜底。
+    """
     try:
-        ev.unlink()
-    except OSError:
-        pass
-    p = subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
-                        "--file", str(path), "--format", "json"],
-                       capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=120)
-    try:
-        d = json.loads(p.stdout)
+        r = _eval(PROFILER_OFF_CODE, timeout=30)
     except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"取证 eval 输出不是 JSON：{(p.stdout or p.stderr)[-300:]}") from e
-    if not d.get("success"):
-        raise RuntimeError("Unity 拒绝取证 eval：" +
-                           json.dumps(d.get("errors"), ensure_ascii=False)[:300])
-    inner = ((d.get("data") or {}).get("result") or {})
-    if not inner.get("success", True):
-        raise RuntimeError("取证脚本内部失败：" +
-                           json.dumps(inner.get("errors") or inner.get("result"),
-                                      ensure_ascii=False)[:300])
-    deadline = time.time() + 15
-    while time.time() < deadline and not ev.exists():
-        time.sleep(0.2)
-    if not ev.exists():
-        raise RuntimeError("取证文件未落盘：" + str(ev) +
-                           "（Unity 可能已退出，见 sim/project/Logs/Editor.log）")
-    return inner
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": bool(r.get("ok")), "result": r.get("result"),
+            "errors": r.get("errors")}
+
+
+def _emergency_stop_if_runaway() -> dict:
+    """break-glass：编辑器被主线程卡死且内存失控时，按确认 PID 停掉，保护桌面。"""
+    m = _editor_mem()
+    mb = m.get("mb") or 0
+    pid = m.get("ProcessId")
+    if mb >= 9000 and pid:
+        subprocess.run(["powershell", "-NoProfile", "-Command",
+                        f"Stop-Process -Id {int(pid)} -Force"],
+                       capture_output=True, text=True, timeout=60)
+        return {"killed": True, "pid": pid, "mb": mb}
+    return {"killed": False, "pid": pid, "mb": mb}
+
+
+def _run_probe_file(path: Path, ev: Path) -> dict:
+    """跑一个取证 .cs，并显式检查 eval 的外层/内层结果；收尾必关 profiler。"""
+    try:
+        try:
+            ev.unlink()
+        except OSError:
+            pass
+        p = subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                            "--file", str(path), "--timeout", "90", "--format", "json"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=120)
+        try:
+            d = json.loads(p.stdout)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                f"取证 eval 输出不是 JSON：{(p.stdout or p.stderr)[-300:]}") from e
+        if not d.get("success"):
+            raise RuntimeError("Unity 拒绝取证 eval：" +
+                               json.dumps(d.get("errors"), ensure_ascii=False)[:300])
+        inner = ((d.get("data") or {}).get("result") or {})
+        if not inner.get("success", True):
+            raise RuntimeError("取证脚本内部失败：" +
+                               json.dumps(inner.get("errors") or inner.get("result"),
+                                          ensure_ascii=False)[:300])
+        # 采集脚本自带 4s 主线程预算；这里留足 eval+落盘余量。
+        deadline = time.time() + 45
+        while time.time() < deadline and not ev.exists():
+            time.sleep(0.2)
+        if not ev.exists():
+            raise RuntimeError("取证文件未落盘：" + str(ev) +
+                               "（Unity 可能已退出，见 sim/project/Logs/Editor.log）")
+        return inner
+    finally:
+        off = _force_profiler_off()
+        if not off.get("ok"):
+            stop = _emergency_stop_if_runaway()
+            raise RuntimeError(
+                "profiler 收尾失败（主线程可能被取证占住）；"
+                + (f"编辑器内存 {stop['mb']}MB 已按 PID {stop['pid']} 强制停止。"
+                   if stop.get("killed") else
+                   "编辑器仍可用，但本次取证作废。") +
+                json.dumps(off.get("errors") or off.get("error"), ensure_ascii=False)[:160])
+        m = _editor_mem()
+        if (m.get("mb") or 0) > 6000:
+            stop = _emergency_stop_if_runaway()
+            raise RuntimeError(
+                f"取证后编辑器占用 {m['mb']}MB，超出安全线；"
+                + (f"已按 PID {stop['pid']} 强制停止。" if stop.get("killed")
+                   else "请先重启编辑器再做下一次取证。"))
 
 
 def _capture_once(tag: str, limit: int = 8) -> list[dict]:
@@ -445,6 +539,11 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
     """只采当前目标需要的窗口，并只保留该目标作用域内的候选。"""
     if not case_ids:
         return {"ok": False, "error": "先选择 case"}
+    # 本次采集开始时先作废旧证据：采集失败后不允许 diagnose 读到上一轮的候选。
+    try:
+        DIAG.unlink()
+    except OSError:
+        pass
     play = _ensure_play()
     if not play.get("ok"):
         return {"ok": False, "error": play.get("error"), "editor": play.get("editor")}
@@ -485,11 +584,19 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
                               "phase": st.get("phase"), "score": st.get("score")}
 
     if "board" in windows:
-        forced = _force_board_resolve()
+        # 板子取证器自己触发 resolve（外部触发会因 eval 延迟错过那一帧）；
+        # 这里只负责在 resolve 之前把 profiler 打开。
+        _force_profiler_off()
+        on = _eval(PROFILER_ON_SHALLOW_CODE, timeout=30)
+        if not on.get("ok"):
+            raise RuntimeError("打开 profiler 失败：" +
+                               json.dumps(on.get("errors"), ensure_ascii=False)[:200])
+        # 深档开启会重启采样流；不等几帧，探针看到的历史只有 0~1 帧（实测）。
+        time.sleep(0.5)
         board = _capture_board(CAPTURE_LIMIT)
         raw += board
-        window_info["board"] = {"candidates": len(board),
-                                "resolve": _parse_state(forced).get("totalCleared")}
+        st = _parse_state(_hud_ready())
+        window_info["board"] = {"candidates": len(board), "phase": st.get("phase")}
 
     if "shop" in windows:
         opened = _open_shop()
@@ -507,6 +614,10 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
            "pid": mem1.get("ProcessId") or mem0.get("ProcessId")}
     if mem.get("before_mb") and mem.get("after_mb"):
         mem["delta_mb"] = mem["after_mb"] - mem["before_mb"]
+    if (mem1.get("mb") or 0) > 6000:
+        raise RuntimeError(
+            f"取证后编辑器占用 {mem1['mb']}MB：已强制关闭 profiler，"
+            "请先重启编辑器再做下一次取证")
     scoped_union: list[dict] = []
     per_case = []
     for cid, m in zip(case_ids, metas):

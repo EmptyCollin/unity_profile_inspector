@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 import urllib.error
@@ -42,14 +43,16 @@ def call(path: str, body: dict | None = None, timeout: int = 600) -> dict:
 
 
 def step(report: dict, name: str, path: str, body: dict | None = None,
-         timeout: int = 600) -> dict:
+         timeout: int = 600, expect_fail: bool = False) -> dict:
     t0 = time.time()
     r = call(path, body, timeout)
     ms = int((time.time() - t0) * 1000)
-    report["steps"].append({"step": name, "ms": ms, "ok": bool(r.get("ok")),
+    good = (not r.get("ok")) if expect_fail else bool(r.get("ok"))
+    report["steps"].append({"step": name, "ms": ms, "ok": good,
+                            "expected_fail": expect_fail,
                             "path": path, "response": r})
-    print(f"[{name}] {'ok' if r.get('ok') else 'FAIL'} {ms}ms"
-          + ("" if r.get("ok") else " :: " + str(r.get("error"))[:160]))
+    print(f"[{name}] {'ok' if good else 'FAIL'} {ms}ms"
+          + ("" if good else " :: " + str(r.get("error"))[:160]))
     return r
 
 
@@ -74,13 +77,8 @@ def scenario_b(report: dict) -> None:
     step(report, "diagnose", "/api/diagnose", {"mode": "diagnostic"}, timeout=300)
     step(report, "repair_plans", "/api/repair_plans", {"mode": "diagnostic"})
     rp2 = step(report, "repair", "/api/repair", {"mode": "diagnostic"}, timeout=600)
-    if rp2.get("ok"):
-        step(report, "replay_after_fix", "/api/replay", {"mode": "diagnostic"})
-        cap2 = step(report, "capture_after_fix", "/api/capture",
-                    {"mode": "diagnostic", "cases": cases})
-        if cap2.get("ok"):
-            (OUT / "b_capture_after.json").write_text(
-                json.dumps(cap2, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not rp2.get("ok"):
+        print("  repair 未成功，跳过修后复采")
     step(report, "restore", "/api/restore", {"mode": "diagnostic"})
 
 
@@ -143,7 +141,8 @@ def scenario_d(report: dict) -> None:
     for name, path in (("combo_capture_rejected", "/api/capture"),
                        ("combo_diagnose_rejected", "/api/diagnose"),
                        ("combo_repair_rejected", "/api/repair")):
-        r = step(report, name, path, {"mode": "combo", "cases": cases})
+        r = step(report, name, path, {"mode": "combo", "cases": cases},
+                 expect_fail=True)
         report.setdefault("guards", []).append(
             {"step": name, "rejected": not r.get("ok"), "error": r.get("error")})
     step(report, "restore", "/api/restore", {"mode": "combo"})
@@ -151,6 +150,13 @@ def scenario_d(report: dict) -> None:
 
 
 SCENARIOS = {"a": scenario_a, "b": scenario_b, "c": scenario_c, "d": scenario_d}
+
+
+def _dirty() -> bool:
+    p = subprocess.run(["git", "status", "--porcelain", "--", "sim/project"],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    return bool((p.stdout or "").strip())
 
 
 def main() -> int:
@@ -166,6 +172,9 @@ def main() -> int:
     try:
         SCENARIOS[a.scenario](report)
     finally:
+        # 中途失败也必须把 base 恢复，不能让 sim/project 脏着离开
+        if _dirty():
+            step(report, "restore_after_failure", "/api/restore", {"mode": "diagnostic"})
         report["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         report["all_ok"] = all(s["ok"] for s in report["steps"])
         OUT.mkdir(parents=True, exist_ok=True)

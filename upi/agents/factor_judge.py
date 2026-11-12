@@ -124,13 +124,23 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
     )
     if eff.get("json_mode"):
         kwargs["response_format"] = {"type": "json_object"}
-    resp = cli.chat.completions.create(**kwargs)
-
-    raw_text = (resp.choices[0].message.content or "").strip()
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise JudgeError(f"模型输出非 JSON（{exc.msg}）；前 120 字：{raw_text[:120]}") from exc
+    raw_text = ""
+    data = None
+    parse_exc = None
+    # 模型偶发返回被截断/少逗号的 JSON：重试一次即可，不改变任何判定口径。
+    for _attempt in range(2):
+        resp = cli.chat.completions.create(**kwargs)
+        raw_text = (resp.choices[0].message.content or "").strip()
+        try:
+            data = json.loads(raw_text)
+            break
+        except json.JSONDecodeError as exc:
+            parse_exc = exc
+            data = None
+    if data is None:
+        raise JudgeError(
+            f"模型输出非 JSON（{parse_exc.msg if parse_exc else 'unknown'}）；"
+            f"前 120 字：{raw_text[:120]}") from parse_exc
     if not isinstance(data, dict):
         raise JudgeError("模型输出 JSON 但非对象")
 

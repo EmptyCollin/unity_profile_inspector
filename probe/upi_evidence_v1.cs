@@ -2,6 +2,7 @@
 // 通过 `unity command script eval --file` 注入；不改被测工程。
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using UnityEditor;
@@ -66,7 +67,7 @@ public static class UpiEvidenceV1
         // 按“帧”等待，而不是按 update tick：进入 Play Mode 后 profiler 历史很短，
         // 60 tick(~30ms) 内可能连一帧都没有，最后 4 帧会完全错过 10Hz 的 HUD 更新。
         int now = ProfilerDriver.lastFrameIndex;
-        bool enoughFrames = now - _startFrame >= 10;
+        bool enoughFrames = now - _startFrame >= 2;
         bool timedOut = (DateTime.UtcNow - _startUtc).TotalSeconds > 4.0;
         if (!enoughFrames && !timedOut) return;
         _done = true;
@@ -101,8 +102,12 @@ public static class UpiEvidenceV1
 
     static void Capture()
     {
+        // 硬预算：主线程上的回调一旦失控，Python 的收尾 eval 也进不来（主线程被占），
+        // profiler 会一直录到内存爆掉（实测 18GB）。这里到点就截断，先保证能落盘。
+        var budget = Stopwatch.StartNew();
+        bool truncated = false;
         int last = ProfilerDriver.lastFrameIndex;
-        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 11);
+        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 7);
         if (first < 0) first = last;
         try { File.WriteAllText(Out + ".start", "start " + first + "-" + last); } catch (Exception) { }
         var frames = new List<int>();
@@ -110,11 +115,14 @@ public static class UpiEvidenceV1
         var stacks = new List<string>();
         var allocs = new List<string>();
         int threads = 0;
-        for (int frame = first; frame <= last; frame++)
+        // 从最新帧往前扫：预算不足时优先保住“刚发生”的帧，旧帧被截断没关系。
+        for (int frame = last; frame >= first; frame--)
         {
+            if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
             frames.Add(frame);
             for (int ti = 0; ti < 32; ti++)
             {
+                if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
                 using (var view = ProfilerDriver.GetRawFrameDataView(frame, ti))
                 {
                     if (!view.valid) break;
@@ -122,6 +130,7 @@ public static class UpiEvidenceV1
                     int n = view.sampleCount;
                     for (int i = 0; i < n; i++)
                     {
+                        if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
                         string name = view.GetSampleName(i);
                         if (string.IsNullOrEmpty(name)) continue;
 
@@ -219,7 +228,8 @@ public static class UpiEvidenceV1
            .Append(",\"enabled_driver\":").Append(_weEnabledDriver ? "true" : "false")
            .Append(",\"enabled_deep\":").Append(_weEnabledDeep ? "true" : "false")
            .Append(",\"enabled_alloc_callstacks\":").Append(_weEnabledAlloc ? "true" : "false")
-           .Append(",\"restore_on_exit\":true}}").Append("}");
+           .Append(",\"restore_on_exit\":true,\"truncated\":")
+           .Append(truncated ? "true" : "false").Append("}}").Append("}");
         Directory.CreateDirectory(Path.GetDirectoryName(Out));
         File.WriteAllText(Out, sb2.ToString(), new UTF8Encoding(false));
         foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }
