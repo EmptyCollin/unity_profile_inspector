@@ -23,7 +23,7 @@ sim/
 python sim/replay/devsim_replay.py --case c18
 ```
 
-`c18` 是混合 case，共 22 个 scenario（17 常规 + 2 混合 + 3 负对照），
+`c18` 是混合 case，共 24 个 scenario（18 常规 + 3 混合 + 3 负对照），
 定义在 `sim/replay/scenarios.json`；`sim/oracle/cases/*.json` 只给评测器看，
 不传给工程或工具。
 
@@ -37,6 +37,7 @@ python sim/replay/devsim_replay.py --case c18
 - `legacy_canvas`：每帧改侧栏尺寸触发 rebuild；
 - `legacy_texture`：每格创建独立 Texture2D/Sprite；
 - `legacy_hint`：空闲时每帧全盘扫描提示；
+- `legacy_anim`：每帧重算 64 格缩放动画（ANIM）；
 - `autoplay`/`round_seconds`：仅 replay 用的自动局面，不改变正常游戏。
 
 ## 静态机会扫描（I7c 已起步）
@@ -49,7 +50,7 @@ python sim/oracle/evaluate.py --case c18
 - `OpportunityFinding` 已落模型：必须带 `reference_ref`，不进入 `verified` 计数；
 - 当前是**静态模式匹配 + 运行期 feature 门控**：游戏启动时写
   `%TEMP%/devsim_active_features.json`，扫描器只报当前 case 激活的分支；
-- 22 case 全跑结果：**recall=1.0、precision=1.0、3 个负对照全过**；
+- 24 case 全跑结果：**recall=1.0、precision=1.0、3 个负对照全过**；
 - 若没有运行期 feature 状态，静态扫描仍会报休眠分支（这是已知局限）。
 
 ## source-aware planner（I7d 起步）
@@ -69,7 +70,6 @@ python scripts/plan_opportunity.py --project sim/project --pattern ui_text_rebui
 
 ## 尚未完成
 
-- 22 个 case 的 oracle 已生成，但还没有评测器逐项打分；
-- 静态扫描没有运行期门控，c20 会误报；
 - 音效、粒子、更完整的动画；
-- 自动点击 replay 的完整“商店/BONUS”断言（当前可自动跑一局并截图）。
+- 自动点击 replay 的完整“商店/BONUS”断言（当前可自动跑一局并截图）；
+- 真实工程接入。

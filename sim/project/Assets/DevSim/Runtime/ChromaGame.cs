@@ -184,6 +184,7 @@ namespace DevSim
             public string project_path;
             public bool legacy_ui, legacy_material, legacy_match_alloc, sync_shop_load;
             public bool legacy_particle, legacy_canvas, legacy_texture, legacy_hint;
+            public bool legacy_anim;
         }
 
         private static void WriteFeatureState(CaseConfig c)
@@ -202,6 +203,7 @@ namespace DevSim
                     legacy_canvas = c.legacy_canvas,
                     legacy_texture = c.legacy_texture,
                     legacy_hint = c.legacy_hint,
+                    legacy_anim = c.legacy_anim,
                 };
                 // 运行期特征状态，仅用于“当前激活了哪些路径”；不是 oracle。
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "devsim_active_features.json"),
@@ -397,6 +399,7 @@ namespace DevSim
             if (cfg.legacy_canvas && sideRect != null)
                 sideRect.sizeDelta = new Vector2(1164, 624 + (Time.frameCount % 2));
             if (cfg.legacy_hint && playing && !paused) HasMatch();
+            if (cfg.legacy_anim && playing && !paused) AnimateTilesLegacy();
             if (!playing || paused || overOpen) return;
             timeLeft -= Time.deltaTime;
             if (timeLeft <= 0f) { timeLeft = 0f; EndRound(); return; }
@@ -405,6 +408,19 @@ namespace DevSim
                 nextHud = Time.unscaledTime + 0.1f;
                 UpdateHud();
             }
+        }
+
+        private void AnimateTilesLegacy()
+        {
+            // “图省事”的逐帧 UI 动画：64 个格子每帧重算缩放。
+            for (int r = 0; r < N; r++)
+                for (int c = 0; c < N; c++)
+                {
+                    var b = tileButtons[r, c];
+                    if (b == null) continue;
+                    float s = 1f + 0.04f * Mathf.Sin(Time.time * 4f + (r + c) * 0.25f);
+                    b.transform.localScale = new Vector3(s, s, 1f);
+                }
         }
 
         private void UpdateHud()

@@ -1,0 +1,18 @@
+{
+  "case_id": "c23",
+  "display_name": "per-frame tile animation",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c23",
+  "mixed": false,
+  "negative_control": false,
+  "expected_opportunities": [
+    {
+      "pattern_id": "per_frame_tile_animation",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::AnimateTilesLegacy",
+      "reference_kind": "static",
+      "reference_ref": "逐帧手写 64 格缩放应由动画系统/脏标记驱动",
+      "risk": "medium"
+    }
+  ]
+}

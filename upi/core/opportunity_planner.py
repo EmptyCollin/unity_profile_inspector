@@ -104,6 +104,15 @@ SPECS: dict[str, Spec] = {
         tier="auto",
         invariants=("交换后的消除判定仍然执行",),
     ),
+    "per_frame_tile_animation": Spec(
+        find="            if (cfg.legacy_anim && playing && !paused) AnimateTilesLegacy();\n",
+        replace="",
+        why="移除逐帧手写 64 格缩放动画，改由动画/脏标记驱动",
+        playbook="PB-OP-ANIM-DIRTY",
+        side_effect="may_affect_perception",
+        tier="semi",
+        invariants=("消除/计分逻辑不变",),
+    ),
 }
 
 

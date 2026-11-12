@@ -42,6 +42,8 @@ PATTERNS: tuple[Pattern, ...] = (
             r"new\s+Texture2D\s*\(", "共享图集优于每格独立 Texture2D/Sprite"),
     Pattern("idle_hint_scan_per_frame", "cpuMainThreadFrameTimeMs", "cpu",
             r"HasMatch\s*\(\s*\)\s*;", "空闲提示应缓存/节流，不应每帧全盘扫描"),
+    Pattern("per_frame_tile_animation", "cpuMainThreadFrameTimeMs", "anim",
+            r"AnimateTilesLegacy\s*\(\s*\)\s*;", "逐帧重算 64 个格子的缩放应由动画系统/脏标记驱动"),
 )
 
 
@@ -54,6 +56,7 @@ FLAG_FOR_PATTERN = {
     "canvas_layout_churn": "legacy_canvas",
     "per_tile_texture": "legacy_texture",
     "idle_hint_scan_per_frame": "legacy_hint",
+    "per_frame_tile_animation": "legacy_anim",
 }
 
 

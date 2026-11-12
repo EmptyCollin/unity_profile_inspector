@@ -1098,7 +1098,7 @@ sim/
 - 机会可能“看起来像 bug”，也可能只是“没做但能做”；
 - 不写“这里是缺陷”的注释，不用 `F-`/`DEFECT`/`fixture` 命名。
 
-**case 矩阵（建议 17 常规 + 2 混合 + 3 负对照，共 22；后续可扩展）**：
+**case 矩阵（建议 18 常规 + 3 混合 + 3 负对照，共 24；后续可扩展）**：
 
 | ID | 入口/场景 | 类型 | 可能的机会（1..N） |
 |---|---|---|---|
@@ -1121,6 +1121,8 @@ sim/
 | `c17` | Game/UI | 日常 | GraphicRaycaster 全屏扫描/Physics2D 过度检测 |
 | `c18` | Lobby→Game | **混合** | 公告文本 + Addressables 重复加载 + 棋盘材质实例（3 个机会） |
 | `c19` | Game→Bonus→Shop | **混合** | 匹配分配 + Animator 参数 + 商店布局 rebuild（3 个机会） |
+| `c23` | Game 棋盘 | 日常 | 每帧重算 64 格缩放动画（ANIM） |
+| `c24` | Game→Shop | **混合** | 逐格材质 + 每帧动画 + 同步 Addressables（GPU/ANIM/LOAD） |
 | `c20` | Lobby/Game | **负对照** | 已做缓存/池化/合批，0 机会 |
 | `c21` | Game | **负对照** | 只有高级色块锁定玩法，无性能机会（0 机会） |
 | `c22` | Shop | **负对照** | 合理的异步加载/对象池，0 机会 |
@@ -1155,7 +1157,7 @@ python -m upi dev devsim-replay --project sim/project --case c04
 1. `sim/project` 可被 UI 选中，默认场景能打开；
 2. 默认场景 UI 能进入每个 case；replay 也能进入同一 case；
 3. 工程内无 oracle/答案痕迹（自动校验）；
-4. 至少 **17 个常规 case + 2 个混合 case + 3 个负对照（共 22）**；
+4. 至少 **18 个常规 case + 3 个混合 case + 3 个负对照（共 24）**；
 5. 每个 case 至少有 1 个可解释机会或明确 0 机会；混合 case 的机会可分别定位；
 6. 工程能通过 UI 从默认场景进入全部 case，replay 也能走同一路由；
 7. 工具运行时 workspace 不含 oracle，仍能产出机会；
