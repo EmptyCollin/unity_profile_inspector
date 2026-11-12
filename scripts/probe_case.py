@@ -50,6 +50,12 @@ def main() -> int:
     gc_ring_sorted = sorted(gc_ring)
     gc_median = (gc_ring_sorted[len(gc_ring_sorted) // 2] if gc_ring_sorted else 0)
     gc_p95 = (gc_ring_sorted[int(len(gc_ring_sorted) * 0.95)] if gc_ring_sorted else 0)
+    gc_sample = [v for e in samples
+                 if e.get("metric") == "Memory/GcAllocInFrameBytes"
+                 for v in (e.get("series") or [])]
+    gc_sample_sorted = sorted(gc_sample)
+    gc_s_median = (gc_sample_sorted[len(gc_sample_sorted) // 2] if gc_sample_sorted else 0)
+    gc_s_p95 = (gc_sample_sorted[int(len(gc_sample_sorted) * 0.95)] if gc_sample_sorted else 0)
     report = {
         "ok": True, "gcthr": a.gcthr, "seconds": a.seconds,
         "events": len(ev),
@@ -61,6 +67,10 @@ def main() -> int:
         "gc_median": gc_median,
         "gc_p95": gc_p95,
         "gc_max": (max(gc_ring) if gc_ring else 0),
+        "gc_sample_n": len(gc_sample),
+        "gc_sample_median": gc_s_median,
+        "gc_sample_p95": gc_s_p95,
+        "gc_sample_max": (max(gc_sample) if gc_sample else 0),
     }
     out = Path(a.out) if a.out else (ROOT / "runs" / "probe_case.json")
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
