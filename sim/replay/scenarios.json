@@ -1,0 +1,20 @@
+{
+  "c18": {
+    "case_id": "c18",
+    "seed": 20261112,
+    "start_tier": 3,
+    "legacy_ui": true,
+    "legacy_material": true,
+    "legacy_match_alloc": true,
+    "sync_shop_load": true
+  },
+  "c20": {
+    "case_id": "c20",
+    "seed": 7,
+    "start_tier": 1,
+    "legacy_ui": false,
+    "legacy_material": false,
+    "legacy_match_alloc": false,
+    "sync_shop_load": false
+  }
+}

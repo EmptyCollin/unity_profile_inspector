@@ -1,0 +1,33 @@
+{
+  "case_id": "c18",
+  "display_name": "Lobby→Game mixed",
+  "entry": "Bootstrap/Lobby/开始游戏",
+  "scenario": "c18",
+  "expected_opportunities": [
+    {
+      "pattern_id": "ui_text_rebuild_per_frame",
+      "metric": "cpuMainThreadFrameTimeMs",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "reference_kind": "static",
+      "reference_ref": "HUD text refresh should be dirty-flagged, not per-frame",
+      "risk": "low"
+    },
+    {
+      "pattern_id": "per_instance_material",
+      "metric": "drawCalls",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard/RefreshTiles",
+      "reference_kind": "static",
+      "reference_ref": "64 tiles should not own a material instance each",
+      "risk": "medium"
+    },
+    {
+      "pattern_id": "sync_resources_load_on_shop",
+      "metric": "frame_time_ms",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::OpenShop",
+      "reference_kind": "budget",
+      "reference_ref": "shop open should not synchronously load 24 assets",
+      "risk": "medium"
+    }
+  ],
+  "negative_controls": []
+}

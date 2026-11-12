@@ -1,0 +1,17 @@
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+ExportedObj/
+*.csproj
+*.sln
+*.user
+*.unityproj
+.vs/
+.idea/
+.vscode/
+*.tmp
