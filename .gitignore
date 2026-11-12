@@ -103,3 +103,5 @@ projects/
 
 # DSH ACL repair reports (local recovery records, see diagnose-windows-sandbox-acl)
 .dsh-acl-reports/
+
+test_project/

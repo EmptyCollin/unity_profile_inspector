@@ -27,23 +27,23 @@ class Pattern:
 
 PATTERNS: tuple[Pattern, ...] = (
     Pattern("ui_text_rebuild_per_frame", "cpuMainThreadFrameTimeMs", "cpu",
-            r"^\s*UpdateHud\s*\(\s*\)\s*;", "HUD 应脏标记，不应每帧重建文本"),
+            r'^\s*roundText\.text\s*=\s*"ROUND "', "HUD 应脏标记，不应每帧重建文本"),
     Pattern("per_instance_material", "drawCalls", "gpu",
             r"new\s+Material\s*\(", "共享材质/MaterialPropertyBlock 优于逐实例材质"),
     Pattern("match_scan_allocation", "gc_alloc_per_frame", "cpu",
-            r"new\s+List<\s*int\s*>", "热路径扫描不应每次分配临时 List"),
+            r"var\s+hit\s*=\s*new\s+bool\s*\[\s*N\s*,\s*N\s*\]", "热路径扫描不应每次分配临时缓冲"),
     Pattern("sync_resources_load_on_shop", "frame_time_ms", "loading",
-            r"WaitForCompletion\s*\(\s*\)", "异步 Addressables 优于 WaitForCompletion 同步等待"),
+            r"Resources\.Load\s*<\s*TextAsset\s*>", "异步 Addressables 优于同步 Resources.Load"),
     Pattern("per_clear_particle_instantiate", "gc_alloc_per_frame", "cpu",
-            r"StartCoroutine\s*\(\s*FadeFx", "消除特效应池化，不应每次 Instantiate/Destroy"),
+            r"Destroy\s*\(\s*\w+\s*,\s*0\.25f\s*\)", "消除特效应池化，不应每次 Instantiate/Destroy"),
     Pattern("canvas_layout_churn", "cpuMainThreadFrameTimeMs", "cpu",
-            r"sizeDelta\s*=\s*new\s+Vector2", "每帧改尺寸会触发 Canvas rebuild"),
+            r"Canvas\.ForceUpdateCanvases\s*\(\s*\)", "每帧强制 Canvas rebuild 应避免"),
     Pattern("per_tile_texture", "total_used_memory", "gpu",
-            r"new\s+Texture2D\s*\(", "共享图集优于每格独立 Texture2D/Sprite"),
+            r"new\s+Texture2D\s*\(\s*2\s*,\s*2", "共享图集优于每格独立 Texture2D/Sprite"),
     Pattern("idle_hint_scan_per_frame", "cpuMainThreadFrameTimeMs", "cpu",
-            r"HasMatch\s*\(\s*\)\s*;", "空闲提示应缓存/节流，不应每帧全盘扫描"),
+            r"if\s*\(\s*model\.HasMatch\s*\(\s*\)\s*\)\s*break;", "空闲提示应缓存/节流，不应每帧全盘扫描"),
     Pattern("per_frame_tile_animation", "cpuMainThreadFrameTimeMs", "anim",
-            r"AnimateTilesLegacy\s*\(\s*\)\s*;", "逐帧重算 64 个格子的缩放应由动画系统/脏标记驱动"),
+            r"localScale\s*=\s*Vector3\.one\s*\*\s*\(1f\s*\+\s*0\.02f", "逐帧重算格子缩放应由动画系统/脏标记驱动"),
 )
 
 

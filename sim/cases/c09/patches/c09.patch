@@ -3,18 +3,12 @@
 @@ -1 +1 @@
 -        private void ResolvePendingWhenIdle()
 +        private static readonly ProfilerMarker HintScanMarker = new ProfilerMarker("ChromaGame.ResolvePendingWhenIdle");
-+        private int _hintLocked;
 +        private void ResolvePendingWhenIdle()
 @@ -1 +1 @@
 -            if (busy || bonusOpen || phase != Phase.Playing) return;
 +            using (HintScanMarker.Auto())
 +            {
-+                if (model != null)
-+                {
-+                    int hn = model.N;
-+                    for (int r = 0; r < hn; r++)
-+                        for (int c = 0; c < hn; c++)
-+                            if (!model.IsEmpty(r, c) && model.Layers[r, c] >= 2) _hintLocked++;
-+                }
++                for (int guard = 0; guard < 4; guard++)
++                    if (model.HasMatch()) break;
 +            }
 +            if (busy || bonusOpen || phase != Phase.Playing) return;
