@@ -128,6 +128,47 @@ class Finding(BaseModel):
         return self
 
 
+class OpportunityCodeAnchor(BaseModel):
+    file: str
+    symbol: str = ""
+    line_range: str = ""
+
+
+class OpportunityFinding(BaseModel):
+    """I7c：相对可达参考的改进机会；不是 Issue，不混入 resolved/verified 计数。"""
+
+    id: str
+    project_id: str = ""
+    scene: str = ""
+    mode: Literal["resident", "regression"] = "resident"
+    metric: str
+    unit: str = ""
+    current_value: Optional[float] = None
+    reference_kind: Literal["budget", "floor", "peer", "history", "static", "algorithmic"]
+    reference_value: Optional[float] = None
+    reference_ref: str
+    gap_abs: Optional[float] = None
+    gap_ratio: Optional[float] = None
+    estimated_gain_pct: Optional[float] = None
+    evidence: list[Evidence] = Field(min_length=1)
+    code_anchor: OpportunityCodeAnchor
+    pattern_id: str
+    suggested_playbook: str = ""
+    permission_tier: PermissionTier = "semi"
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    risk: str = ""
+    status: Literal["draft", "reviewed", "planned", "closed", "regressed", "rejected"] = "draft"
+    created_at: str = ""
+
+    @model_validator(mode="after")
+    def _needs_reference(self):
+        if not self.reference_ref.strip():
+            raise ValueError("Opportunity 必须有 reference_ref（I1）")
+        if not self.pattern_id.strip():
+            raise ValueError("Opportunity 必须有 pattern_id")
+        return self
+
+
 class A4Frame(BaseModel):
     """A4 逐帧计时的一帧（DESIGN §2.1 A4 行）。"""
 

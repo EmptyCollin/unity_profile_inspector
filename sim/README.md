@@ -39,6 +39,19 @@ python sim/replay/devsim_replay.py --case c18
 - `legacy_hint`：空闲时每帧全盘扫描提示；
 - `autoplay`/`round_seconds`：仅 replay 用的自动局面，不改变正常游戏。
 
+## 静态机会扫描（I7c 已起步）
+
+```powershell
+python scripts/scan_opportunities.py --project sim/project --project-id chroma-rogue
+python sim/oracle/evaluate.py --case c18
+```
+
+- `OpportunityFinding` 已落模型：必须带 `reference_ref`，不进入 `verified` 计数；
+- 当前扫描器是**静态模式匹配**，会看到代码里所有条件分支；
+- `c18`：recall=1.0，precision≈0.57（把未激活的 particle/canvas/texture 也报了）；
+- `c20` 负对照当前 **negative_ok=false**：静态扫描无法区分“代码存在”和“case 激活”，
+  需要运行期门控/探针证据；这是下一步，不是通过。
+
 ## 尚未完成
 
 - 22 个 case 的 oracle 已生成，但还没有评测器逐项打分；
