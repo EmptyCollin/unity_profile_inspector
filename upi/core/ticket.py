@@ -223,6 +223,34 @@ def build_opportunity_ticket(findings, project_root, *, project_id: str = "") ->
                        approve_token=_token(tid, items))
 
 
+def build_candidate_ticket(candidates, project_root, *, project_id: str = "") -> BatchTicket:
+    """I8d：证据候选 + source-aware recipe → BatchTicket（可审计、可回滚）。"""
+    from upi.core.repair_recipe import plan_for_candidate
+
+    tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-" + secrets.token_hex(3)
+    items: list[TicketItem] = []
+    for c in candidates:
+        plan = plan_for_candidate(c, project_root)
+        tier = plan.permission_tier if plan is not None else "blocked"
+        status: ItemStatus = ("pending" if plan is not None and tier == "auto"
+                              else "needs_human")
+        iid = "it-" + secrets.token_hex(4)
+        items.append(TicketItem(
+            item_id=iid, cluster_id=c.id, metric=c.kind, shape="candidate",
+            kind="candidate", count=c.evidence_n,
+            pattern_id=c.mechanism,
+            playbook_id=(plan.playbook_id if plan is not None else ""),
+            permission_tier=tier,
+            plan=(plan.model_dump() if plan is not None else None),
+            status=status,
+            error=("" if plan is not None else "no source-aware recipe; needs human"),
+            item_approve_token=_item_token(tid, iid),
+        ))
+    return BatchTicket(ticket_id=tid, project_id=project_id, mode="resident",
+                       created_at=E.now(), status="awaiting_approval", items=items,
+                       approve_token=_token(tid, items))
+
+
 class TicketStore:
     def __init__(self, root: Optional[Path | str] = None):
         self.root = Path(root) if root else Path(
