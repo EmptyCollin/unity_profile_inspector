@@ -309,6 +309,39 @@ def _capture_once(tag: str) -> list[dict]:
     return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
 
 
+def _capture_board() -> list[dict]:
+    ev = ROOT / "runs" / "_probe" / "board_evidence.json"
+    try:
+        ev.unlink()
+    except OSError:
+        pass
+    subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
+                    "--file", str(ROOT / "probe" / "upi_board_evidence.cs"),
+                    "--format", "json"], capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    deadline = time.time() + 10
+    while time.time() < deadline and not ev.exists():
+        time.sleep(0.2)
+    if not ev.exists():
+        return []
+    run_id = "lab_board"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
+                    "--project", str(PROJECT), "--evidence", str(ev),
+                    "--run-id", run_id, "--scene", "Assets/Scenes/00_Bootstrap.unity"],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
+    out = ROOT / "runs" / run_id / "evidence" / "candidates.json"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
+                    "--project", str(PROJECT), "--evidence", str(bundle),
+                    "--out", str(out), "--limit", "8"],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    if not out.exists():
+        return []
+    return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+
+
 def capture_candidates() -> dict:
     es = editor_status()
     if not es.get("ok") or es.get("playMode") != "playing":
@@ -334,7 +367,7 @@ def capture_candidates() -> dict:
     subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
                     "--code", force, "--format", "json"], capture_output=True,
                    text=True, encoding="utf-8", errors="replace", timeout=60)
-    b = _capture_once("board")
+    b = _capture_board()
     hud = ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
            'if(g==null) return "no-game"; return g.DebugSetScore(0);')
     subprocess.run(["unity", "command", "script eval", "--project-path", str(PROJECT),
