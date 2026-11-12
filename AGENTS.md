@@ -2,7 +2,7 @@
 
 > 本文件定义管线的角色、边界与契约。**边界不可越，越界必须转人工。**
 > 适用范围：`upi/`（管线代码，含 `agents/daemon.py`+`core/events.py` 常驻守护、`agents/webui.py` Web 控制台）、`probe/`（经 Unity CLI 注入 Editor 的采样片段，非自建插件）、`fixtures/`（测试夹具）、`knowledge/`（特征库）、`dashboard/`（统计与可视化只读产物）、`runs/daemon_*`（守护运行态与事件留痕）、`llm_config.yaml`（模型服务配置与 `pipeline.monitor` 巡检段，见 DESIGN §2.3）。
-> 最后更新：2026-11-11（**v1.0 方向重排**：工具分**常驻/回归**两形态；**探针是唯一数据源**，1Hz 只做哨兵；**cluster 是修复/验证单位**；**批量工单、串行落地**；**UI 是唯一人机通道**（本地 Web，旧 ANSI TUI → `upi dev tui`）；常驻结论只 `unverified`，回归才 `verified`。v1.0 新增 G21~G23 与 §8，冲突时以 §8 为准。承前 v0.9：G16 渲染计数 A2 主源 + 轮询哨兵；G19 渲染逐笔 spike 解禁但 GPU 发作仍 A4、逐笔归因仍人工；G20 五项盲区）
+> 最后更新：2026-11-12（**v0.17 产品目标修正**：Issue/Opportunity 分账；CLEAN 退出产品目标；去夹具化；修复对象工程必须在 UI 选择、保留历史并绑定 `project_id`。承前 v1.0 两形态/探针唯一源/UI 唯一通道；G21~G23 见 §4）
 
 ---
 
@@ -267,7 +267,7 @@ MetaMetrics:                  # DESIGN §7.2，禁止只报其一
 - G20 **盲区显式声明门禁**：每份报告必须含"不可检出清单"，与检出率同屏，逐项注明受阻原因与解锁路径（当前五项：①GPU 尖峰逐笔归因→EX-1/B 档（**2026-11-11 改判后范围收窄**：渲染计数逐帧源已解锁，本项只覆盖"归因到哪一笔"，detector 注册不再算解锁信号）；②未放大的代码风险→M3.5 C+；③感知类退化→M7 T8；④**记忆体守护覆盖面窄**——`monoHeapBytes/totalAllocatedBytes/totalReservedBytes/total_used_per_frame` 经实测**不受强制 GC 影响**（Δ≈0），是会话累积量而非净占用，跨会话不可比 ⇒ 已降级为未评估盲区，"修复是否多吃内存"当前**只能靠 `monoUsedBytes` 一个口径回答**；解锁路径=B 档真机/更长隔离的 fresh 采集；⑤**batches 注入等价性（#27 新列）**——Render 类目结构性无汇总 `Batches Count` 句柄（仅 Dynamic/Instanced/Static 三分项），SRP 常态场景两侧同零 ⇒ 注入与轮询对不了表；`Mono Used Memory`/`Update Time`/`Frame Time` 短名同批证实不存在（口径归属见 G16④）；解锁=真实非零合批场景对表或接受轮询单源标注）。缺该清单的报告无效。
 - G21 **两形态分账（v1.0）**：任何结论必须带 `mode ∈ resident|regression` 与 `verification_status ∈ unverified|observed|verified`。**常驻形态不得记 `resolved/verified`**；`unverified` 不进成功率分母、不得对外说"修好了"。回归形态的 `verified` 必须来自"同 replay、同 cluster 消失、无新 cluster、守护不劣化"。违反即结论作废。
 - G22 **探针唯一源 + 1Hz 哨兵（v1.0）**：常驻采集只认探针事件（`breach`/`sample`）；1Hz 轮询只做交叉核对，**不得单独作为 finding 依据**。哨兵比值不在 `[0.2, 5.0]` 或两侧同零（无信息量）→ 该窗标未评估，不得当通过。物理合并前，旧两心跳文件仍可读，但 Web/统计只认统一事件流（兼容桥除外）。
-- G23 **UI 唯一人机通道（v1.0）**：所有人类操作必须有 UI 路径（接入、模式切换、探针开关、看事件、批工单、执行/回滚、跑回归、看报告、改配置）；文件只作内部审计载体，不要求人手工读写。CLI 只保留启动/停止/诊断/应急。UI 必须本地绑定、token 门禁、可离线；UI 故障时保留 break-glass 停止/回滚，但日常不依赖它。
+- G23 **UI 唯一人机通道（v1.0）**：所有人类操作必须有 UI 路径（**选择/管理修复对象工程**、接入、模式切换、探针开关、看事件、批工单、执行/回滚、跑回归、看报告、改配置）；工程选择必须保留最近/历史并可快速恢复，所有操作显式绑定 `project_id`，运行中禁止切换；文件只作内部审计载体，不要求人手工读写。CLI 只保留启动/停止/诊断/应急。UI 必须本地绑定、token 门禁、可离线；UI 故障时保留 break-glass 停止/回滚，但日常不依赖它。
 
 ---
 
