@@ -1,0 +1,19 @@
+{
+  "oracle_id": "c01",
+  "case_id": "c01",
+  "version": 1,
+  "expected_root_causes": [
+    "BoardModel.FindMatches 每次匹配新建 bool[N,N]",
+    "BoardModel.CountByColor 每次新建 int[Colors]"
+  ],
+  "acceptable_files": [
+    "Assets/DevSim/Runtime/BoardModel.cs"
+  ],
+  "repair_assertions": [
+    "匹配结果不变",
+    "每次匹配前缓冲清零",
+    "不再每次匹配分配 bool[N,N]/int[Colors]"
+  ],
+  "expected_direction": "gc_alloc_bytes 下降",
+  "evaluator_only": true
+}
