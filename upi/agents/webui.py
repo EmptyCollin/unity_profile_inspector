@@ -255,6 +255,11 @@ def build_status() -> dict:
     except Exception as e:  # noqa: BLE001
         settings = {"error": f"{type(e).__name__}: {e}"}
     from upi.core.scheduler import get_scheduler
+    try:
+        from upi.core import capture_config as CC
+        capture_cfg = CC.load()
+    except Exception as e:  # noqa: BLE001
+        capture_cfg = {"error": f"{type(e).__name__}: {e}"}
     return {
         "ok": True,
         "time": E.now(),
@@ -272,6 +277,7 @@ def build_status() -> dict:
         "batch_tickets": batch_tickets,
         "regression_suites": regression_suites,
         "settings": settings,
+        "capture_config": capture_cfg,
         "resident_scheduler": get_scheduler().status(),
         "tickets": _open_tickets(),
         "events": _recent_events(),
@@ -565,6 +571,28 @@ _INDEX_HTML = r"""<!doctype html>
         <table><tbody id="settingsBody"><tr><td class="empty">加载中…</td></tr></tbody></table>
       </div>
       <div class="panel" style="margin-top:12px">
+        <h2>探针与采集</h2>
+        <div style="padding:10px 15px;font-size:12px;color:var(--muted);line-height:1.9">
+          <div>探针状态：<b id="setProbeState">—</b> <span id="setProbeMeta" class="small"></span></div>
+          <div style="margin-top:6px" id="setProbeActions">
+            <button class="pbtn" data-pact="install">安装</button>
+            <button class="pbtn" data-pact="sample-on">采样开</button>
+            <button class="pbtn" data-pact="sample-off">采样关</button>
+            <button class="pbtn" data-pact="unload">卸载</button>
+          </div>
+          <div style="margin-top:12px">
+            取证线程 <input id="capThreads" type="number" min="1" max="64" style="width:66px">
+            取证帧数 <input id="capFrames" type="number" min="1" max="32" style="width:66px">
+            预算ms <input id="capBudget" type="number" min="500" max="20000" style="width:84px">
+            板子帧数 <input id="capBoardFrames" type="number" min="1" max="8" style="width:66px">
+            采样窗口 <input id="capSampleWindow" type="number" min="30" max="3600" style="width:76px">
+            <button class="pbtn" id="capSave">保存</button>
+            <span id="capMsg" class="small"></span>
+          </div>
+          <div class="small" style="margin-top:6px">这些值与 I8 Lab 共用 config/i8_lab.json；下一次取证/采样生效。</div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:12px">
         <h2>首次使用顺序</h2>
         <div id="onboard" style="padding:10px 15px;color:var(--muted);font-size:12px;line-height:1.9">
           加载中…
@@ -685,7 +713,37 @@ function renderSettings(s){
   $("onboard").innerHTML = steps.map(([label, ok]) =>
     `<div>${ok ? '<span class="ok">✓</span>' : '<span class="bad">○</span>'} ${esc(label)}</div>`).join("")
     + `<div class="small" style="margin-top:6px">顺序：装探针 → 采样开 → 巡检/建单 → 批准 → 回归 3 次基线 → 验证/报告</div>`;
+  $("setProbeState").textContent = p.state === "alive" ? "在线"
+    : (p.state === "stale" ? "心跳超龄" : "无心跳");
+  $("setProbeMeta").textContent = p.heartbeat_age_s == null
+    ? "未安装/未运行探针" : `心跳 ${p.heartbeat_age_s}s 前`;
+  const cc = s.capture_config || {};
+  if (!cc.error) {
+    $("capThreads").value = cc.evidence_threads;
+    $("capFrames").value = cc.evidence_frames;
+    $("capBudget").value = cc.evidence_budget_ms;
+    $("capBoardFrames").value = cc.board_frames;
+    $("capSampleWindow").value = cc.probe_sample_window;
+  }
 }
+async function saveCaptureCfg(){
+  try{
+    const body = {
+      evidence_threads: +$("capThreads").value,
+      evidence_frames: +$("capFrames").value,
+      evidence_budget_ms: +$("capBudget").value,
+      board_frames: +$("capBoardFrames").value,
+      probe_sample_window: +$("capSampleWindow").value,
+    };
+    const r = await post("/api/capture/config", body);
+    $("capMsg").textContent = `已保存（线程 ${r.config.evidence_threads} / 帧 ${r.config.evidence_frames} / 预算 ${r.config.evidence_budget_ms}ms）`;
+    await refresh();
+  }catch(e){ $("capMsg").textContent = "失败：" + e.message; }
+}
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("#capSave");
+  if (t) { ev.preventDefault(); saveCaptureCfg(); }
+});
 async function verifyLast(sid){
   try{
     const r = await post(`/api/regression/suites/${encodeURIComponent(sid)}/verify`, {});
@@ -1108,6 +1166,16 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/projects":
             self._send_json(200, {"ok": True, **_projects_payload()})
             return
+        if parsed.path == "/api/capture/config":
+            try:
+                from upi.core import capture_config as CC
+                self._send_json(200, {"ok": True, "config": CC.load(),
+                                      "defaults": CC.DEFAULTS,
+                                      "limits": {k: list(v) for k, v in CC.LIMITS.items()},
+                                      "probe_config": str(CC.PROBE_CONFIG_PATH)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
         m = re.match(r"^/api/regression/suites/(rs-[A-Za-z0-9_\-]+)/report$",
                      parsed.path)
         if m:
@@ -1377,6 +1445,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
 
+        if parsed.path == "/api/capture/config":
+            try:
+                from upi.core import capture_config as CC
+                cfg = CC.save(body)
+                CC.write_probe_config()
+                self._send_json(200, {"ok": True, "config": cfg,
+                                      "probe_config": str(CC.PROBE_CONFIG_PATH)})
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
         if parsed.path in ("/api/probe/install", "/api/probe/unload",
                            "/api/probe/sample"):
             try:
@@ -1386,8 +1467,9 @@ class _Handler(BaseHTTPRequestHandler):
                 elif parsed.path.endswith("/unload"):
                     res = PC.unload()
                 else:
-                    res = PC.sample(bool(body.get("on", True)),
-                                    int(body.get("window", 300) or 300))
+                    from upi.core import capture_config as CC
+                    window = int(body.get("window") or CC.load()["probe_sample_window"])
+                    res = PC.sample(bool(body.get("on", True)), window)
                 self._send_json(200 if res.get("ok") else 400, res)
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})

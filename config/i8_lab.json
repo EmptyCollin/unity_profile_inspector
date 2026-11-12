@@ -4,5 +4,6 @@
   "evidence_budget_ms": 6000,
   "board_threads": 8,
   "board_frames": 4,
-  "board_budget_ms": 5000
+  "board_budget_ms": 5000,
+  "probe_sample_window": 300
 }

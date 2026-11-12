@@ -108,6 +108,31 @@ try:
     ok("状态含巡检调度", "resident_scheduler" in data)
     ok("状态含设置", isinstance(data.get("settings"), dict)
        and data["settings"].get("profile_id"))
+    ok("状态含取证配置（与 I8 Lab 共用）",
+       isinstance(data.get("capture_config"), dict)
+       and data["capture_config"].get("evidence_threads") == 8)
+
+    # 取证参数：用临时路径，避免测试污染仓库里的 config/i8_lab.json
+    from pathlib import Path as _Path
+    from upi.core import capture_config as CC
+    _tmp = tempfile.mkdtemp(prefix="upi-cfg-")
+    CC.CONFIG_PATH = _Path(_tmp) / "i8_lab.json"
+    CC.PROBE_CONFIG_PATH = _Path(_tmp) / "capture_cfg.json"
+    code, _hdr, body = get(base + "/api/capture/config?token=test-token")
+    _cfg = json.loads(body.decode("utf-8"))
+    ok("取证配置 API 200 + 默认值/范围", code == 200 and _cfg.get("ok") is True
+       and _cfg["config"]["evidence_threads"] == 8
+       and _cfg["limits"]["evidence_threads"] == [1, 64])
+    code, _r = post_json(base + "/api/capture/config?token=test-token",
+                         {"evidence_threads": 4, "probe_sample_window": 120})
+    ok("取证配置可保存并写探针文件", code == 200
+       and _r["config"]["evidence_threads"] == 4
+       and _r["config"]["probe_sample_window"] == 120
+       and CC.PROBE_CONFIG_PATH.exists())
+    code, _r = post_json(base + "/api/capture/config?token=test-token",
+                         {"evidence_threads": 999})
+    ok("取证配置越界拒绝", code == 400 and _r.get("ok") is False)
+    CC.CONFIG_PATH = _Path(_tmp) / "absent.json"   # 还原成不存在，后续读取走默认值
 
     code, _hdr, _body = get(base + "/api/status")
     ok("无 token 访问 API 被拒", code == 403, f"code={code}")

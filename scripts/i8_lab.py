@@ -45,63 +45,12 @@ TOUCHED = LAB / "touched.json"
 COMPILE = LAB / "compile.json"
 REPLAY = LAB / "replay.json"
 
-# 取证参数：用户可改（文件或页面），探针每次采集前读取。
-CAPTURE_CFG = ROOT / "config" / "i8_lab.json"
-PROBE_CFG = ROOT / "runs" / "_probe" / "capture_cfg.json"
-CFG_DEFAULTS = {
-    "evidence_threads": 8,
-    "evidence_frames": 8,
-    "evidence_budget_ms": 6000,
-    "board_threads": 8,
-    "board_frames": 4,
-    "board_budget_ms": 5000,
-}
-CFG_LIMITS = {
-    "evidence_threads": (1, 64),
-    "evidence_frames": (1, 32),
-    "evidence_budget_ms": (500, 20000),
-    "board_threads": (1, 64),
-    "board_frames": (1, 8),
-    "board_budget_ms": (500, 20000),
-}
-
-
-def load_capture_cfg() -> dict:
-    cfg = dict(CFG_DEFAULTS)
-    try:
-        raw = json.loads(CAPTURE_CFG.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        raw = {}
-    for k, (lo, hi) in CFG_LIMITS.items():
-        v = raw.get(k)
-        if isinstance(v, int) and not isinstance(v, bool):
-            cfg[k] = max(lo, min(hi, v))
-    return cfg
-
-
-def save_capture_cfg(body: dict) -> dict:
-    cfg = load_capture_cfg()
-    for k, (lo, hi) in CFG_LIMITS.items():
-        v = body.get(k)
-        if v is None:
-            continue
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            raise ValueError(f"{k} 必须是整数")
-        iv = int(v)
-        if not (lo <= iv <= hi):
-            raise ValueError(f"{k} 超出范围 [{lo},{hi}]：{iv}")
-        cfg[k] = iv
-    CAPTURE_CFG.parent.mkdir(parents=True, exist_ok=True)
-    CAPTURE_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n",
-                           encoding="utf-8")
-    return cfg
-
-
-def _write_probe_cfg() -> dict:
-    cfg = load_capture_cfg()
-    PROBE_CFG.parent.mkdir(parents=True, exist_ok=True)
-    PROBE_CFG.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
-    return cfg
+# 取证参数：与产品控制台共用 upi/core/capture_config.py 的单一事实源。
+from upi.core.capture_config import DEFAULTS as CFG_DEFAULTS  # noqa: E402
+from upi.core.capture_config import LIMITS as CFG_LIMITS  # noqa: E402
+from upi.core.capture_config import load as load_capture_cfg  # noqa: E402
+from upi.core.capture_config import save as save_capture_cfg  # noqa: E402
+from upi.core.capture_config import write_probe_config as _write_probe_cfg  # noqa: E402
 
 MODES = {"diagnostic", "combo"}
 CAPTURE_LIMIT = 60
