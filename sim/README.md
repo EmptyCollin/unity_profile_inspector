@@ -1,5 +1,7 @@
 # devsim — Chroma Rogue vertical slice
 
+> I7g 视觉/交互效果设计：[`docs/视觉设计.md`](../docs/视觉设计.md)。
+
 ```text
 sim/
   project/        # Unity 工程（I7b 选择这个目录）
