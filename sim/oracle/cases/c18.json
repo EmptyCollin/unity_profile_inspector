@@ -9,10 +9,14 @@
     {
       "pattern_id": "ui_text_rebuild_per_frame",
       "metric": "cpuMainThreadFrameTimeMs",
-      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHudBody",
       "reference_kind": "static",
       "reference_ref": "HUD 应脏标记，不应每帧重建文本",
-      "risk": "low"
+      "risk": "low",
+      "accept_methods": [
+        "UpdateHudBody",
+        "UpdateHud"
+      ]
     },
     {
       "pattern_id": "per_instance_material",
@@ -25,7 +29,7 @@
     {
       "pattern_id": "match_scan_allocation",
       "metric": "gc_alloc_per_frame",
-      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::FindMatches",
+      "code_anchor": "Assets/DevSim/Runtime/BoardModel.cs::FindMatches",
       "reference_kind": "static",
       "reference_ref": "匹配扫描不应每帧分配临时列表",
       "risk": "low"

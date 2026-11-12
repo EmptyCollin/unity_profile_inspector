@@ -90,7 +90,7 @@
       "seconds": 0.5
     },
     {
-      "type": "resolve"
+      "type": "resolve_board"
     },
     {
       "type": "wait",

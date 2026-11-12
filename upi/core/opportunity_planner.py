@@ -116,10 +116,14 @@ SPECS: dict[str, Spec] = {
 }
 
 
-def plan_for(finding: OpportunityFinding, project_root: str | Path) -> EditPlan | None:
-    spec = SPECS.get(finding.pattern_id)
-    if spec is None:
-        return None
+_SOURCE_ANCHOR = {
+    "ui_text_rebuild_per_frame": "ChromaGame.UpdateHudBody",
+    "match_scan_allocation": "BoardModel.FindMatches",
+}
+
+
+def _spec_plan(finding: OpportunityFinding, project_root: str | Path,
+               spec: Spec) -> EditPlan | None:
     root = Path(project_root).resolve()
     rel = finding.code_anchor.file
     target = (root / rel).resolve()
@@ -148,3 +152,17 @@ def plan_for(finding: OpportunityFinding, project_root: str | Path) -> EditPlan 
         touched_assets=[rel],
         permission_tier=spec.tier,  # type: ignore[arg-type]
     )
+
+
+def plan_for(finding: OpportunityFinding, project_root: str | Path) -> EditPlan | None:
+    spec = SPECS.get(finding.pattern_id)
+    if spec is not None:
+        ep = _spec_plan(finding, project_root, spec)
+        if ep is not None:
+            return ep
+    # 旧 SPECS 只覆盖 legacy 代码形态；新病灶走源码配方（不写答案、find 必须精确命中）
+    method = _SOURCE_ANCHOR.get(finding.pattern_id)
+    if not method:
+        return None
+    from upi.core.source_plan import plan_for_anchor
+    return plan_for_anchor(project_root, f"{finding.code_anchor.file}::{method}")

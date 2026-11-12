@@ -17,10 +17,13 @@
     {
       "pattern_id": "per_tile_texture",
       "metric": "total_used_memory",
-      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::BuildBoard",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::RefreshTiles",
       "reference_kind": "static",
       "reference_ref": "不应为每格创建独立 Texture2D/Sprite",
-      "risk": "medium"
+      "risk": "medium",
+      "accept_methods": [
+        "RefreshTiles"
+      ]
     }
   ],
   "atomic_cases": [

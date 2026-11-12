@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.case_overlay import apply_cases, tree_hash  # noqa: E402
+from upi.core.replay_spec import load_replay, merge_replays  # noqa: E402
 
 CASES_DIR = ROOT / "sim" / "cases"
 ORACLE_DIR = ROOT / "sim" / "oracle" / "cases"
@@ -53,7 +54,7 @@ def cases() -> list[dict]:
 
 
 def _capability_expectations(case_ids: list[str]) -> list[dict]:
-    """oracle → 结果性期望：机制 + 锚点（文件::方法）+ 指标。不含正则。"""
+    """oracle + case 自带 capability → 结果性期望（机制 + 锚点 + 可接受方法）。不含正则。"""
     expected: list[dict] = []
     for p in sorted(ORACLE_DIR.glob("c*.json")):
         d = json.loads(p.read_text(encoding="utf-8"))
@@ -63,11 +64,19 @@ def _capability_expectations(case_ids: list[str]) -> list[dict]:
         for e in d.get("expected_opportunities", []):
             expected.append({"mechanism": e.get("pattern_id"),
                              "anchor": e.get("code_anchor", ""),
-                             "metric": e.get("metric", "")})
-    # 去重（同一机制可能被多个场景引用）
+                             "metric": e.get("metric", ""),
+                             "accept_methods": e.get("accept_methods") or []})
+    for cid in case_ids:
+        m = json.loads((CASES_DIR / cid / "manifest.json").read_text(encoding="utf-8"))
+        cap = m.get("capability")
+        if cap:
+            expected.append({"mechanism": cap.get("mechanism", ""),
+                             "anchor": cap.get("anchor", ""),
+                             "metric": cap.get("metric", ""),
+                             "accept_methods": cap.get("accept_methods") or []})
     seen, uniq = set(), []
     for e in expected:
-        k = (e["mechanism"], e["anchor"], e["metric"])
+        k = (e["mechanism"], e["anchor"])
         if k not in seen:
             seen.add(k)
             uniq.append(e)
@@ -83,13 +92,41 @@ def generate(case_ids: list[str]) -> dict:
     if target != (ROOT / "test_project").resolve():
         raise RuntimeError(f"拒绝清理非考卷路径：{target}")
     if target.exists():
+        # 工程被 Unity 打开时删除会撞文件锁：先明确要求关闭，不硬删
+        try:
+            import subprocess as _sp
+            p = _sp.run(["unity", "command", "editor status",
+                         "--project-path", str(target), "--format", "json"],
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=20)
+            if '"success": true' in (p.stdout or "").replace("\n", ""):
+                raise RuntimeError(
+                    "test_project 正在 Unity 中打开：请先关闭该编辑器，再重新生成考卷")
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001 — 探测失败按“未打开”处理
+            pass
         shutil.rmtree(target)
     run = apply_cases(BASE, dirs, target)
+    # 合并 replay：考卷的“考试负载”由所选病例的 replay 合并而来（start/stop 各一次）
+    specs = []
+    for d in dirs:
+        m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+        if m.get("replay"):
+            specs.append(load_replay(ROOT / "sim" / "replay" / f"{m['replay']}.json"))
+    replay_id, replay_path = "", ""
+    if specs:
+        merged = merge_replays(specs)
+        LAB.mkdir(parents=True, exist_ok=True)
+        replay_path = str(LAB / "paper_replay.json")
+        Path(replay_path).write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+        replay_id = merged.replay_id
     paper = {"cases": run.case_ids, "files": run.files,
              "base_hash": tree_hash(BASE),
              "expectations": _capability_expectations(case_ids),
              "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-             "project": str(target), "project_id": TEST_PROJECT_ID}
+             "project": str(target), "project_id": TEST_PROJECT_ID,
+             "replay_id": replay_id, "replay_path": replay_path}
     LAB.mkdir(parents=True, exist_ok=True)
     PAPER.write_text(json.dumps(paper, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "paper": paper}
@@ -104,8 +141,11 @@ def _latest_findings(created_at: str) -> tuple[dict | None, str]:
         return None, f"findings 契约不可用：{type(e).__name__}: {e}"
     if not runs:
         return None, "未运行工具（没有 findings.json）"
-    after = [r for r in runs if str(r.created_at) >= created_at]
-    return (after[-1] if after else runs[-1]), ""
+    after = [r for r in runs
+             if str(r.created_at).replace("T", " ") >= str(created_at).replace("T", " ")]
+    if not after:
+        return None, "未运行工具（本考卷生成之后没有运行记录）"
+    return after[-1], ""
 
 
 def score() -> dict:

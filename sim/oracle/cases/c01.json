@@ -9,10 +9,14 @@
     {
       "pattern_id": "ui_text_rebuild_per_frame",
       "metric": "cpuMainThreadFrameTimeMs",
-      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHud",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::UpdateHudBody",
       "reference_kind": "static",
       "reference_ref": "HUD 应脏标记，不应每帧重建文本",
-      "risk": "low"
+      "risk": "low",
+      "accept_methods": [
+        "UpdateHudBody",
+        "UpdateHud"
+      ]
     }
   ],
   "atomic_cases": [

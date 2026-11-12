@@ -6,6 +6,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from _compose import compose  # noqa: E402
 
 from upi.core.candidates_v2 import CandidateV2  # noqa: E402
 from upi.core.evidence_v2 import SourceSpan  # noqa: E402
@@ -19,7 +22,7 @@ def ok(name, cond, detail=""):
     print(f"  [{'ok' if cond else 'FAIL'}] {name}" + ("" if cond else f" -> {detail}"))
 
 
-PROJECT = ROOT / "sim" / "project"
+PROJECT = compose(["c02"])
 plan = CandidateV2(
     id="c1", root_cause="hot_function:ChromaGame.UpdateHud",
     mechanism="hot_path", kind="function",

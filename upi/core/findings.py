@@ -65,7 +65,8 @@ class RepairRecord(BaseModel):
     plan_id: str = ""
     files: list[str] = Field(default_factory=list)
     compile_ok: bool = False
-    gameplay_ok: Optional[bool] = None
+    runnable: Optional[bool] = None   # 编译后能否正常进 Play 并启动一局（体验门槛）
+    gameplay_ok: Optional[bool] = None  # 保留字段：玩法自测不计入考试
     verdict: str = ""            # resolved | not_significant | regressed | unverified
     metric_delta: Optional[float] = None
 
@@ -146,39 +147,68 @@ def new_run_id(project_id: str) -> str:
 
 # ─────────────────────────── 能力判分（无正则/无 pattern 匹配）───────────────
 
+def _norm_file(f: str) -> str:
+    f = (f or "").replace("\\", "/").strip()
+    i = f.find("Assets/")
+    return f[i:] if i >= 0 else f
+
+
+def _norm_method(m: str) -> str:
+    m = (m or "").strip().replace("()", "")
+    if "::" in m:
+        m = m.split("::")[-1]
+    return m.split(".")[-1]
+
+
+def normalize_file(f: str) -> str:
+    return _norm_file(f)
+
+
+def normalize_method(m: str) -> str:
+    return _norm_method(m)
+
+
 def _split_anchor(anchor: str) -> tuple[str, str]:
-    """oracle 的 `Assets/.../File.cs::Method` → (file, method)。"""
+    """oracle 的 `Assets/.../File.cs::Method` → (file, method)，统一归一化。"""
     if "::" in anchor:
         f, m = anchor.split("::", 1)
-        return f.strip().replace("\\", "/"), m.strip()
-    return anchor.strip().replace("\\", "/"), ""
+        return _norm_file(f), _norm_method(m)
+    return _norm_file(anchor), ""
 
 
-def _anchor_matches(a: Anchor, file: str, method: str) -> bool:
-    if a.file.replace("\\", "/") != file:
+def _norm_ts(s: str) -> str:
+    return str(s or "").replace("T", " ")
+
+
+def _anchor_matches(a: Anchor, file: str, method: str,
+                    accept: list[str] | tuple[str, ...] = ()) -> bool:
+    if _norm_file(a.file) != file:
         return False
     if method:
-        return bool(a.method) and a.method.split(".")[-1] == method.split(".")[-1]
-    # oracle 没有方法名时，退化为行区间重叠（都未给行号则只按文件算命中，但需 state 明确）
-    if a.start_line and a.end_line:
-        return True
-    return bool(a.method)
+        am = _norm_method(a.method)
+        return bool(am) and (am == method
+                             or am in {_norm_method(x) for x in accept})
+    if accept:
+        return _norm_method(a.method) in {_norm_method(x) for x in accept}
+    # oracle 只给文件（例如资产类），同文件即命中
+    return True
 
 
 def score_run(paper: dict, run: RunFindings) -> dict:
     """按能力维度判分：发现（位置匹配）/ 误报 / 修复 / 可复现。"""
     expectations = paper.get("expectations") or []
     exp = [(e.get("mechanism", ""), *_split_anchor(str(e.get("anchor", ""))),
-            e.get("metric", "")) for e in expectations]
+            e.get("metric", ""),
+            tuple(e.get("accept_methods") or [])) for e in expectations]
     findings = run.findings
     matched: list[dict] = []
     used: set[int] = set()
-    for mech, file, method, metric in exp:
+    for mech, file, method, metric, accept in exp:
         hit = None
         for i, f in enumerate(findings):
             if i in used:
                 continue
-            if any(_anchor_matches(a, file, method) for a in f.anchors):
+            if any(_anchor_matches(a, file, method, accept) for a in f.anchors):
                 hit = (i, f)
                 break
         if hit:
@@ -187,7 +217,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
                             "metric": metric, "finding_id": hit[1].finding_id,
                             "finding_mechanism": hit[1].mechanism})
     fn = [{"mechanism": m, "anchor": f"{f}::{meth}", "metric": mt}
-          for (m, f, meth, mt) in exp
+          for (m, f, meth, mt, _acc) in exp
           if not any(x["mechanism"] == m and x["anchor"] == f"{f}::{meth}"
                      for x in matched)]
     fp = [{"finding_id": f.finding_id, "mechanism": f.mechanism,
@@ -202,7 +232,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
             "finding_id": m["finding_id"],
             "plan_id": (r.plan_id if r else ""),
             "compile_ok": bool(r and r.compile_ok),
-            "gameplay_ok": (r.gameplay_ok if r else None),
+            "runnable": (r.runnable if r else None),
             "verdict": (r.verdict if r else ""),
             "effective": bool(r and r.compile_ok and r.gameplay_ok is not False
                               and r.verdict in ("resolved", "verified")),
@@ -219,14 +249,17 @@ def score_run(paper: dict, run: RunFindings) -> dict:
     repair = {
         "matched": len(matched),
         "compiled": sum(1 for r in repair_rows if r["compile_ok"]),
+        "runnable": sum(1 for r in repair_rows if r["runnable"]),
         "effective": sum(1 for r in repair_rows if r["effective"]),
         "rows": repair_rows,
     }
-    # 可复现：同一协议指纹的多次运行，findings 位置集合是否一致
+    # 可复现：同一协议指纹、且在本考卷生成之后的多次运行，findings 位置集合是否一致
+    since = _norm_ts(paper.get("created_at") or "")
     same = [r for r in load_runs(run.project_id)
             if r.run_id != run.run_id
             and r.protocol_fingerprint
-            and r.protocol_fingerprint == run.protocol_fingerprint]
+            and r.protocol_fingerprint == run.protocol_fingerprint
+            and (not since or _norm_ts(r.created_at) >= since)]
     if same:
         def key(r):
             return {(a.file, a.method) for f in r.findings for a in f.anchors}

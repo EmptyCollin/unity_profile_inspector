@@ -10,7 +10,7 @@ from typing import Any
 from upi.core.replay_spec import ReplayCommand, ReplaySpec
 
 SUPPORTED = {"start_game", "load_scene", "swap", "wait", "open_shop", "stop",
-             "set_board", "resolve"}
+             "set_board", "resolve", "resolve_board"}
 
 
 class UnsupportedCommand(ValueError):
@@ -70,6 +70,11 @@ class ReplayExecutor:
         code = self._game() + 'return g.DebugResolveStep();'
         return self.eval(code)
 
+    def resolve_board(self) -> Any:
+        """完整同步结算（走 ResolveAllSync），用于检验消除路径上的缺陷。"""
+        code = self._game() + 'return g.DebugResolveBoard();'
+        return self.eval(code)
+
     def open_shop(self) -> Any:
         code = (self._game() +
                 'var m=g.GetType().GetMethod("OpenShop",'
@@ -107,6 +112,8 @@ class ReplayExecutor:
                     "state": self.set_board(cmd.board_n or 0, cmd.colors or [], cmd.layers)}
         if cmd.type == "resolve":
             return {"type": "resolve", "state": self.resolve()}
+        if cmd.type == "resolve_board":
+            return {"type": "resolve_board", "state": self.resolve_board()}
         if cmd.type == "open_shop":
             return {"type": "open_shop", "state": self.open_shop()}
         raise UnsupportedCommand(cmd.type)

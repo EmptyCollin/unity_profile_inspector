@@ -8,12 +8,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from upi.agents.fixer import apply_diffs  # noqa: E402
 from upi.core.repair_recipe import (plan_board_buffer_reuse,  # noqa: E402
                                     plan_for_candidate, plan_hud_text_cache,
                                     plan_item_label_cache)
 from upi.core.source_index import SourceIndex  # noqa: E402
+from _compose import compose  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -23,7 +25,8 @@ def ok(name, cond, detail=""):
     print(f"  [{'ok' if cond else 'FAIL'}] {name}" + ("" if cond else f" -> {detail}"))
 
 
-PROJECT = ROOT / "sim" / "project"
+# 配方要的是“当前源码里真的有缺陷模板”：用组合病例工程，不用干净 base
+PROJECT = compose(["c01", "c02", "c03"], prefix="upi_recipe_proj_")
 idx = SourceIndex.build(PROJECT)
 plan = plan_item_label_cache(PROJECT, idx)
 ok("recipe 生成 plan", plan is not None)

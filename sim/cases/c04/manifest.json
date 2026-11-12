@@ -18,5 +18,11 @@
       "shopOpen": true
     }
   },
-  "pattern_id": "payload_asset_oversized"
+  "pattern_id": "payload_asset_oversized",
+  "capability": {
+    "mechanism": "oversized_resource_asset",
+    "anchor": "Assets/Resources/DevSim/payload_0.txt",
+    "accept_methods": [],
+    "metric": "total_used_memory"
+  }
 }

@@ -11,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from _compose import compose  # noqa: E402
 
 from upi.agents.webui import WebUI  # noqa: E402
 from upi.config.project_profile import reset_profile  # noqa: E402
@@ -30,7 +33,7 @@ def ok(name, cond, detail=""):
 
 TMP = Path(tempfile.mkdtemp(prefix="upi_cand_web_"))
 E.isolate(TMP / "runs")
-PROJECT = ROOT / "sim" / "project"
+PROJECT = compose(["c02"])
 reset_profile()
 reg = ProjectRegistry(E.PROJECTS)
 e = reg.add(project_path=PROJECT, display_name="Chroma Rogue",

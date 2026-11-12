@@ -20,5 +20,14 @@
       "ChromaGame.RefreshItemLabelsBody"
     ]
   },
-  "pattern_id": "item_label_rebuild_per_frame"
+  "pattern_id": "item_label_rebuild_per_frame",
+  "capability": {
+    "mechanism": "item_label_rebuild_per_frame",
+    "anchor": "Assets/DevSim/Runtime/ChromaGame.cs::RefreshItemLabelsBody",
+    "accept_methods": [
+      "RefreshItemLabels",
+      "RefreshItemLabelsBody"
+    ],
+    "metric": "cpuMainThreadFrameTimeMs"
+  }
 }

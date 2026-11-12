@@ -55,8 +55,10 @@ public static class UpiMarkerEvidence
             if (!File.Exists(CfgPath)) return;
             string j = File.ReadAllText(CfgPath);
             _maxThreads = (int)Math.Min(64, Math.Max(1, ReadNum(j, "board_threads", 8)));
-            _framesBack = (int)Math.Min(16, Math.Max(1, ReadNum(j, "board_frames", 8)));
-            _budgetMs = (long)Math.Min(20000, Math.Max(500, ReadNum(j, "board_budget_ms", 5000)));
+            _framesBack = (int)Math.Min(600, Math.Max(1, ReadNum(j, "marker_frames",
+                ReadNum(j, "board_frames", 8))));
+            double budget = ReadNum(j, "marker_budget_ms", 5000);
+            _budgetMs = (long)Math.Min(30000.0, Math.Max(500.0, budget));
             _action = ReadStr(j, "marker_action", "none");
         }
         catch (Exception) { }

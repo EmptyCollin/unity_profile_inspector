@@ -17,7 +17,7 @@
     {
       "pattern_id": "per_clear_particle_instantiate",
       "metric": "gc_alloc_per_frame",
-      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::Burst",
+      "code_anchor": "Assets/DevSim/Runtime/ChromaGame.cs::ResolveAllSync",
       "reference_kind": "static",
       "reference_ref": "每次消除不应 Instantiate/Destroy UI 粒子",
       "risk": "low"
