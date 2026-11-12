@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Unity.Profiling;
 
 namespace DevSim
 {
@@ -15,6 +16,8 @@ namespace DevSim
         public int Colors { get; }
         public int[,] Color { get; private set; }
         public int[,] Layers { get; private set; }
+        private static readonly ProfilerMarker FindMatchesMarker =
+            new ProfilerMarker("BoardModel.FindMatches");
 
         public BoardModel(int n, int colors)
         {
@@ -123,6 +126,11 @@ namespace DevSim
         }
 
         public bool[,] FindMatches()
+        {
+            using (FindMatchesMarker.Auto()) return FindMatchesBody();
+        }
+
+        private bool[,] FindMatchesBody()
         {
             var hit = new bool[N, N];
             for (int r = 0; r < N; r++)

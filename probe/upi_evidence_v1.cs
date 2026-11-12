@@ -23,7 +23,8 @@ public static class UpiEvidenceV1
     static readonly string[] MarkerNames = {
         "ChromaGame.Update", "ChromaGame.UpdateHud",
         "ChromaGame.RefreshItemLabels", "ChromaGame.UpdateBody",
-        "ChromaGame.ResolvePendingWhenIdle"
+        "ChromaGame.ResolvePendingWhenIdle",
+        "BoardModel.FindMatches"
     };
 
     public static string Main()
@@ -67,7 +68,7 @@ public static class UpiEvidenceV1
     static void Capture()
     {
         int last = ProfilerDriver.lastFrameIndex;
-        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 1);
+        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 3);
         if (first < 0) first = last;
         try { File.WriteAllText(Out + ".start", "start " + first + "-" + last); } catch (Exception) { }
         var frames = new List<int>();
