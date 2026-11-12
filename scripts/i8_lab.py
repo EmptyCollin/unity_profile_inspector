@@ -45,6 +45,64 @@ TOUCHED = LAB / "touched.json"
 COMPILE = LAB / "compile.json"
 REPLAY = LAB / "replay.json"
 
+# 取证参数：用户可改（文件或页面），探针每次采集前读取。
+CAPTURE_CFG = ROOT / "config" / "i8_lab.json"
+PROBE_CFG = ROOT / "runs" / "_probe" / "capture_cfg.json"
+CFG_DEFAULTS = {
+    "evidence_threads": 8,
+    "evidence_frames": 8,
+    "evidence_budget_ms": 6000,
+    "board_threads": 8,
+    "board_frames": 4,
+    "board_budget_ms": 5000,
+}
+CFG_LIMITS = {
+    "evidence_threads": (1, 64),
+    "evidence_frames": (1, 32),
+    "evidence_budget_ms": (500, 20000),
+    "board_threads": (1, 64),
+    "board_frames": (1, 8),
+    "board_budget_ms": (500, 20000),
+}
+
+
+def load_capture_cfg() -> dict:
+    cfg = dict(CFG_DEFAULTS)
+    try:
+        raw = json.loads(CAPTURE_CFG.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        raw = {}
+    for k, (lo, hi) in CFG_LIMITS.items():
+        v = raw.get(k)
+        if isinstance(v, int) and not isinstance(v, bool):
+            cfg[k] = max(lo, min(hi, v))
+    return cfg
+
+
+def save_capture_cfg(body: dict) -> dict:
+    cfg = load_capture_cfg()
+    for k, (lo, hi) in CFG_LIMITS.items():
+        v = body.get(k)
+        if v is None:
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f"{k} 必须是整数")
+        iv = int(v)
+        if not (lo <= iv <= hi):
+            raise ValueError(f"{k} 超出范围 [{lo},{hi}]：{iv}")
+        cfg[k] = iv
+    CAPTURE_CFG.parent.mkdir(parents=True, exist_ok=True)
+    CAPTURE_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n",
+                           encoding="utf-8")
+    return cfg
+
+
+def _write_probe_cfg() -> dict:
+    cfg = load_capture_cfg()
+    PROBE_CFG.parent.mkdir(parents=True, exist_ok=True)
+    PROBE_CFG.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    return cfg
+
 MODES = {"diagnostic", "combo"}
 CAPTURE_LIMIT = 60
 
@@ -547,6 +605,7 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
     play = _ensure_play()
     if not play.get("ok"):
         return {"ok": False, "error": play.get("error"), "editor": play.get("editor")}
+    cfg = _write_probe_cfg()
     mem0 = _editor_mem()
     if (mem0.get("mb") or 0) > 5000:
         return {"ok": False,
@@ -839,6 +898,13 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 <div class="card"><b>选择 case</b><div id="cases"></div>
 <div class="small" id="selInfo"></div></div>
 
+<div class="card"><b>取证参数</b> <span class="small">（下一次采集生效）</span><br>
+取证线程 <input id="cfgThreads" type="number" min="1" max="64" style="width:70px">
+取证帧数 <input id="cfgFrames" type="number" min="1" max="32" style="width:70px">
+预算ms <input id="cfgBudget" type="number" min="500" max="20000" style="width:90px">
+板子帧数 <input id="cfgBoardFrames" type="number" min="1" max="8" style="width:70px">
+<button onclick="saveCfg()">保存参数</button> <span id="cfgMsg" class="small"></span></div>
+
 <div class="card" id="diagPanel"><b>真实诊断流程</b>
 <div class="hint small">单 case 单独跑、单独看候选。c01 用 Board 窗口；c02/c03 用 HUD 窗口；c04 只做资产检测。
 顺序：组合 → 检查 Unity → 应用 → 执行 replay → 定向采集 → Agent → 修复计划 → 执行修复 → 恢复。</div>
@@ -883,7 +949,22 @@ async function init(){
   const d=await api('/api/cases');
   document.getElementById('cases').innerHTML=d.cases.map(c=>`<label><input type="checkbox" value="${c.case_id}"> <b>${c.case_id}</b> — ${c.notes||''} <span class="small">窗口:${(c.windows||[]).join(',')||'-'} 期望:${(c.symbols||[]).join(',')||'-'}</span></label>`).join('');
   setMode('diagnostic');
+  loadCfg();
 }
+async function loadCfg(){const d=await api('/api/config');if(!d.ok)return;
+  const c=d.config||{};
+  document.getElementById('cfgThreads').value=c.evidence_threads;
+  document.getElementById('cfgFrames').value=c.evidence_frames;
+  document.getElementById('cfgBudget').value=c.evidence_budget_ms;
+  document.getElementById('cfgBoardFrames').value=c.board_frames;}
+async function saveCfg(){
+  const body={evidence_threads:+document.getElementById('cfgThreads').value,
+              evidence_frames:+document.getElementById('cfgFrames').value,
+              evidence_budget_ms:+document.getElementById('cfgBudget').value,
+              board_frames:+document.getElementById('cfgBoardFrames').value};
+  const d=await api('/api/config',body);
+  document.getElementById('cfgMsg').textContent=d.ok?('已保存：线程 '+d.config.evidence_threads
+      +' / 帧 '+d.config.evidence_frames+' / 预算 '+d.config.evidence_budget_ms+'ms'):('失败：'+d.error);}
 function selected(){return [...document.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);}
 function show(r){const ok=r&&r.ok;document.getElementById('msg').innerHTML=ok?'<span class="ok">完成</span>':'<span class="bad">失败</span>';
   document.getElementById('out').textContent=JSON.stringify(r,null,2);}
@@ -900,8 +981,7 @@ async function coverage(){show(await api('/api/coverage',{mode:MODE}));}
 async function restore(){show(await api('/api/restore',{mode:MODE}));}
 async function loadCandidates(){show(await api('/api/candidates'));}
 async function loadPreviewInfo(){show(await api('/api/preview_info'));}
-init();
-</script></body></html>"""
+init();</script></body></html>"""
 
 
 class H(BaseHTTPRequestHandler):
@@ -936,6 +1016,9 @@ class H(BaseHTTPRequestHandler):
             if not PREVIEW.exists():
                 return self._send(200, {"ok": False, "error": "还没有组合"})
             return self._send(200, json.loads(PREVIEW.read_text(encoding="utf-8")))
+        if p == "/api/config":
+            return self._send(200, {"ok": True, "config": load_capture_cfg(),
+                                    "defaults": CFG_DEFAULTS, "limits": CFG_LIMITS})
         self._send(404, {"ok": False})
 
     def do_POST(self):
@@ -973,6 +1056,12 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, run_repair())
             if p == "/api/coverage":
                 return self._send(200, combo_coverage())
+            if p == "/api/config":
+                try:
+                    return self._send(200, {"ok": True,
+                                            "config": save_capture_cfg(body)})
+                except ValueError as e:
+                    return self._send(400, {"ok": False, "error": str(e)})
             if p == "/api/restore":
                 return self._send(200, restore_base())
         except Exception as e:  # noqa: BLE001

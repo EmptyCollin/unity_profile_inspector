@@ -15,11 +15,46 @@ return UpiBoardEvidence.LastLine;
 public static class UpiBoardEvidence
 {
     const string Out = @"D:/unity_profile_inspector/runs/_probe/board_evidence.json";
+    const string CfgPath = @"D:/unity_profile_inspector/runs/_probe/capture_cfg.json";
     public static string LastLine = "";
     static int _startFrame;
     static int _resolveFrame;
     static DateTime _startUtc;
     static bool _done;
+    static int _maxThreads = 8;
+    static int _framesLimit = 4;
+    static long _budgetMs = 5000;
+
+    static void LoadCfg()
+    {
+        try
+        {
+            if (!File.Exists(CfgPath)) return;
+            string j = File.ReadAllText(CfgPath);
+            _maxThreads = (int)Math.Min(64, Math.Max(1, ReadNum(j, "board_threads", 8)));
+            _framesLimit = (int)Math.Min(8, Math.Max(1, ReadNum(j, "board_frames", 4)));
+            _budgetMs = (long)Math.Min(20000, Math.Max(500, ReadNum(j, "board_budget_ms", 5000)));
+        }
+        catch (Exception) { }
+    }
+
+    static double ReadNum(string json, string key, double dflt)
+    {
+        int i = json.IndexOf("\"" + key + "\"");
+        if (i < 0) return dflt;
+        int c = json.IndexOf(':', i);
+        if (c < 0) return dflt;
+        int j = c + 1;
+        while (j < json.Length && (json[j] == ' ' || json[j] == '\t' || json[j] == '\n' || json[j] == '\r')) j++;
+        int k = j;
+        while (k < json.Length && (char.IsDigit(json[k]) || json[k] == '.' || json[k] == '-' || json[k] == '+'))
+            k++;
+        double v;
+        if (k > j && double.TryParse(json.Substring(j, k - j),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out v)) return v;
+        return dflt;
+    }
 
     static string Q(string s)
     {
@@ -37,6 +72,7 @@ public static class UpiBoardEvidence
 
     public static string Main()
     {
+        LoadCfg();
         // 在本件内部触发 resolve：若由外部 eval 触发，再 eval 本件时已经过去 1~2 秒，
         // resolve 帧会落在扫描窗口之外（实测 last=66 而 resolve 在 45）。
         var g = UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();
@@ -87,24 +123,24 @@ public static class UpiBoardEvidence
         // 按“最新优先”会把真正含 marker 的帧挤掉（实测只扫到 113/112）。
         var order = new List<int>();
         foreach (int f in new int[] { _resolveFrame + 1, _resolveFrame, _resolveFrame + 2, _resolveFrame - 1 })
-            if (f >= firstAvailable && f <= last) order.Add(f);
+            if (f >= firstAvailable && f <= last && order.Count < _framesLimit) order.Add(f);
         var funcs = new Dictionary<string, long[]>();
         var allocs = new List<string>();
         var frames = new List<int>();
         foreach (int frame in order)
         {
-            if (budget.ElapsedMilliseconds > 5000) { truncated = true; break; }
+            if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
             frames.Add(frame);
-            for (int ti = 0; ti < 8; ti++)
+            for (int ti = 0; ti < _maxThreads; ti++)
             {
-                if (budget.ElapsedMilliseconds > 5000) { truncated = true; break; }
+                if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
                 using (var view = ProfilerDriver.GetRawFrameDataView(frame, ti))
                 {
                     if (!view.valid) break;
                     int n = view.sampleCount;
                     for (int i = 0; i < n; i++)
                     {
-                        if (budget.ElapsedMilliseconds > 5000) { truncated = true; break; }
+                        if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
                         string name = view.GetSampleName(i);
                         if (name == null) continue;
                         if (name == "GC.Alloc" && allocs.Count < 16)

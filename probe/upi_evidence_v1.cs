@@ -17,11 +17,16 @@ return UpiEvidenceV1.LastLine;
 public static class UpiEvidenceV1
 {
     const string Out = @"D:/unity_profile_inspector/runs/_probe/evidence_v1.json";
+    const string CfgPath = @"D:/unity_profile_inspector/runs/_probe/capture_cfg.json";
     public static string LastLine = "";
     static int _ticks;
     static bool _done;
     static int _startFrame;
     static DateTime _startUtc;
+    // 取证参数（用户可在 config/i8_lab.json 或 Lab 页面改；每次采集前由 Lab 写到这里）
+    static int _maxThreads = 8;
+    static int _framesBack = 8;
+    static long _budgetMs = 6000;
     static bool _weEnabledProfiler, _weEnabledDriver, _weEnabledDeep, _weEnabledAlloc;
     static bool _prevProfileEditor;
     static readonly Dictionary<string, ProfilerRecorder> _rec = new Dictionary<string, ProfilerRecorder>();
@@ -34,6 +39,7 @@ public static class UpiEvidenceV1
 
     public static string Main()
     {
+        LoadCfg();
         // 只在这些开关确实关闭时才打开：反复“打开已打开”的 profiler 会重启采样流，
         // 实测可把 ProfilerEditor 缓冲推到 1GB 并在采集途中 OOM 崩溃。
         try { if (!Profiler.enabled) { Profiler.enabled = true; _weEnabledProfiler = true; } } catch (Exception) { }
@@ -94,6 +100,37 @@ public static class UpiEvidenceV1
         try { ProfilerDriver.ClearAllFrames(); } catch (Exception) { }
     }
 
+    static void LoadCfg()
+    {
+        try
+        {
+            if (!File.Exists(CfgPath)) return;
+            string j = File.ReadAllText(CfgPath);
+            _maxThreads = (int)Math.Min(64, Math.Max(1, ReadNum(j, "evidence_threads", 8)));
+            _framesBack = (int)Math.Min(32, Math.Max(1, ReadNum(j, "evidence_frames", 8)));
+            _budgetMs = (long)Math.Min(20000, Math.Max(500, ReadNum(j, "evidence_budget_ms", 6000)));
+        }
+        catch (Exception) { }
+    }
+
+    static double ReadNum(string json, string key, double dflt)
+    {
+        int i = json.IndexOf("\"" + key + "\"");
+        if (i < 0) return dflt;
+        int c = json.IndexOf(':', i);
+        if (c < 0) return dflt;
+        int j = c + 1;
+        while (j < json.Length && (json[j] == ' ' || json[j] == '\t' || json[j] == '\n' || json[j] == '\r')) j++;
+        int k = j;
+        while (k < json.Length && (char.IsDigit(json[k]) || json[k] == '.' || json[k] == '-' || json[k] == '+'))
+            k++;
+        double v;
+        if (k > j && double.TryParse(json.Substring(j, k - j),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out v)) return v;
+        return dflt;
+    }
+
     static void DisposeRecorders()
     {
         foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }
@@ -107,7 +144,7 @@ public static class UpiEvidenceV1
         var budget = Stopwatch.StartNew();
         bool truncated = false;
         int last = ProfilerDriver.lastFrameIndex;
-        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 7);
+        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - (_framesBack - 1));
         if (first < 0) first = last;
         try { File.WriteAllText(Out + ".start", "start " + first + "-" + last); } catch (Exception) { }
         var frames = new List<int>();
@@ -118,11 +155,11 @@ public static class UpiEvidenceV1
         // 从最新帧往前扫：预算不足时优先保住“刚发生”的帧，旧帧被截断没关系。
         for (int frame = last; frame >= first; frame--)
         {
-            if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
+            if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
             frames.Add(frame);
-            for (int ti = 0; ti < 32; ti++)
+            for (int ti = 0; ti < _maxThreads; ti++)
             {
-                if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
+                if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
                 using (var view = ProfilerDriver.GetRawFrameDataView(frame, ti))
                 {
                     if (!view.valid) break;
@@ -130,7 +167,7 @@ public static class UpiEvidenceV1
                     int n = view.sampleCount;
                     for (int i = 0; i < n; i++)
                     {
-                        if (budget.ElapsedMilliseconds > 6000) { truncated = true; break; }
+                        if (budget.ElapsedMilliseconds > _budgetMs) { truncated = true; break; }
                         string name = view.GetSampleName(i);
                         if (string.IsNullOrEmpty(name)) continue;
 
@@ -229,7 +266,11 @@ public static class UpiEvidenceV1
            .Append(",\"enabled_deep\":").Append(_weEnabledDeep ? "true" : "false")
            .Append(",\"enabled_alloc_callstacks\":").Append(_weEnabledAlloc ? "true" : "false")
            .Append(",\"restore_on_exit\":true,\"truncated\":")
-           .Append(truncated ? "true" : "false").Append("}}").Append("}");
+           .Append(truncated ? "true" : "false")
+           .Append(",\"capture_cfg\":{\"threads\":").Append(_maxThreads)
+           .Append(",\"frames\":").Append(_framesBack)
+           .Append(",\"budget_ms\":").Append(_budgetMs)
+           .Append("}}}").Append("}");
         Directory.CreateDirectory(Path.GetDirectoryName(Out));
         File.WriteAllText(Out, sb2.ToString(), new UTF8Encoding(false));
         foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }
