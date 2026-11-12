@@ -54,6 +54,7 @@ python sim/oracle/evaluate.py --case c18
 - 当前是**静态模式匹配 + 运行期 feature 门控**：游戏启动时写
   `%TEMP%/devsim_active_features.json`，扫描器只报当前 case 激活的分支；
 - 24 case 全跑结果：**recall=1.0、precision=1.0、3 个负对照全过**；
+- 拖拽 begin/drag/end 已用 ExecuteEvents 验证（events=3）；真实鼠标手感待验收。
 - 若没有运行期 feature 状态，静态扫描仍会报休眠分支（这是已知局限）。
 
 ## source-aware planner（I7d 起步）
