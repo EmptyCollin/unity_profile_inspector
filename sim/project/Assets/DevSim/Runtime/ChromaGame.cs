@@ -42,15 +42,14 @@ namespace DevSim
 
         private enum Phase { Lobby, Playing, Preview, Shop, Bonus, Over }
 
-        private CaseConfig cfg;
+        private RunConfig cfg;
         private System.Random rng;
         private Font font;
         private Canvas canvas;
         private RectTransform canvasRect;
         private GameObject gameRoot, lobbyRoot, shopPanel, bonusPanel, overPanel, previewPanel;
         private RectTransform boardRoot, sideRect;
-        private GameObject helpPanel, caseMenu;
-        private Text caseButtonLabel;
+        private GameObject helpPanel;
 
         private BoardModel model;
         private int boardN;
@@ -62,7 +61,6 @@ namespace DevSim
         private Vector2[,] tileBase;
         private readonly Dictionary<int, Sprite> tileSprites = new Dictionary<int, Sprite>();
         private readonly Dictionary<int, Sprite> iconSprites = new Dictionary<int, Sprite>();
-        private readonly List<Sprite> _spritesLegacy = new List<Sprite>();
 
         private Text roundText, targetText, scoreText, timeText, coinText, statusText, highText;
         private Text shopCoins, overText, stepText, previewTitle, previewBody, previewCountdown;
@@ -140,7 +138,7 @@ namespace DevSim
 
         private void Start()
         {
-            cfg = CaseConfig.Load();
+            cfg = new RunConfig();
             WriteFeatureState(cfg);
             rng = new System.Random(cfg.seed);
             tier = cfg.start_tier;
@@ -292,27 +290,15 @@ namespace DevSim
         private sealed class FeatureState
         {
             public string project_path;
-            public bool legacy_ui, legacy_material, legacy_match_alloc, sync_shop_load;
-            public bool legacy_particle, legacy_canvas, legacy_texture, legacy_hint;
-            public bool legacy_anim;
         }
 
-        private static void WriteFeatureState(CaseConfig c)
+        private static void WriteFeatureState(RunConfig c)
         {
             try
             {
                 var fs = new FeatureState
                 {
                     project_path = Path.GetDirectoryName(Application.dataPath).Replace("\\", "/"),
-                    legacy_ui = c.legacy_ui,
-                    legacy_material = c.legacy_material,
-                    legacy_match_alloc = c.legacy_match_alloc,
-                    sync_shop_load = c.sync_shop_load,
-                    legacy_particle = c.legacy_particle,
-                    legacy_canvas = c.legacy_canvas,
-                    legacy_texture = c.legacy_texture,
-                    legacy_hint = c.legacy_hint,
-                    legacy_anim = c.legacy_anim,
                 };
                 // 运行期特征状态，仅用于“当前激活了哪些路径”。
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "devsim_active_features.json"),
@@ -413,7 +399,7 @@ namespace DevSim
 
         private void BuildFxPool()
         {
-            // 基线：粒子池；legacy_particle 分支才 Instantiate/Destroy。
+            // 基线：粒子池复用。
             for (int i = 0; i < 32; i++)
             {
                 var img = MakePanel(canvas.transform, 0, 0, 20, 20, Color.white, "Fx" + i);
@@ -440,40 +426,12 @@ namespace DevSim
                    new Color(0.18f, 0.42f, 0.32f), 24);
             MakeButton(lobbyRoot.transform, "说明", 150, 408, 300, 52, ShowHelp,
                    new Color(0.18f, 0.23f, 0.3f), 20);
-            var caseBtn = MakeButton(lobbyRoot.transform, "", 150, 474, 400, 50,
-                   ToggleCaseMenu, new Color(0.12f, 0.18f, 0.26f), 16);
-            caseButtonLabel = caseBtn.GetComponentInChildren<Text>();
-            caseButtonLabel.text = "专项测试  c18 · 混合  ▾";
             MakeLabel(lobbyRoot.transform, "LOCAL ARCADE", 830, 336, 300, 26, 18, new Color(0.9f, 0.75f, 0.4f));
             MakeLabel(lobbyRoot.transform, "Top scores are stored on this machine.", 830, 366, 320, 50, 15,
                    new Color(0.65f, 0.76f, 0.88f));
             MakeLabel(lobbyRoot.transform, "v0.3 · 时间驱动回合 · 动态棋盘 · 拖拽道具 · no network",
                    150, 566, 900, 26, 14, new Color(0.4f, 0.5f, 0.62f));
-            BuildCaseMenu();
             BuildHelp();
-        }
-
-        private void BuildCaseMenu()
-        {
-            caseMenu = new GameObject("CaseMenu", typeof(RectTransform));
-            caseMenu.transform.SetParent(lobbyRoot.transform, false);
-            var rt = caseMenu.GetComponent<RectTransform>();
-            rt.anchorMin = rt.anchorMax = new Vector2(0, 1);
-            rt.pivot = new Vector2(0, 1);
-            rt.anchoredPosition = new Vector2(150, -532);
-            rt.sizeDelta = new Vector2(920, 300);
-            MakePanel(caseMenu.transform, 0, 0, 920, 300, new Color(0.04f, 0.07f, 0.11f, 0.99f), "CaseBg");
-            MakeLabel(caseMenu.transform, "专项测试（选中即启动，等价于 replay --case）", 16, 8, 860, 24, 14,
-                  new Color(0.75f, 0.85f, 0.95f));
-            for (int i = 0; i < DevSimScenarios.Ids.Length; i++)
-            {
-                string id = DevSimScenarios.Ids[i];
-                float x = 16 + (i % 2) * 460;
-                float y = 38 + (i / 2) * 21;
-                MakeButton(caseMenu.transform, DevSimScenarios.Label(id), x, y, 430, 19,
-                       () => StartCase(id), new Color(0.1f, 0.16f, 0.23f), 11);
-            }
-            caseMenu.SetActive(false);
         }
 
         private void BuildHelp()
@@ -501,29 +459,14 @@ namespace DevSim
             helpPanel.SetActive(false);
         }
 
-        private void ToggleCaseMenu()
-        {
-            if (caseMenu != null) caseMenu.SetActive(!caseMenu.activeSelf);
-        }
-
         private void StartDefaultGame()
         {
-            cfg = new CaseConfig
+            cfg = new RunConfig
             {
                 seed = 20261112,
                 round_seconds = 30f, target_base = 600,
             };
             WriteFeatureState(cfg);
-            caseButtonLabel.text = "专项测试  c18 · 混合  ▾";
-            StartGame();
-        }
-
-        private void StartCase(string id)
-        {
-            cfg = DevSimScenarios.For(id);
-            WriteFeatureState(cfg);
-            caseButtonLabel.text = "专项测试  " + DevSimScenarios.Label(id) + "  ▾";
-            if (caseMenu != null) caseMenu.SetActive(false);
             StartGame();
         }
 
@@ -825,7 +768,6 @@ namespace DevSim
             pendingRoundEnd = pendingGameOver = false;
             ShowOnlyOverlay(null);
             if (gameRoot) gameRoot.SetActive(false);
-            if (caseMenu) caseMenu.SetActive(false);
             if (helpPanel) helpPanel.SetActive(false);
             if (lobbyRoot) lobbyRoot.SetActive(true);
             RefreshHighScores();
@@ -844,7 +786,6 @@ namespace DevSim
             for (int i = 0; i < inventory.Length; i++) inventory[i] = 0;
             for (int i = 0; i < lastPerColor.Length; i++) lastPerColor[i] = 0;
             if (lobbyRoot) lobbyRoot.SetActive(false);
-            if (caseMenu) caseMenu.SetActive(false);
             if (helpPanel) helpPanel.SetActive(false);
             if (gameRoot) gameRoot.SetActive(true);
             ShowOnlyOverlay(null);
@@ -892,10 +833,6 @@ namespace DevSim
                 }
             }
             else busySince = 0f;
-            if (cfg.legacy_canvas && sideRect != null)
-                sideRect.sizeDelta = new Vector2(652, 560);
-            if (cfg.legacy_hint && phase == Phase.Playing) HasMatch();
-            if (cfg.legacy_anim && phase == Phase.Playing) AnimateTilesLegacy();
             float dt = Time.deltaTime;
             if (phase == Phase.Playing)
             {
@@ -919,7 +856,7 @@ namespace DevSim
                 }
             }
             ResolvePendingWhenIdle();
-            if (cfg.legacy_ui || Time.unscaledTime >= nextHud)
+            if (Time.unscaledTime >= nextHud)
             {
                 nextHud = Time.unscaledTime + 0.1f;
                 UpdateHud();
@@ -942,19 +879,6 @@ namespace DevSim
         private bool HasMatch()
         {
             return model != null && model.HasMatch();
-        }
-
-        private void AnimateTilesLegacy()
-        {
-            // “图省事”的逐帧 UI 动画：所有格子每帧重算缩放。
-            for (int r = 0; r < boardN; r++)
-                for (int c = 0; c < boardN; c++)
-                {
-                    var rt = tileRects[r, c];
-                    if (rt == null) continue;
-                    float s = 1f + 0.002f * Mathf.Sin(Time.time * 4f + (r + c) * 0.25f);
-                    rt.localScale = new Vector3(s, s, 1f);
-                }
         }
 
         private void UpdateHud()
@@ -1063,19 +987,6 @@ namespace DevSim
                     tileArmor[r, c] = label;
                     tileBase[r, c] = rt.anchoredPosition;
                     boardCells.Add(go);
-
-                    if (cfg.legacy_texture)
-                    {
-                        // 每格一份独立纹理：像素与共享贴图完全一致（外观不变），只是浪费显存/上传带宽。
-                        var sp = MakeTileSprite((int)tilePx);
-                        _spritesLegacy.Add(sp);
-                        img.sprite = sp;
-                    }
-                    if (cfg.legacy_material)
-                    {
-                        var sh = Shader.Find("UI/Default");
-                        if (sh != null) img.material = new Material(sh);
-                    }
                 }
             }
             RefreshTiles();
@@ -1234,7 +1145,6 @@ namespace DevSim
             if (a != null) a.anchoredPosition = pa;
             if (b != null) b.anchoredPosition = pb;
             RefreshTiles();
-            if (cfg.legacy_match_alloc) { var waste = new List<int>(); for (int i = 0; i < 64; i++) waste.Add(i); }
             yield return StartCoroutine(ResolveRoutine());
             busy = false;
         }
@@ -1264,12 +1174,6 @@ namespace DevSim
                 var plan = PlanDrop(removedMask);
                 model.ApplyDamage(hit, out int removed);
                 o.removed += removed;
-                if (cfg.legacy_particle)
-                {
-                    for (int r = 0; r < boardN; r++)
-                        for (int c = 0; c < boardN; c++)
-                            if (hit[r, c]) Burst(r, c, model.Color[r, c]);
-                }
                 totalScore += n * 10 * multiplier * o.chain;
                 model.DropAndRefill(rng, tier, cfg.stack_chance_base, cfg.stack_chance_per_tier);
                 RefreshTiles();
@@ -1507,15 +1411,6 @@ namespace DevSim
         private void Burst(int r, int c, int color)
         {
             Color col = color >= 0 ? (Color)Palette[color] : Color.white;
-            if (cfg.legacy_particle)
-            {
-                var img = MakePanel(canvas.transform,
-                                    BoardX + BoardPad + c * (tilePx + gapPx),
-                                    BoardY + BoardPad + r * (tilePx + gapPx),
-                                    22, 22, col, "fx");
-                StartCoroutine(FadeFx(img));
-                return;
-            }
             if (_fxPool.Count == 0) return;
             var pooled = _fxPool[_fxCursor];
             _fxCursor = (_fxCursor + 1) % _fxPool.Count;
@@ -1717,23 +1612,7 @@ namespace DevSim
         private void OpenShop()
         {
             if (busy) { pendingRoundEnd = true; return; }
-            if (cfg.sync_shop_load)
-            {
-                // 故意保留同步等待路径：case 用它测“打开商店卡主线程”
-                int ok = 0;
-                for (int i = 0; i < 24; i++)
-                {
-                    var h = Addressables.LoadAssetAsync<TextAsset>("devsim/payload_" + (i % 8));
-                    h.WaitForCompletion();
-                    if (h.Status == AsyncOperationStatus.Succeeded) ok++;
-                    Addressables.Release(h);
-                }
-                Debug.Log("DevSim sync Addressables: " + ok + "/24");
-            }
-            else
-            {
-                StartCoroutine(LoadShopAsync());
-            }
+            StartCoroutine(LoadShopAsync());
             phase = Phase.Shop;
             shopVisits++;
             shopMessage = "";

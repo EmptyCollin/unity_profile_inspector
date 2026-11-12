@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using UnityEngine;
 
 namespace DevSim
@@ -7,18 +6,9 @@ namespace DevSim
     // 由外部命令传入的运行配置；工程本身不包含期望结果。
     // 轮次/棋盘/商店规则全部走这里，UI 与 replay 共用同一份数值。
     [Serializable]
-    public sealed class CaseConfig
+    public sealed class RunConfig
     {
         public int seed = 20261112;
-        public bool legacy_ui = false;
-        public bool legacy_material = false;
-        public bool legacy_match_alloc = false;
-        public bool sync_shop_load = false;
-        public bool legacy_particle = false;
-        public bool legacy_canvas = false;
-        public bool legacy_texture = false;
-        public bool legacy_hint = false;
-        public bool legacy_anim = false;
         public bool autoplay = false;
         public bool pause_on_bonus = false;
 
@@ -58,29 +48,6 @@ namespace DevSim
             int step = Mathf.Max(1, board_step_rounds);
             int shrink = Mathf.Max(0, round - 1) / step;
             return Mathf.Clamp(start - shrink, min, start);
-        }
-
-        public static CaseConfig Load()
-        {
-            var cfg = new CaseConfig();
-            var args = Environment.GetCommandLineArgs();
-            string path = null;
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i] == "--devsim-case") path = args[i + 1];
-            }
-            if (string.IsNullOrEmpty(path))
-                path = Environment.GetEnvironmentVariable("DEVSIM_CASE");
-            if (string.IsNullOrEmpty(path))
-                path = Path.Combine(Path.GetTempPath(), "devsim_case.json");
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
-            {
-                try { cfg = JsonUtility.FromJson<CaseConfig>(File.ReadAllText(path)) ?? cfg; }
-                catch (Exception e) { Debug.LogWarning("DevSim case config ignored: " + e.Message); }
-            }
-            cfg.seed = cfg.seed == 0 ? 20261112 : cfg.seed;
-            cfg.start_tier = Mathf.Clamp(cfg.start_tier, 1, 6);
-            return cfg;
         }
     }
 }
