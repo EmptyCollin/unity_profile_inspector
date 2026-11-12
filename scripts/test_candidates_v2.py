@@ -66,6 +66,20 @@ ok("单帧标 single_frame", all(c.interval_basis == "single_frame" for c in cs)
 ok("候选带区间", all(c.score_interval_low <= c.score <= c.score_interval_high
                  for c in cs))
 
+mf = bundle.model_copy(deep=True)
+mf.frames = [7, 8]
+mf.functions.append(FunctionStat(frame_idx=8, symbol="Foo.Update", calls=20,
+                                 total_ms=4.0, self_ms=3.0, source=span))
+mf.allocations.append(AllocationSite(frame_idx=8, bytes=2048, count=5,
+                                     stack=[frame], source=span))
+mf.callstacks.append(CallStackSample(frame_idx=8, frames=[frame], weight=4.0))
+mf_cs = generate_candidates(mf, project_root=proj)
+mf_alloc = next(c for c in mf_cs if c.kind == "allocation")
+ok("多帧 bootstrap 区间", mf_alloc.interval_basis == "bootstrap"
+   and mf_alloc.evidence_n == 2
+   and mf_alloc.score_interval_low <= mf_alloc.score <= mf_alloc.score_interval_high,
+   mf_alloc)
+
 fp = FingerprintStore(tmp / "fp.db")
 fp.seed_builtin()
 with_fp = generate_candidates(bundle, g, project_root=proj, fingerprint_store=fp)

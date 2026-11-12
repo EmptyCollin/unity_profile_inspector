@@ -82,7 +82,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
             code_anchors=[f"{file}:{line}"],
             sources=[span],
             evidence_ids=a["evidence"],
-            score=float(a["bytes"] * max(1, a["count"])),
+            score=float(sum(a["vals"])),
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
