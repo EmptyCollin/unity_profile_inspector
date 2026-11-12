@@ -1,11 +1,14 @@
 @echo off
+title I8 Lab
 setlocal
 cd /d "%~dp0"
 
-rem I8 Lab one-click start.
+rem I8 Lab one-click start (development/acceptance bench, port 8787).
 rem ASCII-only on purpose: a UTF-8 batch file with non-ASCII text can be
 rem mis-parsed by cmd.exe before chcp takes effect, which makes the window
 rem close instantly. Keep this file plain ASCII.
+rem The Lab runs in THIS window (foreground). Closing the window or Ctrl+C
+rem stops it; the Unity editor is left running.
 
 if not exist "scripts\i8_lab.py" (
   echo [ERROR] scripts\i8_lab.py not found. Run this file from the repo root.
@@ -43,7 +46,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/2] Starting I8 Lab ...
+echo [2/2] Starting I8 Lab on http://127.0.0.1:8787
+echo [Lab] Keep this window open while you use the Lab.
+echo [Lab] Closing this window or Ctrl+C stops the Lab (Unity stays open).
+echo.
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8787'"
 python scripts\i8_lab.py --port 8787
 echo.
