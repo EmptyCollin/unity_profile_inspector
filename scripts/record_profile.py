@@ -33,7 +33,7 @@ def main() -> int:
               "--output-path", str(out), "--timeout-seconds", str(a.timeout),
               "--deep-profile", "true")
     started = ((r.get("data") or {}).get("result") or {})
-    if started.get("status") not in {"recording", "completed"}:
+    if started.get("status") not in {"queued", "recording", "completed"}:
         print(json.dumps({"started": started, "error": r.get("errors")},
                          ensure_ascii=False, indent=2)[:1200])
         return 1
