@@ -20,12 +20,18 @@ def main() -> int:
     ap.add_argument("--evidence", required=True)
     ap.add_argument("--out", default="")
     ap.add_argument("--limit", type=int, default=12)
+    ap.add_argument("--fingerprint-db", default="")
     a = ap.parse_args()
 
     project = Path(a.project).resolve()
     bundle = EvidenceBundleV2(**json.loads(Path(a.evidence).read_text(encoding="utf-8")))
     g = EvidenceGraph.from_bundle(bundle, project)
-    candidates = generate_candidates(bundle, g, project_root=project, limit=a.limit)
+    store = None
+    if a.fingerprint_db:
+        from upi.core.fingerprint import FingerprintStore
+        store = FingerprintStore(Path(a.fingerprint_db))
+    candidates = generate_candidates(bundle, g, project_root=project, limit=a.limit,
+                                     fingerprint_store=store)
     result = {
         "run_id": bundle.run_id,
         "project_id": bundle.project_id,

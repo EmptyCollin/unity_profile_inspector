@@ -13,6 +13,7 @@ from upi.core.evidence_graph import EvidenceGraph  # noqa: E402
 from upi.core.evidence_v2 import (AllocationSite, CallStackFrame,  # noqa: E402
                                   CallStackSample, EvidenceBundleV2,
                                   FunctionStat, RenderObjectStat)
+from upi.core.fingerprint import FingerprintStore  # noqa: E402
 from upi.core.source_index import SourceIndex  # noqa: E402
 
 PASS, FAIL = [], []
@@ -60,6 +61,15 @@ ok("候选有源码", cs[0].sources and cs[0].sources[0].file.endswith("Foo.cs")
 ok("候选不来自 EditorLoop", all("EditorLoop" not in c.root_cause for c in cs))
 ok("候选有 evidence id", all(c.evidence_ids for c in cs))
 ok("候选 limit", len(generate_candidates(bundle, g, project_root=proj, limit=1)) == 1)
+
+fp = FingerprintStore(tmp / "fp.db")
+fp.seed_builtin()
+with_fp = generate_candidates(bundle, g, project_root=proj, fingerprint_store=fp)
+alloc = next((c for c in with_fp if c.kind == "allocation"), None)
+ok("指纹只做 prior", alloc is not None and alloc.prior > 0
+   and alloc.source_kind == "evidence+fingerprint", alloc)
+novel = generate_candidates(bundle, g, project_root=proj)
+ok("无指纹仍是候选", any(c.prior == 0 for c in novel))
 
 print(f"\n==== 证据图/候选测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 raise SystemExit(1 if FAIL else 0)

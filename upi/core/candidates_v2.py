@@ -36,7 +36,8 @@ def _span_of(node_data: dict) -> Optional[SourceSpan]:
 
 def generate_candidates(bundle: EvidenceBundleV2,
                         graph: Optional[EvidenceGraph] = None,
-                        project_root=None, limit: int = 12) -> list[CandidateV2]:
+                        project_root=None, limit: int = 12,
+                        fingerprint_store=None) -> list[CandidateV2]:
     g = graph or EvidenceGraph.from_bundle(bundle, project_root)
     out: list[CandidateV2] = []
     seen: set[tuple] = set()
@@ -133,5 +134,26 @@ def generate_candidates(bundle: EvidenceBundleV2,
             score=float(e["weight"]) * 100.0,
         ))
 
-    out.sort(key=lambda c: (c.score, c.prior), reverse=True)
+    if fingerprint_store is not None:
+        from upi.core.fingerprint import FingerprintFeatures, FingerprintStore
+        store: FingerprintStore = fingerprint_store
+        metric_of = {
+            "per_frame_allocation": ("gc_alloc_per_frame", "step", "sample", "A2"),
+            "hot_path": ("frame_time_ms", "spike", "breach", "A4"),
+            "callstack_hot_path": ("frame_time_ms", "spike", "breach", "A4"),
+        }
+        for c in out:
+            spec = metric_of.get(c.mechanism)
+            if not spec:
+                continue
+            metric, shape, kind, tier = spec
+            f = FingerprintFeatures(metric=metric, shape=shape, kind=kind,
+                                    data_tier=tier, rel_bucket=-1)
+            rec, score, _second = store.lookup(f)
+            if rec is not None and score > 0:
+                # 指纹只是 prior：只加分，不做准入门槛；没命中仍是 novel 候选。
+                c.prior = round(float(score), 4)
+                c.source_kind = "evidence+fingerprint"
+
+    out.sort(key=lambda c: (c.score + c.score * c.prior, c.prior), reverse=True)
     return out[:limit]
