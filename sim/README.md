@@ -52,6 +52,17 @@ python sim/oracle/evaluate.py --case c18
 - 22 case 全跑结果：**recall=1.0、precision=1.0、3 个负对照全过**；
 - 若没有运行期 feature 状态，静态扫描仍会报休眠分支（这是已知局限）。
 
+## source-aware planner（I7d 起步）
+
+```powershell
+python scripts/plan_opportunity.py --project sim/project --pattern ui_text_rebuild_per_frame
+```
+
+- 只读当前源码；
+- `find` 必须在当前文件精确命中一次，否则返回 None（转人工）；
+- 不读 `_refs`、不按 profile_id 分流；
+- 当前覆盖 6 个 devsim pattern；`sync Addressables` 还没有通用模板。
+
 ## 尚未完成
 
 - 22 个 case 的 oracle 已生成，但还没有评测器逐项打分；
