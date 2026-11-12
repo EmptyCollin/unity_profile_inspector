@@ -172,8 +172,8 @@ def execute(plan: EditPlan, snap: Optional[Snapshot], *,
     try:
         # planner 的 file 可能是“工程内相对路径”；旧模板是“仓库根相对路径”。
         # 两边都支持：默认 root 找不到、但在 project_path 下能找到时，改用工程根。
-        apply_root = root
-        if apply_root and project_path and plan.diffs:
+        apply_root = Path(root) if root else ROOT
+        if project_path and plan.diffs:
             rp = Path(apply_root)
             pp = Path(project_path)
             if all(not (rp / d["file"]).exists() and (pp / d["file"]).exists()

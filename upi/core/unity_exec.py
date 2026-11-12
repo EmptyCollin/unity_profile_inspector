@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 from typing import Callable, Optional
 
 from upi.core import events as E
@@ -77,6 +78,21 @@ class UnityTicketExecutor:
         self.project = project or _profile().abs_project
         self.scene = scene if scene is not None else default_scene()
 
+    def _keep_commit(self, snap: Snapshot, ticket: BatchTicket, item: TicketItem) -> None:
+        """把已 applied 的 patch 提交，保证下一 patch 的快照仍然干净。"""
+        root = Path(snap.root).resolve()
+        try:
+            rel = self.project.resolve().relative_to(root).as_posix()
+        except ValueError:
+            rel = "."
+        subprocess.run(["git", "add", "--", rel], cwd=str(root),
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", check=False)
+        subprocess.run(["git", "commit", "-m",
+                        f"[upi-keep] {ticket.ticket_id} {item.item_id} {item.pattern_id}"],
+                       cwd=str(root), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", check=False)
+
     def execute(self, ticket: BatchTicket) -> BatchTicket:
         if ticket.status != "approved":
             ticket.results.append({"error": f"未批准（{ticket.status}）"})
@@ -118,6 +134,7 @@ class UnityTicketExecutor:
                 )
                 st = str((rep or {}).get("status") or "")
                 if st == "applied":
+                    self._keep_commit(snap, ticket, item)
                     item.status = "applied_unverified"
                     item.observation = self.observe_fn() or {}
                     ticket.results.append({
