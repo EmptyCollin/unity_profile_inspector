@@ -37,9 +37,11 @@
    - **不保留兼容性**：旧 `projects/*.json`、旧 API/CLI 可直接替换；不做迁移层/双读/fallback。
 6. **I7 计划**：I7b 工程管理优先，I7b2 真实开发模拟工程，I7c 机会发现，
    I7d 通用 planner，I7e GPU/ANIM/LOAD + 负对照，I7f 真实工程。
-7. **devsim（I7b2）**：一个综合 Unity 工程、统一默认场景、≥10 个日常 case +
-   2 个负对照；case 是“图省事/忘配置”的开发写法，不是故意破坏；oracle 放
-   `sim/oracle`，**不进工程路径、不进工具 workspace**；UI 跳转与 replay 同路由。
+7. **devsim（I7b2）**：一个综合 Unity 工程 **Chroma Rogue**（8×8 三消 + 轻肉鸽，
+   30s/轮、目标分结转、5 连 BONUS、每 5 轮商店、商店后难度/高级色块）；
+   统一默认场景；**17 个常规 case + 2 个混合 case + 3 个负对照（共 22）**；
+   Addressables；全包体 <30MB；case 是“图省事/忘配置”的开发写法，不是故意破坏；
+   oracle 放 `sim/oracle`，**不进工程路径、不进工具 workspace**；UI 跳转与 replay 同路由。
 
 ## 影响
 

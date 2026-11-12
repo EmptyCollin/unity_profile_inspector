@@ -1,4 +1,4 @@
-# DESIGN.md — 自动化性能优化管线（最小集）v0.18
+# DESIGN.md — 自动化性能优化管线（最小集）v0.19
 
 > 需求条目：REQ-1~REQ-9 功能需求 / DOM-1~DOM-5 技术领域 / SCN-1 场景锚定（定义见 §0，全文按编号引用）
 > 技术底座：Unity CLI 1.0.0-beta.6 + Unity 6000.6.7f1 + Python 3.14.3 + LangChain/LangGraph
@@ -10,7 +10,7 @@
 > v0.5 变更：确认密钥注入方式=系统级持久环境变量（用户自行设置，管线不代设不收集值）；确认连通性测试时机=第一次使用时跑（D11 补充）；llm_config.yaml 同步
 > v0.6 变更：配置层代码落地（§2.3.3 双通道表、注册表回退与通道门禁实测）；连通性测试实测四步全通过，model id 按服务商列表校正为 `deepseek-flash`；§12 补记 4 项实测事实
 > v0.7 变更：M0/M0' 实跑——夹具工程与 Pipeline 0.10.0 就位、191 条命令面实测；新增 §2.2.1 实测修正（无头模式渲染恒为 0 ⇒ 门禁 G16 与指纹字段 `editor_mode`；回调跨 eval 存活但静态字段不存活且旧回调卸不掉；update 频率 2100/s ≠ 帧率；`get_performance` 为上一帧快照）；契约门禁自测 6/6 通过
-> v0.18 变更（2026-11-12）：**不保留兼容性，功能优先**。① 工具尚无使用者/历史包袱，旧 `projects/*.json`、旧 API/CLI、旧 profile 字段不做兼容读取、不做迁移层、不双读、不 fallback；② `ProjectRegistry` 成为工程事实源，旧 profile 只允许作为测试夹具；③ 明确“planner 从当前源码+证据生成 diff，禁止按 `profile_id` 分流”的人话解释；④ 安全约束（快照/审批/fail-closed/不回退夹具）保留，它们不是兼容性。
+> v0.19 变更（2026-11-12）：**devsim 具体化**。① 模拟工程定为 **Chroma Rogue**：8×8 三消 + 轻肉鸽，30s/轮、目标分结转、5 连 BONUS、每 5 轮商店、商店后难度/高级色块；② 明确本地街机式 Top 10、商店道具/价格、难度概率；③ 美术走轻量霓虹/生成资产/CC0，全包体 <30MB；④ Addressables 分组与加载/卸载 case；⑤ case 扩到 **17 常规 + 2 混合 + 3 负对照（22）**；⑥ oracle 仍严格隔离在工程路径/工具 workspace 之外。
 > v0.15 变更（2026-11-11）：**渲染计数数据源改判（#27/#29，exp5/exp6/exp7 + 5298 行句柄全量表）**。① "注入读渲染计数恒 0"根因改判为句柄名口径错误（真名带 `Count` 后缀）+ `UI Toolkit` 同名遮蔽；双条件定位（名字==目标 且 类目==Render）修复后 A2 逐帧注入与轮询在 F-GPU-01 比值 1.00（n=300）——D1"不写插件 + 注入常驻采样器"恢复成立。② G16 重写：Draw/SetPass/Triangles/Vertices 双源可用（A2 主源 + 1Hz 轮询哨兵交叉核对，量级不符或注册失败即 fail-loud 拒收）；无头渲染恒 0 与 Play Mode 约束**维持不变**；batches 因 Render 类目无汇总句柄仍轮询单源。③ G19：渲染计数逐笔 spike detector 解禁；GPU 发作口径（A4 gpuFrameTime）与逐笔归因（转人工）**未被推翻**。④ `sampler_v3`→v3.1：Targets 全换实测真名 + 双条件定位 + 定位不到拒装报 skipped；`Mono Used Memory`/`Update Time`/`Frame Time` 短名经句柄表逐行证实不存在，移出 Targets 并记口径归属。⑤ G20 清单新增第 5 项（batches 注入等价性无从对表），item1 范围收窄为仅 GPU 归因，并封堵旧"detector 注册即 unlocked"的虚报检出入口（I1）。⑥ 换数据源 ⇒ `data_tier` A→A2 变更，既有标定/bundle 按 G7 不可比，#30 重标定是条文义务。⑦ exp7 作废留档：`QualitySettings.enableDynamicBatching` 在 Unity 6000 不存在（eval 内层 CS0117），同批撞出"eval 实验必须查内层 diagnostics，否则把编译失败当活代码"的方法学教训（§2.2.1 事实 12）。
 > v0.14 变更（2026-11-09）：M6 / M6' / M7 统计与报告层落地。① 新增 §7.1 聚合底座实装（SQLite 六表增量幂等 + G13 untraced 剔除 + `upi stats`）；② §7.3 A 形态落地为 `upi report` 单文件 HTML 七视图，G20 不可检出清单与检出率**同屏渲染**（代码层面保证拆不开）；③ §8.7 体检表六项改为可计算并已接进升维提案——阈值**从 `knowledge._CHECKLIST` 的判定函数反查**，报告与提案共用一份口径；实测 3 项达标、3 项受结构性样本不足限制；④ §8.1 的 tuning/holdout 隔离从"靠人工自觉"落为强制校验闸 `scripts/check_fixture_split.py`（S1/S2/S3 三条检查，并用变异测试证明其拦截力）。四处判据修正均由本轮实测撞出：聚合层**不得跨文件按时间戳猜配对**（run_id 是开始时刻、日志 ts 是结束时刻，实测只配上 1/13，会把有结论的轮次写成"0 检出"的静默轮 = 违反 B7）⇒ 改为只读轮次自身 `state.json`；未评估盲区只存在于**最后一条 `kind=verify` 记录**（顶层 `verdict.unevaluated` 为空）；检出率分母须排除缺 `detector` 字段的早期观测并显式报排除数（否则算出假 0）；留出泄漏判据以"可回溯至 CLEAN 重算"为主、"等于留出中位"仅作升级——单看后者会对跨夹具同值指标（gc_alloc_per_frame/triangles/vertices 等实测同值）产生假阳性。
 > v0.13 变更（2026-11-09）：真机全链实测 + 独立运行形态。新增 §2.5 运行形态（常驻守护 / 控制台 UI / 手动开关采样 / 优雅停止）；记忆体守护口径改两侧各自 fresh post-GC，不响应 GC 者（含同物理量双路径别名）降级未评估盲区；G11 预算护栏改节点感知（attempts 只拦 fix 入口、计数点在 verify 出判定处、作废崩溃不烧配额）；真实模型端到端归因首次实跑，保留通路实测 verdict=resolved；AGENTS 同步至 v0.8（§1.5 双分支 / G11 / G20 第四项）。
@@ -976,7 +976,105 @@ sim/
 - 同一套路由给 replay 用：UI 按钮和 `--case` 走同一个 `CaseRouter`；
 - 工程内不出现“case 1/2/3”这类暴露评测意图的命名；case 编号只存在 oracle 与外部 replay 映射。
 
-#### 14.12.4 case 设计原则
+#### 14.12.4 游戏设计：Chroma Rogue（工作名）
+
+**定位**：轻量三消 + 轻度肉鸽，像真实小体量商业原型；用于机会发现评测，
+不是“缺陷演示”。
+
+**一局**：
+
+- 8×8 棋盘，5 种基础色块；相邻交换，3 连及以上消除，支持连锁；
+- 每轮 **30 秒倒计时**；本轮目标分数 `target = 600 + 300 × (round-1)`；
+- 本轮得分超过 target 的部分**结转到下一轮**，不浪费；
+- 未达 target 或时间耗尽 → 本局结束，进入结算；
+- 消除 **≥5 个色块** → 暂停，进入 **BONUS 三选一**：
+  - 得分系数 +10%（叠加）；
+  - 本轮/下轮时长 +1s；
+  - 开局多 1 个炸弹；
+  - 连锁得分 +2%；
+  - 商店免费重随 1 次；
+  - 高级色块护甲 -1。
+- 每 **5 轮**进一次商店，商店结束后难度等级 +1。
+
+**商店/经济**：
+
+- 货币 `coins`：每轮结束按 `20 + round×5 + 超出 target 的分数/200` 结算；
+- 商店 3 个货架 + 1 次重随（50 coins）；道具栏最多 3 个，局内可用；
+- 道具设计（价格可调，先作为评测基线）：
+
+| 道具 | 效果 | 价格 |
+|---|---|---:|
+| 炸弹 | 3×3 消除；高级色块护甲 -1 | 120 |
+| 改色卡 | 把选中色块改成指定色 | 80 |
+| 锤子 | 单格消除；护甲 -1 | 100 |
+| 洗牌 | 重排棋盘 | 60 |
+| 时间冻结 | 下一轮 +5s | 150 |
+| 双倍得分 | 下一轮得分 ×2 | 200 |
+| 破甲 | 全场高级色块护甲 -1 | 180 |
+
+**高级色块（难度）**：
+
+- 商店后难度 `tier` 提升；
+- 每轮按概率刷出高级色块：`p = min(0.05 + 0.07×tier, 0.45)`；
+- 色块上有数字 `2..N`，`N = min(2 + tier, 6)`；
+- 数字是护甲/倒计时：每执行一次**玩家交换**，全场高级色块数字 -1；
+- 数字 >0 时**不允许与其他色块换位**；炸弹/锤子可减护甲或直接消除；
+- 数字归零后变成普通色块，可正常交换/匹配。
+
+**结算/街机感**：
+
+- 本地存档：最高分 Top 10，记录 3 字母缩写、分数、轮次、日期、seed；
+- 不依赖服务器；可用 JSON/PlayerPrefs；
+- 结算页有“再来一局/回主菜单/清空记录”。
+
+**场景流**：
+
+```text
+00_Bootstrap → 10_Lobby → 20_Game ↔ 30_Shop/31_BonusDraft → 40_Results
+```
+
+- `00_Bootstrap` 是唯一入口/默认场景；
+- 10_Lobby 用正常 UI：开始游戏 / 商店练习 / 背包 / 战斗 / 设置；
+- 20_Game 是主玩法；30_Shop/31_BonusDraft 是暂停态叠加 UI；
+- case 只通过 `CaseRouter` 改变种子/棋盘/难度/资源组合，不改变“像正常游戏”的外观。
+
+**确定性**：
+
+- 棋盘、掉落、高级色块概率全部由 `seed + case` 驱动；
+- 不使用全局 `UnityEngine.Random`；以便 replay 对齐；
+- 30s/计时以游戏内帧/固定步长推进，避免墙钟漂移。
+
+#### 14.12.4.1 美术、资产与 Addressables
+
+**风格**：轻量霓虹/扁平街机风，深色背景 + 高饱和色块 + 简洁 UI；靠配色、
+粒子、缩放/缓动、屏幕轻微震动做“好看”，不靠大贴图/视频。
+
+**资源策略**：
+
+- 优先用脚本/编辑器工具生成简单贴图、图标、色块、粒子、UI 九宫格；
+- 需要外部素材时只用 **CC0/免版权**（如 Kenney/OpenGameArt），保留
+  `LICENSES.md` 与来源；不使用来源不明/需署名但未署名的素材；
+- 全包体 **<30MB，目标 20MB**：UI 纹理 256/512、图集合并、压缩；
+  UI 不开 mipmap；音频 OGG 64~96kbps；无视频、无大字体全集；
+- Editor `Library/` 不计入包体；以 Player build/Addressables 产物统计为准。
+
+**Addressables 分组**：
+
+| 组 | 内容 | 用途 |
+|---|---|---|
+| `core` | 启动、基础 UI、棋盘 | 常驻 |
+| `ui` | Lobby/Shop/Results 皮肤 | 异步加载/释放 |
+| `audio` | BGM/SFX | 按场景加载 |
+| `bonus` | 肉鸽技能图标/描述 | 按需 |
+| `shop` | 商品图标/特效 | 按需 |
+| `themes` | 可选配色/节日皮肤 | 测试卸载 |
+
+- 用 `Addressables.LoadAssetAsync` / `InstantiateAsync`，句柄必须释放；
+- 覆盖重复加载、句柄泄漏、场景切换未释放、同步等待等 case（c02/c09）；
+- 地址名用领域语义（`shop/item/bomb`），不使用 `case/defect` 命名。
+
+
+#### 14.12.5 case 设计原则
 
 **像开发者会写的东西**，而不是“故意写坏”：
 
@@ -1000,7 +1098,37 @@ sim/
 - 机会可能“看起来像 bug”，也可能只是“没做但能做”；
 - 不写“这里是缺陷”的注释，不用 `F-`/`DEFECT`/`fixture` 命名。
 
-#### 14.12.5 replay 入口
+**case 矩阵（建议 17 常规 + 2 混合 + 3 负对照，共 22；后续可扩展）**：
+
+| ID | 入口/场景 | 类型 | 可能的机会（1..N） |
+|---|---|---|---|
+| `c01` | Lobby 大厅 | 日常 | 每帧刷新公告文本/字符串拼接；Canvas 重建 |
+| `c02` | Lobby 大厅 | 日常 | Addressables 重复加载且未释放句柄 |
+| `c03` | Game 棋盘 | 日常 | 每帧匹配扫描里 new List/LINQ（分配） |
+| `c04` | Game 棋盘 | 日常 | 棋盘格 `GetComponent`/每帧查找 |
+| `c05` | Game 棋盘 | 日常 | 每块独立 `.material`，打断合批 |
+| `c06` | Game 棋盘 | 日常 | 消除粒子每次 Instantiate/Destroy |
+| `c07` | Game 棋盘 | 日常 | 提示/洗牌同步全盘扫描卡主线程 |
+| `c08` | Game 棋盘 | 日常 | 分数 TMP 每帧 SetText |
+| `c09` | Shop 商店 | 日常 | 打开商店时同步 Addressables/Resources 全量加载 |
+| `c10` | Shop 商店 | 日常 | 商品卡每项独立材质 + 每帧改色 |
+| `c11` | Shop 商店 | 日常 | `ContentSizeFitter`/Layout 每帧 rebuild |
+| `c12` | BonusDraft | 日常 | 每帧无条件写 Animator 参数 |
+| `c13` | BonusDraft | 日常 | 全屏半透明叠层过绘制 |
+| `c14` | Results 结算 | 日常 | 排行榜 JSON/字符串拼接在主线程，每次全量重写 |
+| `c15` | Game 音频 | 日常 | 音频 decompress on load、过多 AudioSource |
+| `c16` | 全局 UI | 日常 | 纹理未压缩/开 mipmap/图集拆分 |
+| `c17` | Game/UI | 日常 | GraphicRaycaster 全屏扫描/Physics2D 过度检测 |
+| `c18` | Lobby→Game | **混合** | 公告文本 + Addressables 重复加载 + 棋盘材质实例（3 个机会） |
+| `c19` | Game→Bonus→Shop | **混合** | 匹配分配 + Animator 参数 + 商店布局 rebuild（3 个机会） |
+| `c20` | Lobby/Game | **负对照** | 已做缓存/池化/合批，0 机会 |
+| `c21` | Game | **负对照** | 只有高级色块锁定玩法，无性能机会（0 机会） |
+| `c22` | Shop | **负对照** | 合理的异步加载/对象池，0 机会 |
+
+混合 case 的目标是验证“同一场景多个机会能分别定位、分别报价、分别修复”，
+不是把多个缺陷硬塞进一个文件。case 数量后续可扩到 30+。
+
+#### 14.12.6 replay 入口
 
 ```text
 python -m upi dev devsim-replay --project sim/project --case c04
@@ -1012,7 +1140,7 @@ python -m upi dev devsim-replay --project sim/project --case c04
 - case id 对工具是 opaque 的，不附带 expected findings；
 - 失败（场景缺失/入口不可达）如实报错。
 
-#### 14.12.6 评测
+#### 14.12.7 评测
 
 - oracle 记录：`case_id`、入口、replay 步骤、expected opportunities（pattern/metric/reference/allowed fix/risk）、负对照标记；
 - 工具产出 `OpportunityFinding` 后，**由评测器**与 oracle 比对：
@@ -1022,14 +1150,17 @@ python -m upi dev devsim-replay --project sim/project --case c04
 - oracle 不参与工具推理，也不得出现在工具日志/报告中；
 - 工具若“猜到 case id 对应什么”不算能力，评测只看证据和代码锚点。
 
-#### 14.12.7 验收（I7b2）
+#### 14.12.8 验收（I7b2）
 
 1. `sim/project` 可被 UI 选中，默认场景能打开；
 2. 默认场景 UI 能进入每个 case；replay 也能进入同一 case；
 3. 工程内无 oracle/答案痕迹（自动校验）；
-4. 至少 10 个日常 case + 2 个负对照；
-5. 每个 case 至少有 1 个可解释机会或明确 0 机会；
-6. 工具运行时 workspace 不含 oracle，仍能产出机会；
-7. 评测报告能区分“漏报/误报/正确机会”，不把 0 机会 case 当失败。
+4. 至少 **17 个常规 case + 2 个混合 case + 3 个负对照（共 22）**；
+5. 每个 case 至少有 1 个可解释机会或明确 0 机会；混合 case 的机会可分别定位；
+6. 工程能通过 UI 从默认场景进入全部 case，replay 也能走同一路由；
+7. 工具运行时 workspace 不含 oracle，仍能产出机会；
+8. Addressables 组可加载/卸载；case 能覆盖异步加载、句柄释放、重复加载；
+9. 全包体 <30MB（目标 20MB），资源许可证清单齐全；
+10. 评测报告能区分“漏报/误报/正确机会”，不把 0 机会 case 当失败。
 
 ---
