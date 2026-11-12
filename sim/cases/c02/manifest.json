@@ -10,5 +10,14 @@
   "replay": "c02",
   "oracle": "c02",
   "base_hash": "e616c40678022314",
-  "notes": "HUD static text rebuilt every update (minimal patch)"
+  "notes": "HUD static text rebuilt every update (minimal patch)",
+  "expects": {
+    "windows": [
+      "hud"
+    ],
+    "symbols": [
+      "ChromaGame.UpdateHud",
+      "ChromaGame.UpdateHudBody"
+    ]
+  }
 }

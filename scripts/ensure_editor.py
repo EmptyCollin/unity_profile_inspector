@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def call(*args):
+    # CLI 只接受“一段命令名”：`editor status` 必须作为单个 argv 传入；
+    # 拆成 editor / status 会被当成命令名 editor，报 Command Not Found。
     p = subprocess.run(["unity", *args, "--project-path", "sim/project",
                         "--format", "json"], cwd=str(ROOT), capture_output=True,
                        text=True, encoding="utf-8", errors="replace")
@@ -24,7 +26,7 @@ def call(*args):
 def status():
     last = None
     for _ in range(3):
-        r = call("command", "editor", "status")
+        r = call("command", "editor status")
         if r.get("success"):
             s = ((r.get("data") or {}).get("result") or {})
             if s.get("status"):

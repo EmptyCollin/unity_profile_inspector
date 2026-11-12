@@ -7,5 +7,15 @@
   "replay": "c04",
   "oracle": "c04",
   "base_hash": "e616c40678022314",
-  "notes": "oversized shop payload; asset-only case"
+  "notes": "oversized shop payload; asset-only case",
+  "expects": {
+    "windows": [
+      "shop"
+    ],
+    "symbols": [],
+    "assert": {
+      "phase": "Shop",
+      "shopOpen": true
+    }
+  }
 }

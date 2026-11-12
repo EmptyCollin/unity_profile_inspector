@@ -19,6 +19,10 @@ public static class UpiEvidenceV1
     public static string LastLine = "";
     static int _ticks;
     static bool _done;
+    static int _startFrame;
+    static DateTime _startUtc;
+    static bool _weEnabledProfiler, _weEnabledDriver, _weEnabledDeep, _weEnabledAlloc;
+    static bool _prevProfileEditor;
     static readonly Dictionary<string, ProfilerRecorder> _rec = new Dictionary<string, ProfilerRecorder>();
     static readonly string[] MarkerNames = {
         "ChromaGame.Update", "ChromaGame.UpdateHud",
@@ -29,11 +33,14 @@ public static class UpiEvidenceV1
 
     public static string Main()
     {
-        Profiler.enabled = true;
-        ProfilerDriver.enabled = true;
+        // 只在这些开关确实关闭时才打开：反复“打开已打开”的 profiler 会重启采样流，
+        // 实测可把 ProfilerEditor 缓冲推到 1GB 并在采集途中 OOM 崩溃。
+        try { if (!Profiler.enabled) { Profiler.enabled = true; _weEnabledProfiler = true; } } catch (Exception) { }
+        try { if (!ProfilerDriver.enabled) { ProfilerDriver.enabled = true; _weEnabledDriver = true; } } catch (Exception) { }
+        try { _prevProfileEditor = ProfilerDriver.profileEditor; } catch (Exception) { }
         try { ProfilerDriver.profileEditor = true; } catch (Exception) { }
-        try { ProfilerDriver.deepProfiling = true; } catch (Exception) { }
-        try { Profiler.enableAllocationCallstacks = true; } catch (Exception) { }
+        try { if (!ProfilerDriver.deepProfiling) { ProfilerDriver.deepProfiling = true; _weEnabledDeep = true; } } catch (Exception) { }
+        try { if (!Profiler.enableAllocationCallstacks) { Profiler.enableAllocationCallstacks = true; _weEnabledAlloc = true; } } catch (Exception) { }
         foreach (var name in MarkerNames)
         {
             try
@@ -45,6 +52,8 @@ public static class UpiEvidenceV1
         }
         _done = false;
         _ticks = 0;
+        _startFrame = ProfilerDriver.lastFrameIndex;
+        _startUtc = DateTime.UtcNow;
         EditorApplication.update += Tick;
         LastLine = "installed";
         return LastLine;
@@ -54,7 +63,12 @@ public static class UpiEvidenceV1
     {
         if (_done) return;
         _ticks++;
-        if (_ticks < 60) return;
+        // 按“帧”等待，而不是按 update tick：进入 Play Mode 后 profiler 历史很短，
+        // 60 tick(~30ms) 内可能连一帧都没有，最后 4 帧会完全错过 10Hz 的 HUD 更新。
+        int now = ProfilerDriver.lastFrameIndex;
+        bool enoughFrames = now - _startFrame >= 10;
+        bool timedOut = (DateTime.UtcNow - _startUtc).TotalSeconds > 4.0;
+        if (!enoughFrames && !timedOut) return;
         _done = true;
         EditorApplication.update -= Tick;
         try { Capture(); }
@@ -63,12 +77,32 @@ public static class UpiEvidenceV1
             LastLine = "capture-error: " + e;
             try { File.WriteAllText(Out + ".err", e.ToString()); } catch (Exception) { }
         }
+        finally { DisposeRecorders(); RestoreProfilerState(); }
+    }
+
+    /// <summary>采集结束必须把“录像机”关掉并清帧：否则编辑器会一直逐帧录制，
+    /// 内存随会话时间线性上涨（实测 4 分钟到 7GB，把 dwm/DSH 一起带崩）。</summary>
+    static void RestoreProfilerState()
+    {
+        // 先关掉只由本脚本打开的开关，再清已录帧释放缓冲；不动用户自己开着的状态。
+        try { if (_weEnabledAlloc) Profiler.enableAllocationCallstacks = false; } catch (Exception) { }
+        try { if (_weEnabledDeep) ProfilerDriver.deepProfiling = false; } catch (Exception) { }
+        try { if (_weEnabledDriver) ProfilerDriver.enabled = false; } catch (Exception) { }
+        try { if (_weEnabledProfiler) Profiler.enabled = false; } catch (Exception) { }
+        try { ProfilerDriver.profileEditor = _prevProfileEditor; } catch (Exception) { }
+        try { ProfilerDriver.ClearAllFrames(); } catch (Exception) { }
+    }
+
+    static void DisposeRecorders()
+    {
+        foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }
+        _rec.Clear();
     }
 
     static void Capture()
     {
         int last = ProfilerDriver.lastFrameIndex;
-        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 3);
+        int first = Math.Max(ProfilerDriver.firstFrameIndex, last - 11);
         if (first < 0) first = last;
         try { File.WriteAllText(Out + ".start", "start " + first + "-" + last); } catch (Exception) { }
         var frames = new List<int>();
@@ -92,7 +126,7 @@ public static class UpiEvidenceV1
                         if (string.IsNullOrEmpty(name)) continue;
 
                         // GC.Alloc 的样本名不叫工程符号；先处理调用栈，再过滤函数名。
-                        if (name == "GC.Alloc" && stacks.Count < 16)
+                        if (name == "GC.Alloc" && stacks.Count < 64)
                         {
                             var ptrs = new List<ulong>();
                             try { view.GetSampleCallstack(i, ptrs); } catch (Exception) { }
@@ -180,7 +214,12 @@ public static class UpiEvidenceV1
            .Append(",\"blindspots\":[")
            .Append("{\"code\":\"render_object_unavailable\",\"reason\":\"本采集器未接 FrameDebugger\",\"unlock\":\"FrameDebugger/RenderDoc\"}")
            .Append("],\"raw_refs\":[],\"meta\":{\"source\":\"rawframedataview-safe\",\"threads\":")
-           .Append(threads).Append(",\"frame_first\":").Append(first).Append(",\"frame_last\":").Append(last).Append("}}");
+           .Append(threads).Append(",\"frame_first\":").Append(first).Append(",\"frame_last\":").Append(last)
+           .Append(",\"probe_switches\":{\"enabled_profiler\":").Append(_weEnabledProfiler ? "true" : "false")
+           .Append(",\"enabled_driver\":").Append(_weEnabledDriver ? "true" : "false")
+           .Append(",\"enabled_deep\":").Append(_weEnabledDeep ? "true" : "false")
+           .Append(",\"enabled_alloc_callstacks\":").Append(_weEnabledAlloc ? "true" : "false")
+           .Append(",\"restore_on_exit\":true}}").Append("}");
         Directory.CreateDirectory(Path.GetDirectoryName(Out));
         File.WriteAllText(Out, sb2.ToString(), new UTF8Encoding(false));
         foreach (var kv in _rec) { try { kv.Value.Dispose(); } catch (Exception) { } }

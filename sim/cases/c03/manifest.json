@@ -10,5 +10,14 @@
   "replay": "c03",
   "oracle": "c03",
   "base_hash": "e616c40678022314",
-  "notes": "item labels rebuilt every update; same file as c02, different hunk"
+  "notes": "item labels rebuilt every update; same file as c02, different hunk",
+  "expects": {
+    "windows": [
+      "hud"
+    ],
+    "symbols": [
+      "ChromaGame.RefreshItemLabels",
+      "ChromaGame.RefreshItemLabelsBody"
+    ]
+  }
 }
