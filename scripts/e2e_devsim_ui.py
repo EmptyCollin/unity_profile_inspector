@@ -227,6 +227,55 @@ def main() -> int:
            "inv=" + str(st["inventory"][0]) + " cleared=" + str(st["lastCleared"]))
         shots.append(capture("devsim_v03_item_after_drop.png"))
 
+        # 现场 bug 复现：倒计时在消除动效途中归零 + 该步触发 BONUS。
+        # 期望：先等动效落完，只弹 BONUS；选完奖励后才进下一轮预告，不会两套遮罩死锁。
+        col4 = [(r * 2 + c) % 5 for r in range(6) for c in range(6)]
+        col4[3 * 6 + 0] = 2
+        col4[3 * 6 + 1] = 2
+        col4[3 * 6 + 2] = 1
+        col4[3 * 6 + 3] = 2
+        col4[2 * 6 + 2] = 2
+        col4[4 * 6 + 2] = 2
+        col4[5 * 6 + 2] = 2
+        eval_js("var g = UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();"
+                "g.DebugSetBoard(6, new int[]{" + ",".join(map(str, col4)) + "},"
+                "new int[]{" + ",".join(["1"] * 36) + "});"
+                "g.DebugSetScore(99999); g.DebugSetTime(0.15f);"
+                "var go = g.DebugTileObject(2,2);"
+                "var es = UnityEngine.EventSystems.EventSystem.current;"
+                "var ped = new UnityEngine.EventSystems.PointerEventData(es);"
+                "ped.button = UnityEngine.EventSystems.PointerEventData.InputButton.Left;"
+                "ped.position = new Vector2(Screen.width*0.5f, Screen.height*0.5f);"
+                "ped.delta = new Vector2(0f, -45f);"
+                "UnityEngine.EventSystems.ExecuteEvents.Execute(go,ped,"
+                "UnityEngine.EventSystems.ExecuteEvents.beginDragHandler);"
+                "UnityEngine.EventSystems.ExecuteEvents.Execute(go,ped,"
+                "UnityEngine.EventSystems.ExecuteEvents.dragHandler);"
+                "UnityEngine.EventSystems.ExecuteEvents.Execute(go,ped,"
+                "UnityEngine.EventSystems.ExecuteEvents.dragHandler);"
+                "UnityEngine.EventSystems.ExecuteEvents.Execute(go,ped,"
+                "UnityEngine.EventSystems.ExecuteEvents.endDragHandler);"
+                "return \"ok\";")
+        time.sleep(2.6)
+        st = state()
+        overlays = sum(1 for k in ("previewOpen", "shopOpen", "bonusOpen", "overOpen") if st[k])
+        ok("timeup_during_animation_bonus_no_deadlock",
+           st["bonusOpen"] and overlays == 1 and not st["previewOpen"],
+           "phase=" + st["phase"] + " overlays=" + str(overlays)
+           + " preview=" + str(st["previewOpen"]) + " bonus=" + str(st["bonusOpen"]))
+        shots.append(capture("devsim_v03_pending_bonus_only.png"))
+
+        eval_js("var g = UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();"
+                "return g.DebugChooseBonus(0);")
+        time.sleep(0.4)
+        st2 = state()
+        overlays2 = sum(1 for k in ("previewOpen", "shopOpen", "bonusOpen", "overOpen") if st2[k])
+        ok("bonus_then_preview_after_deferred_round_end",
+           st2["previewOpen"] and overlays2 == 1 and not st2["bonusOpen"],
+           "phase=" + st2["phase"] + " overlays=" + str(overlays2)
+           + " round=" + str(st2["round"]))
+        shots.append(capture("devsim_v03_after_bonus_preview.png"))
+
         OUT.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         path = OUT / f"devsim_ui_e2e_{ts}.json"

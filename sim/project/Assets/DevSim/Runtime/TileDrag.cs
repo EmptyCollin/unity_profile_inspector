@@ -25,6 +25,7 @@ namespace DevSim
         private Vector2 _start;
         private Vector2 _total;
         private Canvas _canvas;
+        private bool _active;
 
         private void Awake()
         {
@@ -37,15 +38,16 @@ namespace DevSim
             if (game == null || _rt == null) return;
             _start = _rt.anchoredPosition;
             _total = Vector2.zero;
+            _active = game.BeginDrag(row, col);
+            if (!_active) return;
             dragEvents++;
             lastBeginRow = row;
             lastBeginCol = col;
-            game.BeginDrag(row, col);
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (game == null || _rt == null) return;
+            if (!_active || game == null || _rt == null) return;
             _total += eventData.delta;
             dragEvents++;
             float s = _canvas != null ? _canvas.scaleFactor : 1f;
@@ -56,6 +58,8 @@ namespace DevSim
         public void OnEndDrag(PointerEventData eventData)
         {
             if (game == null || _rt == null) return;
+            if (!_active) return;
+            _active = false;
             dragEvents++;
             _rt.anchoredPosition = _start;
             lastEndRow = row;

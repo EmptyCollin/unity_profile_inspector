@@ -105,6 +105,7 @@ namespace DevSim
         private int bonusTime;
         private bool bonusChoiceLocked;
         private bool bonusOpen, overOpen;
+        private bool pendingRoundEnd, pendingGameOver;
 
         private sealed class Offer
         {
@@ -818,11 +819,9 @@ namespace DevSim
         {
             phase = Phase.Lobby;
             busy = false; dragging = false; dragR = dragC = -1;
+            pendingRoundEnd = pendingGameOver = false;
+            ShowOnlyOverlay(null);
             if (gameRoot) gameRoot.SetActive(false);
-            if (shopPanel) shopPanel.SetActive(false);
-            if (bonusPanel) bonusPanel.SetActive(false);
-            if (overPanel) overPanel.SetActive(false);
-            if (previewPanel) previewPanel.SetActive(false);
             if (caseMenu) caseMenu.SetActive(false);
             if (helpPanel) helpPanel.SetActive(false);
             if (lobbyRoot) lobbyRoot.SetActive(true);
@@ -845,11 +844,9 @@ namespace DevSim
             if (caseMenu) caseMenu.SetActive(false);
             if (helpPanel) helpPanel.SetActive(false);
             if (gameRoot) gameRoot.SetActive(true);
-            if (shopPanel) shopPanel.SetActive(false);
-            if (bonusPanel) bonusPanel.SetActive(false);
-            if (overPanel) overPanel.SetActive(false);
-            if (previewPanel) previewPanel.SetActive(false);
+            ShowOnlyOverlay(null);
             overOpen = false; bonusOpen = false; bonusChoiceLocked = false;
+            pendingRoundEnd = pendingGameOver = false;
             model = null;
             BeginRound(1);
             if (cfg.autoplay) StartCoroutine(AutoPlay());
@@ -866,7 +863,8 @@ namespace DevSim
             int oldN = model != null ? model.N : -1;
             if (oldN != n) BuildBoard(n);
             else model.ClearGuard();
-            if (previewPanel != null) previewPanel.SetActive(false);
+            ShowOnlyOverlay(null);
+            pendingRoundEnd = pendingGameOver = false;
             RefreshTiles();
             UpdateHud();
             statusText.text = "ROUND " + r + " — 目标 " + target + " · " + Mathf.RoundToInt(timeLeft) + "s";
@@ -882,7 +880,13 @@ namespace DevSim
             if (phase == Phase.Playing)
             {
                 timeLeft -= dt;
-                if (timeLeft <= 0f) { timeLeft = 0f; EndRound(); }
+                if (timeLeft <= 0f)
+                {
+                    // 时间到：若还在播消除/掉落动画，先记账，等动效落完再结算，
+                    // 避免“预告已弹出、随后又触发 BONUS”两套遮罩互相锁死。
+                    timeLeft = 0f;
+                    pendingRoundEnd = true;
+                }
             }
             else if (phase == Phase.Preview)
             {
@@ -894,11 +898,25 @@ namespace DevSim
                         previewCountdown.text = "自动开始 " + previewLeft.ToString("0.0") + "s";
                 }
             }
+            ResolvePendingWhenIdle();
             if (cfg.legacy_ui || Time.unscaledTime >= nextHud)
             {
                 nextHud = Time.unscaledTime + 0.1f;
                 UpdateHud();
             }
+        }
+
+        /// <summary>只有“没有动画在播、没有 BONUS 挡着”时才真正结算时间到/手动结束。</summary>
+        private void ResolvePendingWhenIdle()
+        {
+            if (busy || bonusOpen || phase != Phase.Playing) return;
+            if (pendingGameOver)
+            {
+                pendingGameOver = false;
+                EndGame();
+                return;
+            }
+            if (pendingRoundEnd) EndRound();
         }
 
         private bool HasMatch()
@@ -1089,14 +1107,16 @@ namespace DevSim
             return true;
         }
 
-        public void BeginDrag(int r, int c)
+        /// <summary>开始拖拽；返回 false 表示当前不允许操作（动画中/回合结束/已超时），调用方应放弃拖拽。</summary>
+        public bool BeginDrag(int r, int c)
         {
-            if (phase != Phase.Playing || busy) return;
-            if (model == null || !model.InBounds(r, c)) return;
+            if (phase != Phase.Playing || busy || timeLeft <= 0f) return false;
+            if (model == null || !model.InBounds(r, c)) return false;
             dragging = true;
             dragR = r; dragC = c;
             selectedR = r; selectedC = c;
             RefreshTiles();
+            return true;
         }
 
         public void UpdateDragTarget(int r, int c, Vector2 delta)
@@ -1133,7 +1153,7 @@ namespace DevSim
 
         private void TrySwap(int r1, int c1, int r2, int c2)
         {
-            if (busy || phase != Phase.Playing) return;
+            if (busy || phase != Phase.Playing || timeLeft <= 0f) return;
             if (model == null || !model.InBounds(r1, c1) || !model.InBounds(r2, c2)) return;
             if (model.IsLocked(r1, c1) || model.IsLocked(r2, c2))
             {
@@ -1567,6 +1587,14 @@ namespace DevSim
         private void EndRound()
         {
             if (phase != Phase.Playing) return;
+            if (busy)
+            {
+                // 动效还在播：等它落完再结算（期间倒计时停在 0，不再吃输入）。
+                pendingRoundEnd = true;
+                return;
+            }
+            pendingRoundEnd = false;
+            ClearTransientInput();
             if (totalScore < target)
             {
                 EndGame();
@@ -1579,10 +1607,20 @@ namespace DevSim
             else ShowPreview();
         }
 
+        private void ClearTransientInput()
+        {
+            dragging = false;
+            selectedR = selectedC = -1;
+            hoverR = hoverC = -1;
+            if (tileImages != null) RefreshTiles();
+        }
+
         private void ShowPreview()
         {
             if (previewPanel == null) { BeginRound(round); return; }
+            if (busy) { pendingRoundEnd = true; return; }
             phase = Phase.Preview;
+            ShowOnlyOverlay(previewPanel);
             previewLeft = cfg.preview_seconds;
             int next = round;
             int nextTarget = cfg.TargetFor(next);
@@ -1607,6 +1645,7 @@ namespace DevSim
             if (phase != Phase.Preview) return;
             previewPanel.SetActive(false);
             previewLeft = 0f;
+            pendingRoundEnd = false;
             BeginRound(round);
         }
 
@@ -1618,17 +1657,36 @@ namespace DevSim
         private void EndGame()
         {
             if (phase == Phase.Over) return;
+            if (busy)
+            {
+                // 结束也要等动效落完，避免结算面板和消除/BONUS 同屏。
+                pendingGameOver = true;
+                return;
+            }
+            pendingGameOver = false;
+            pendingRoundEnd = false;
+            ClearTransientInput();
             phase = Phase.Over;
             overOpen = true;
-            overPanel.SetActive(true);
+            ShowOnlyOverlay(overPanel);
             overText.text = "SCORE  " + totalScore + "\nROUND  " + round + "\n\n本机最高分已记录";
             SaveScore(totalScore, round);
+        }
+
+        /// <summary>任何时刻最多只有一个全屏遮罩（预告/商店/BONUS/结算），从根上避免互相挡按钮。</summary>
+        private void ShowOnlyOverlay(GameObject keep)
+        {
+            if (previewPanel != null) previewPanel.SetActive(keep == previewPanel);
+            if (shopPanel != null) shopPanel.SetActive(keep == shopPanel);
+            if (bonusPanel != null) bonusPanel.SetActive(keep == bonusPanel);
+            if (overPanel != null) overPanel.SetActive(keep == overPanel);
         }
 
         // ───────────────────────── shop ─────────────────────────
 
         private void OpenShop()
         {
+            if (busy) { pendingRoundEnd = true; return; }
             if (cfg.sync_shop_load)
             {
                 // 故意保留同步等待路径：case 用它测“打开商店卡主线程”
@@ -1649,11 +1707,9 @@ namespace DevSim
             phase = Phase.Shop;
             shopVisits++;
             shopMessage = "";
-            if (previewPanel != null) previewPanel.SetActive(false);
-            if (bonusPanel != null) bonusPanel.SetActive(false);
+            ShowOnlyOverlay(shopPanel);
             for (int i = 0; i < boughtThisShop.Length; i++) boughtThisShop[i] = false;
             RollOffers();
-            shopPanel.SetActive(true);
             UpdateShopUI();
             UpdateHud();
         }
@@ -1816,7 +1872,7 @@ namespace DevSim
                     bonusGroups[i].transform.localScale = new Vector3(0.8f, 0.8f, 1f);
                 }
             }
-            bonusPanel.SetActive(true);
+            ShowOnlyOverlay(bonusPanel);
             StartCoroutine(BonusIntro());
             StartCoroutine(BonusCardsIntro());
             statusText.text = "BONUS — 同色消除 ≥6，选择一项";
@@ -1900,13 +1956,14 @@ namespace DevSim
             statusText.text = "BONUS 已选择：" + bonusNames[id];
             RefreshItemLabels();
             UpdateHud();
+            ResolvePendingWhenIdle();
         }
 
         // ───────────────────────── items ─────────────────────────
 
         public bool BeginItemDrag(int item)
         {
-            if (phase != Phase.Playing || busy || dragging)
+            if (phase != Phase.Playing || busy || dragging || timeLeft <= 0f)
             {
                 statusText.text = "现在不能使用道具";
                 return false;
@@ -1922,6 +1979,7 @@ namespace DevSim
 
         public void HoverItemTarget(int item, Vector2 screenPos)
         {
+            if (phase != Phase.Playing || busy || timeLeft <= 0f) { ClearHighlight(); return; }
             if (CellFromScreen(screenPos, out int r, out int c) && CanUseItemAt(item, r, c))
                 HighlightCell(r, c);
             else
@@ -1935,7 +1993,7 @@ namespace DevSim
 
         public bool DropItem(int item, Vector2 screenPos)
         {
-            if (phase != Phase.Playing || busy) return false;
+            if (phase != Phase.Playing || busy || timeLeft <= 0f) return false;
             if (!CellFromScreen(screenPos, out int r, out int c))
             {
                 statusText.text = "把道具拖到棋盘目标格";
@@ -2024,6 +2082,7 @@ namespace DevSim
             public float timeLeft;
             public int[] inventory;
             public bool bonusOpen, previewOpen, shopOpen, overOpen;
+            public bool pendingRoundEnd, pendingGameOver, busy;
             public int bonusTriggered;
             public string lastMessage, lastStep;
             public int lastChain, lastCleared, lastSameColorId, lastSameColorCount;
@@ -2090,6 +2149,9 @@ namespace DevSim
                 timeLeft = timeLeft,
                 inventory = (int[])inventory.Clone(),
                 bonusOpen = bonusOpen,
+                pendingRoundEnd = pendingRoundEnd,
+                pendingGameOver = pendingGameOver,
+                busy = busy,
                 previewOpen = phase == Phase.Preview,
                 shopOpen = phase == Phase.Shop,
                 overOpen = overOpen,
@@ -2165,10 +2227,8 @@ namespace DevSim
             hoverR = hoverC = -1;
             bonusOpen = false;
             overOpen = false;
-            if (bonusPanel != null) bonusPanel.SetActive(false);
-            if (overPanel != null) overPanel.SetActive(false);
-            if (previewPanel != null) previewPanel.SetActive(false);
-            if (shopPanel != null) shopPanel.SetActive(false);
+            pendingRoundEnd = pendingGameOver = false;
+            ShowOnlyOverlay(null);
             lastCleared = lastChain = lastSameColorCount = lastSameColorId = 0;
             for (int i = 0; i < lastPerColor.Length; i++) lastPerColor[i] = 0;
             phase = Phase.Playing;
@@ -2291,7 +2351,7 @@ namespace DevSim
             if (phase == Phase.Playing)
             {
                 timeLeft -= seconds;
-                if (timeLeft <= 0f) { timeLeft = 0f; EndRound(); }
+                if (timeLeft <= 0f) { timeLeft = 0f; pendingRoundEnd = true; }
             }
             else if (phase == Phase.Preview)
             {
@@ -2301,7 +2361,22 @@ namespace DevSim
                     if (previewLeft <= 0f) { previewLeft = 0f; ContinueFromPreview(); }
                 }
             }
+            ResolvePendingWhenIdle();
             UpdateHud();
+            return DebugState();
+        }
+
+        public string DebugSetTime(float seconds)
+        {
+            timeLeft = Mathf.Max(0f, seconds);
+            if (timeLeft <= 0f) pendingRoundEnd = true;
+            UpdateHud();
+            return DebugState();
+        }
+
+        public string DebugSetBusy(bool value)
+        {
+            busy = value;
             return DebugState();
         }
 
@@ -2332,10 +2407,11 @@ namespace DevSim
             busy = false;
             dragging = false;
             model = null;
-            if (previewPanel != null) previewPanel.SetActive(false);
-            if (shopPanel != null) shopPanel.SetActive(false);
-            if (bonusPanel != null) bonusPanel.SetActive(false);
-            if (overPanel != null) overPanel.SetActive(false);
+            pendingRoundEnd = pendingGameOver = false;
+            shopVisits = 0;
+            refreshCount = 0;
+            shopMessage = "";
+            ShowOnlyOverlay(null);
             BuildBoard(cfg.BoardSizeFor(rr));
             UpdateHud();
             return DebugState();
@@ -2385,6 +2461,7 @@ namespace DevSim
             statusText.text = "BONUS 已选择：" + bonusNames[id];
             RefreshItemLabels();
             UpdateHud();
+            ResolvePendingWhenIdle();
             return DebugState();
         }
 

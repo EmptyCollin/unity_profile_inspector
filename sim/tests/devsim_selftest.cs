@@ -349,7 +349,60 @@ public static class DevSimSelfTest
                 "phase=" + over.phase);
         }
 
-        // 8. 商店：每 3 轮一次、刷新、售罄、重复购买拦截。
+        // 8. 时间到 vs 动效：先记账，等动效落完再结算；期间拒绝输入；只允许一个遮罩。
+        {
+            g.DebugJumpToRound(1);
+            g.DebugSetScore(99999);
+            g.DebugSetTime(0.01f);
+            g.DebugSetBusy(true);
+            var pending = State2(g.DebugAdvance(1f));
+            Ok("round_end_deferred_while_busy",
+                pending.phase == "Playing" && pending.pendingRoundEnd
+                && !pending.previewOpen && !pending.shopOpen && !pending.bonusOpen,
+                "phase=" + pending.phase + " pending=" + pending.pendingRoundEnd
+                + " preview=" + pending.previewOpen);
+
+            bool dragBlocked = !g.BeginDrag(0, 0);
+            bool dropBlocked = !g.DropItem(0, new Vector2(4f, 4f));
+            Ok("input_blocked_while_busy",
+                dragBlocked && dropBlocked,
+                "dragBlocked=" + dragBlocked + " dropBlocked=" + dropBlocked);
+
+            g.DebugSetBusy(false);
+            var afterIdle = State2(g.DebugAdvance(0f));
+            Ok("round_end_applies_after_animation",
+                afterIdle.phase == "Preview" && afterIdle.previewOpen
+                && !afterIdle.bonusOpen && !afterIdle.shopOpen,
+                "phase=" + afterIdle.phase + " preview=" + afterIdle.previewOpen);
+
+            g.DebugJumpToRound(1);
+            g.DebugSetTime(0f);
+            bool dragAfterTimeUp = !g.BeginDrag(0, 0);
+            Ok("input_blocked_when_time_up", dragAfterTimeUp, "blocked=" + dragAfterTimeUp);
+
+            g.DebugJumpToRound(1);
+            g.DebugSetScore(0);
+            g.DebugSetTime(0.01f);
+            g.DebugSetBusy(true);
+            var pendingOver = State2(g.DebugAdvance(1f));
+            g.DebugSetBusy(false);
+            var over = State2(g.DebugAdvance(0f));
+            Ok("game_over_applies_after_animation",
+                pendingOver.phase == "Playing" && over.phase == "Over" && over.overOpen
+                && !over.previewOpen && !over.bonusOpen && !over.shopOpen,
+                "pending=" + pendingOver.phase + " after=" + over.phase);
+
+            g.DebugJumpToRound(3);
+            g.DebugSetScore(99999);
+            var shopState = State2(g.DebugAdvance(999f));
+            Ok("shop_overlay_is_exclusive",
+                shopState.phase == "Shop" && shopState.shopOpen
+                && !shopState.previewOpen && !shopState.bonusOpen,
+                "shop=" + shopState.shopOpen + " preview=" + shopState.previewOpen
+                + " bonus=" + shopState.bonusOpen);
+        }
+
+        // 9. 商店：每 3 轮一次、刷新、售罄、重复购买拦截。
         {
             g.DebugJumpToRound(3);
             g.DebugSetScore(99999);
@@ -403,7 +456,7 @@ public static class DevSimSelfTest
                 "phase=" + r4.phase + " visits=" + r4.shopVisits + " round=" + r4.round);
         }
 
-        // 9. 画质：设计分辨率 1:1、色块纹理与显示像素一致。
+        // 10. 画质：设计分辨率 1:1、色块纹理与显示像素一致。
         {
             g.DebugJumpToRound(1);
             var r = JsonUtility.FromJson<ChromaGame.DebugRenderDto>(Render(g));
@@ -417,7 +470,7 @@ public static class DevSimSelfTest
                 "tilePx=" + r.tilePx + " tex=" + r.tileTextureSize);
         }
 
-        // 10. 动效范围：只对退场格播退场、只对受重力影响的格播移动、只对新格播生成。
+        // 11. 动效范围：只对退场格播退场、只对受重力影响的格播移动、只对新格播生成。
         {
             int n = 6;
             g.DebugSetBoard(n, Latin(n), SolidLayers(n));
@@ -451,7 +504,7 @@ public static class DevSimSelfTest
             Ok("no_removal_no_animation", anyAnim == 0, "animated=" + anyAnim);
         }
 
-        // 11. 拖拽方向映射 + ExecuteEvents 真实事件链（最后执行，会启动交换协程）。
+        // 12. 拖拽方向映射 + ExecuteEvents 真实事件链（最后执行，会启动交换协程）。
         {
             var up = Drag(g, 2, 2, 0, 40);
             var down = Drag(g, 2, 2, 0, -40);
