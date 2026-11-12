@@ -7,3 +7,6 @@
 - 评测器在工具跑完后读取 oracle，与 `OpportunityFinding` 对比 recall/precision/FP。
 
 工程内禁止出现 `oracle`、`case_id`、`defect`、`F-` 等答案痕迹。
+
+> 注：`atomic_cases` 是权威组合字段（24 场景 = `sim/cases/c01..c11` 的组合，负对照为空）；
+> `scenario` 是 I7 legacy 开关配置，开关已从 base 移除，仅留历史。
