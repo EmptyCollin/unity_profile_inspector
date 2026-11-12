@@ -153,6 +153,10 @@ ok("回归判定自带协议指纹（不再为空）",
 
 ok("知识库默认路径指向 knowledge/patterns.db",
    default_path().name == "patterns.db")
+pats = {p["pattern_id"]: p for p in ks.list_patterns()}
+ok("模式库可列出档位（供 UI 升维）",
+   pats.get("pat-1", {}).get("tier") == "shadow"
+   and "n_new_issue" in pats.get("pat-1", {}))
 
 # ── 工单操作：退回修改 / 单条驳回 / 意见回传 ────────────────
 from upi.core.ticket import (TicketExecutor, reject_item,  # noqa: E402

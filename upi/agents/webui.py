@@ -264,7 +264,8 @@ def build_status() -> dict:
         from upi.core.knowledge import KnowledgeStore, default_path
         _ks = KnowledgeStore(default_path())
         learning = {"shadow_agreement": _ks.shadow_agreement(),
-                    "ece_coverage": _ks.ece_coverage()}
+                    "ece_coverage": _ks.ece_coverage(),
+                    "patterns": _ks.list_patterns(30)}
         _ks.close()
     except Exception as e:  # noqa: BLE001
         learning = {"error": f"{type(e).__name__}: {e}"}
@@ -602,6 +603,13 @@ _INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="panel" style="margin-top:12px">
+        <h2>模式档位（升维 / 影子）</h2>
+        <table><thead><tr><th>pattern</th><th>档位</th><th>新问题</th><th>操作</th></tr></thead>
+        <tbody id="patternBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody></table>
+        <div class="small" style="padding:8px 15px">升 auto 必须走升维提案（体检表 + 样本量）；
+          这里只做 semi ↔ shadow 的人工切换，变更会留痕。</div>
+      </div>
+      <div class="panel" style="margin-top:12px">
         <h2>首次使用顺序</h2>
         <div id="onboard" style="padding:10px 15px;color:var(--muted);font-size:12px;line-height:1.9">
           加载中…
@@ -735,6 +743,24 @@ function renderSettings(s){
     $("capBoardFrames").value = cc.board_frames;
     $("capSampleWindow").value = cc.probe_sample_window;
   }
+  const pats = (s.learning || {}).patterns || [];
+  $("patternBody").innerHTML = pats.length ? pats.map(p =>
+    `<tr><td class="mono small">${esc(p.pattern_id)}</td><td>${esc(p.tier)}</td>` +
+    `<td>${esc(p.n_new_issue)}</td><td>` +
+    (p.tier === "semi"
+      ? `<button class="patBtn" data-pid="${esc(p.pattern_id)}" data-tier="shadow">升影子</button>` : "") +
+    (p.tier === "shadow"
+      ? `<button class="patBtn" data-pid="${esc(p.pattern_id)}" data-tier="semi">回半自动</button>` : "") +
+    `</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">还没有模式记录。</td></tr>`;
+}
+async function setPatternTier(pid, tier){
+  const actor = prompt("操作人（档位变更会留痕）:", "ui");
+  if(!actor) return;
+  try{
+    await post(`/api/knowledge/patterns/${encodeURIComponent(pid)}/tier`, {tier, actor});
+    await refresh();
+  }catch(e){ alert("档位变更失败：" + e.message); }
 }
 async function saveCaptureCfg(){
   try{
@@ -1109,6 +1135,8 @@ document.addEventListener("click", (ev) => {
   if(irb){ ticketAction(irb.dataset.tid, "item-reject", irb.dataset.iid); return; }
   const prj = ev.target.closest && ev.target.closest(".prjbtn");
   if(prj){ projectAction(prj.dataset.pact, prj.dataset.pid); return; }
+  const pat = ev.target.closest && ev.target.closest(".patBtn");
+  if(pat){ setPatternTier(pat.dataset.pid, pat.dataset.tier); return; }
   const b = ev.target.closest && ev.target.closest(".tbtn");
   if(!b) return;
   const tid = b.dataset.tid, act = b.dataset.act;
@@ -1477,6 +1505,27 @@ class _Handler(BaseHTTPRequestHandler):
                 CC.write_probe_config()
                 self._send_json(200, {"ok": True, "config": cfg,
                                       "probe_config": str(CC.PROBE_CONFIG_PATH)})
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+
+        m = re.match(r"^/api/knowledge/patterns/(pat-[A-Za-z0-9_\-]+)/tier$",
+                     parsed.path)
+        if m:
+            pid, tier = m.group(1), str(body.get("tier", "")).strip()
+            try:
+                from upi.core.knowledge import KnowledgeStore, default_path
+                if tier not in ("semi", "shadow"):
+                    raise ValueError("只能人工切 semi/shadow；auto 必须走升维提案")
+                ks = KnowledgeStore(default_path())
+                res = ks.set_tier(pid, tier, actor=str(body.get("actor", "ui")),
+                                  reason=str(body.get("reason", "UI 手动调整档位")))
+                ks.close()
+                self._send_json(200, {"ok": True, "change": res})
+            except KeyError as e:
+                self._send_json(404, {"ok": False, "error": str(e)})
             except ValueError as e:
                 self._send_json(400, {"ok": False, "error": str(e)})
             except Exception as e:  # noqa: BLE001

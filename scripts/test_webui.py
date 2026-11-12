@@ -80,6 +80,8 @@ try:
        "approvalPanel" in html and "appConfirm" in html
        and "执行时间线" in html)
     ok("设置页含 onboarding 状态", "onboard" in html)
+    ok("设置页含模式档位表（升维/影子）",
+       "patternBody" in html and "模式档位" in html)
     ok("首页注入 token（前端 API/SSE 用）", "test-token" in html)
     ok("首页 UTF-8 声明", "charset=utf-8" in (hdr.get("Content-Type") or "").lower())
     ok("首页设置 HttpOnly cookie", "HttpOnly" in (hdr.get("Set-Cookie") or ""))
@@ -113,7 +115,8 @@ try:
        and data["capture_config"].get("evidence_threads") == 8)
     ok("状态含学习闭环指标", isinstance(data.get("learning"), dict)
        and "shadow_agreement" in data["learning"]
-       and "ece_coverage" in data["learning"])
+       and "ece_coverage" in data["learning"]
+       and isinstance(data["learning"].get("patterns"), list))
 
     # 取证参数：用临时路径，避免测试污染仓库里的 config/i8_lab.json
     from pathlib import Path as _Path

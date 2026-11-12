@@ -362,6 +362,16 @@ class KnowledgeStore:
         self.db.commit()
         return agreed
 
+    def list_patterns(self, limit: int = 50) -> list[dict]:
+        """模式库概览：档位/新问题/休眠，供 UI 做升维操作。"""
+        rows = self.db.execute(
+            "SELECT id, tier, n_new_issue, dormant, needs_review, playbook_id"
+            " FROM patterns ORDER BY updated_at DESC LIMIT ?",
+            (max(1, int(limit)),)).fetchall()
+        return [{"pattern_id": r[0], "tier": r[1], "n_new_issue": r[2],
+                 "dormant": bool(r[3]), "needs_review": bool(r[4]),
+                 "playbook_id": r[5] or ""} for r in rows]
+
     def shadow_agreement(self, pattern_id: str | None = None) -> dict:
         """自动决策与人工决策的一致率；未决行不计入分母。"""
         where, args = "agreed IS NOT NULL", ()
