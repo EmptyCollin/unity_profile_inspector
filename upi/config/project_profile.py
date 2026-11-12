@@ -494,6 +494,15 @@ def active_profile() -> ProjectProfile:
     """
     global _active
     if _active is None:
+        try:
+            from upi.config.project_registry import ProjectRegistry
+            reg = ProjectRegistry()
+            if reg.path.exists() and reg.active_id() is None:
+                raise ProfileError("工程 registry 存在但没有活动工程：请先在 UI「工程」页选择/激活")
+        except ProfileError:
+            raise
+        except Exception:  # noqa: BLE001 - registry 不存在时走内置
+            pass
         _active = load_profile()
     return _active
 

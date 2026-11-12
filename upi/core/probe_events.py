@@ -53,6 +53,7 @@ class ProbeEvent(BaseModel):
     """一条探针事件；breach 与 sample 共用外壳，payload 按 kind 区分。"""
 
     event_id: str = Field(default_factory=lambda: _new_id("evt"))
+    project_id: str = ""
     kind: EventKind
     ts: str = Field(default_factory=_now)
     session_id: str = ""
@@ -172,6 +173,12 @@ class EventLog:
         self.path = Path(path) if path else (E.RUNS / "_probe" / "probe_events.jsonl")
 
     def append(self, event: ProbeEvent) -> None:
+        if not event.project_id:
+            try:
+                from upi.config.project_profile import active_profile
+                event.project_id = active_profile().profile_id
+            except Exception:  # noqa: BLE001 - 无工程上下文时留空
+                pass
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = event.model_dump_json()
         with self.path.open("a", encoding="utf-8") as f:

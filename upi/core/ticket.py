@@ -63,6 +63,7 @@ class TicketItem(BaseModel):
 
 class BatchTicket(BaseModel):
     ticket_id: str
+    project_id: str = ""
     mode: Literal["resident", "regression"] = "resident"
     created_at: str
     status: TicketStatus = "awaiting_approval"
@@ -77,6 +78,7 @@ class BatchTicket(BaseModel):
     def summary(self) -> dict:
         return {
             "ticket_id": self.ticket_id, "mode": self.mode,
+            "project_id": self.project_id,
             "created_at": self.created_at, "status": self.status,
             "items": len(self.items),
             "pending": sum(1 for i in self.items if i.status == "pending"),
@@ -184,7 +186,13 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
             status=status, error=err,
             item_approve_token=_item_token(tid, iid),
         ))
-    return BatchTicket(ticket_id=tid, mode=mode, created_at=E.now(),
+    try:
+        from upi.config.project_profile import active_profile
+        project_id = active_profile().profile_id
+    except Exception:  # noqa: BLE001
+        project_id = ""
+    return BatchTicket(ticket_id=tid, project_id=project_id, mode=mode,
+                       created_at=E.now(),
                        status="awaiting_approval", items=items,
                        approve_token=_token(tid, items))
 

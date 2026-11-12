@@ -28,6 +28,7 @@ DEFAULT_DIR = ROOT / "runs" / "_regression"
 
 class ReplaySuite(BaseModel):
     suite_id: str
+    project_id: str = ""
     name: str = ""
     project: str = ""
     scene: str = ""
@@ -44,6 +45,7 @@ class ReplaySuite(BaseModel):
 class RegressionRun(BaseModel):
     run_id: str
     suite_id: str
+    project_id: str = ""
     run_index: int
     protocol_fingerprint: str
     clusters: list[IssueCluster] = Field(default_factory=list)
@@ -127,7 +129,7 @@ class RegressionRunner:
                 cs = align_clusters(cs)
             m.runs.append(RegressionRun(
                 run_id=f"{self.suite.suite_id}-r{i}", suite_id=self.suite.suite_id,
-                run_index=i,
+                project_id=self.suite.project_id, run_index=i,
                 protocol_fingerprint=proto or self.suite.protocol_fingerprint,
                 clusters=cs, guards=guards_from_events(events),
                 event_count=len(events), collected_at=E.now()))
@@ -347,7 +349,8 @@ class RegressionStore:
         m = self.load_matrix(sid) or BaselineMatrix(suite_id=sid)
         idx = len(m.runs)
         r = RegressionRun(
-            run_id=f"{sid}-r{idx}", suite_id=sid, run_index=idx,
+            run_id=f"{sid}-r{idx}", suite_id=sid,
+            project_id=suite.project_id, run_index=idx,
             protocol_fingerprint=(protocol or suite.protocol_fingerprint or "unspecified"),
             clusters=cs, guards=guards_from_events(events),
             event_count=len(events), collected_at=E.now())

@@ -238,6 +238,8 @@ class ProjectRegistry:
             raw["active_project_id"] = None
             raw["recent"] = [x for x in raw.get("recent", []) if x != project_id]
             self._save(raw)
+            from upi.config.project_profile import reset_profile
+            reset_profile()
         return e
 
     def delete(self, project_id: str, *, force: bool = False) -> None:
@@ -253,6 +255,9 @@ class ProjectRegistry:
         if raw.get("active_project_id") == project_id:
             raw["active_project_id"] = None
         self._save(raw)
+        if raw.get("active_project_id") is None:
+            from upi.config.project_profile import reset_profile
+            reset_profile()
 
     def validate(self, e: ProjectEntry) -> ProjectEntry:
         from upi.core import events as E

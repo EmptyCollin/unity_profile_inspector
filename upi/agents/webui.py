@@ -1194,6 +1194,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 suite = ReplaySuite(
                     suite_id=sid, name=str(body.get("name") or sid),
+                    project_id=(body.get("project_id") or _project_status().get("id") or ""),
                     project=str(body.get("project") or ""),
                     scene=str(body.get("scene") or ""),
                     replay_script=str(body.get("replay_script") or ""),
