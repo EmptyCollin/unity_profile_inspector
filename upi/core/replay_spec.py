@@ -60,3 +60,24 @@ class ReplaySpec(BaseModel):
 
 def load_replay(path: Path | str) -> ReplaySpec:
     return ReplaySpec(**json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def merge_replays(specs: list[ReplaySpec]) -> ReplaySpec:
+    """合并多个 case replay：start/stop 各一次，中间命令按 case 顺序拼接。"""
+    if not specs:
+        raise ValueError("没有 replay")
+    hashes = {s.base_hash for s in specs if s.base_hash}
+    if len(hashes) > 1:
+        raise ValueError("replay base_hash 不一致")
+    mid: list[ReplayCommand] = []
+    for s in specs:
+        for c in s.commands:
+            if c.type in ("start_game", "stop"):
+                continue
+            mid.append(c)
+    return ReplaySpec(
+        replay_id="+".join(s.replay_id for s in specs),
+        base_hash=(specs[0].base_hash if specs else ""),
+        commands=[ReplayCommand(type="start_game"), *mid, ReplayCommand(type="stop")],
+        notes="merged case replay",
+    )
