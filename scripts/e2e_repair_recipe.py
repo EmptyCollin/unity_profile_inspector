@@ -34,6 +34,14 @@ def git(*args):
     return (p.stdout or "").strip()
 
 
+def stop_play():
+    """测试会启动 Play；回滚前先停，避免 Editor 在 reset 后回写资源。"""
+    subprocess.run(["unity", "command", "editor.playmode stop",
+                    "--project-path", str(PROJECT), "--format", "json"],
+                   capture_output=True, text=True, encoding="utf-8",
+                   errors="replace", timeout=60)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--recipe", choices=["item", "hud", "board"], default="item")
@@ -64,6 +72,7 @@ def main():
                            encoding="utf-8", errors="replace", timeout=300)
         ok("修后玩法自测", p.returncode == 0, (p.stdout or "")[-800:])
     finally:
+        stop_play()
         if snap is not None:
             rb = SN.rollback(snap, PROJECT, SCENE)
             ok("回滚", bool(rb.get("asset_manifest_restored")), rb)
