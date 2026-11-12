@@ -17,8 +17,15 @@ from upi.core.models import EditPlan
 from upi.core.source_index import SourceIndex
 
 PLAYBOOK = "PB-OP-ITEM-LABEL-CACHE"
+HUD_PLAYBOOK = "PB-OP-HUD-TEXT-CACHE"
 FIELD_ANCHOR = "        private bool busy, dragging;"
 FIELD_ADD = "        private int[] lastItemCounts;"
+HUD_FIELD_ADD = (
+    "        private int lastHudRound = int.MinValue;\n"
+    "        private int lastHudTarget = int.MinValue;\n"
+    "        private int lastHudScore = int.MinValue;\n"
+    "        private int lastHudCoins = int.MinValue;"
+)
 
 
 def plan_item_label_cache(project_root: Path | str,
@@ -72,3 +79,62 @@ def plan_item_label_cache(project_root: Path | str,
         touched_assets=[span.file],
         permission_tier="auto",
     )
+
+
+def plan_hud_text_cache(project_root: Path | str,
+                        source_index: Optional[SourceIndex] = None) -> Optional[EditPlan]:
+    """缓存 ROUND/TARGET/SCORE/COINS 文本；timeText 保留实时更新。"""
+    root = Path(project_root).resolve()
+    idx = source_index or SourceIndex.build(root)
+    span = idx.resolve("ChromaGame.UpdateHudBody")
+    if span is None:
+        return None
+    file = root / span.file
+    try:
+        text = file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    body = "\n".join(text.splitlines()[span.start_line - 1:span.end_line])
+    pairs = [
+        ('roundText.text = "ROUND " + round;',
+         'if (round != lastHudRound) { roundText.text = "ROUND " + round; lastHudRound = round; }'),
+        ('targetText.text = "TARGET " + target;',
+         'if (target != lastHudTarget) { targetText.text = "TARGET " + target; lastHudTarget = target; }'),
+        ('scoreText.text = "SCORE " + totalScore;',
+         'if (totalScore != lastHudScore) { scoreText.text = "SCORE " + totalScore; lastHudScore = totalScore; }'),
+        ('coinText.text = "COINS " + coins;',
+         'if (coins != lastHudCoins) { coinText.text = "COINS " + coins; lastHudCoins = coins; }'),
+    ]
+    diffs = []
+    for old, new in pairs:
+        if old not in body:
+            return None
+        diffs.append({"file": span.file, "find": old, "replace": new,
+                      "expect_count": 1, "_why": "静态 HUD 文本仅在值变化时重建"})
+    if FIELD_ANCHOR not in text:
+        return None
+    diffs.insert(0, {"file": span.file, "find": FIELD_ANCHOR,
+                     "replace": FIELD_ANCHOR + "\n" + HUD_FIELD_ADD,
+                     "expect_count": 1, "_why": "HUD 上次显示值缓存"})
+    return EditPlan(
+        playbook_id=HUD_PLAYBOOK,
+        diffs=diffs,
+        invariants_assert=["HUD 文本内容与原逻辑一致", "数值变化时仍更新"],
+        side_effect="none",
+        touched_assets=[span.file],
+        permission_tier="auto",
+    )
+
+
+def plan_for_candidate(candidate, project_root: Path | str,
+                       source_index: Optional[SourceIndex] = None) -> Optional[EditPlan]:
+    """按候选源码符号选择 recipe；不是 case_id/文件行硬编码。"""
+    sources = getattr(candidate, "sources", None) or []
+    span = sources[0] if sources else None
+    symbol = (getattr(span, "symbol", "") or "").lower()
+    root = getattr(candidate, "root_cause", "").lower()
+    if "refreshitemlabels" in symbol or "refreshitemlabels" in root:
+        return plan_item_label_cache(project_root, source_index)
+    if "updatehud" in symbol or "updatehud" in root:
+        return plan_hud_text_cache(project_root, source_index)
+    return None

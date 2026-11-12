@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents.fixer import apply_diffs  # noqa: E402
-from upi.core.repair_recipe import plan_item_label_cache  # noqa: E402
+from upi.core.repair_recipe import (plan_for_candidate, plan_hud_text_cache,  # noqa: E402
+                                    plan_item_label_cache)
 from upi.core.source_index import SourceIndex  # noqa: E402
 
 PASS, FAIL = [], []
@@ -48,6 +49,31 @@ try:
     ok("变化时仍更新", "lastItemCounts[i] = inventory[i];" in text)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+hud = plan_hud_text_cache(PROJECT, idx)
+ok("HUD recipe 生成", hud is not None)
+if hud is not None:
+    ok("HUD 五片 diff", len(hud.diffs) == 5, len(hud.diffs))
+    tmp2 = Path(tempfile.mkdtemp(prefix="upi_recipe_hud_"))
+    try:
+        dst2 = tmp2 / "Assets/DevSim/Runtime/ChromaGame.cs"
+        dst2.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PROJECT / "Assets/DevSim/Runtime/ChromaGame.cs", dst2)
+        apply_diffs(hud, root=tmp2)
+        t2 = dst2.read_text(encoding="utf-8")
+        ok("HUD 缓存字段", "lastHudRound" in t2 and "lastHudCoins" in t2)
+        ok("HUD 条件更新", 'if (round != lastHudRound)' in t2)
+    finally:
+        shutil.rmtree(tmp2, ignore_errors=True)
+
+class FakeCand:
+    root_cause = "hot_function:ChromaGame.UpdateHud"
+    sources = [type("S", (), {"symbol": "ChromaGame.UpdateHud"})()]
+
+ok("候选→HUD recipe", plan_for_candidate(FakeCand(), PROJECT, idx) is not None)
+FakeCand.root_cause = "hot_function:ChromaGame.RefreshItemLabels"
+FakeCand.sources = [type("S", (), {"symbol": "ChromaGame.RefreshItemLabels"})()]
+ok("候选→item recipe", plan_for_candidate(FakeCand(), PROJECT, idx) is not None)
 
 print(f"\n==== 修复 recipe 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 raise SystemExit(1 if FAIL else 0)

@@ -1,6 +1,7 @@
 """I8d：source-aware repair recipe 的真实 apply/compile/selftest/rollback。"""
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents import fixer  # noqa: E402
-from upi.core.repair_recipe import plan_item_label_cache  # noqa: E402
+from upi.core.repair_recipe import plan_hud_text_cache, plan_item_label_cache  # noqa: E402
 from upi.core.source_index import SourceIndex  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
 
@@ -33,15 +34,24 @@ def git(*args):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--recipe", choices=["item", "hud"], default="item")
+    a = ap.parse_args()
     original = git("rev-parse", "HEAD")
+    dirty = git("status", "--porcelain")
+    ok("工作区干净（防止 E2E reset 抹改动）", not dirty, dirty)
+    if dirty:
+        return 1
     tags_before = set(git("tag", "-l", "upi/attempt-*").splitlines())
-    plan = plan_item_label_cache(PROJECT, SourceIndex.build(PROJECT))
+    plan = (plan_hud_text_cache(PROJECT, SourceIndex.build(PROJECT))
+            if a.recipe == "hud" else
+            plan_item_label_cache(PROJECT, SourceIndex.build(PROJECT)))
     ok("recipe plan", plan is not None, plan)
     if plan is None:
         return 1
     snap = None
     try:
-        snap = SN.snapshot("i8d-item-label", PROJECT, SCENE, "i8d-recipe", root=ROOT)
+        snap = SN.snapshot("i8d-" + a.recipe, PROJECT, SCENE, "i8d-recipe", root=ROOT)
         rep = fixer.execute(plan, snap, project_path=PROJECT, scene_path=SCENE,
                             human_approved=True, approval_note="I8d recipe E2E")
         ok("apply+compile", rep.get("status") == "applied", rep)
