@@ -27,6 +27,8 @@ namespace DevSim
 
         private const float DragThreshold = 20f;
         private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("ChromaGame.Update");
+        private static readonly ProfilerMarker UpdateHudMarker = new ProfilerMarker("ChromaGame.UpdateHud");
+        private static readonly ProfilerMarker ItemLabelsMarker = new ProfilerMarker("ChromaGame.RefreshItemLabels");
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Boot()
@@ -959,6 +961,11 @@ namespace DevSim
 
         private void UpdateHud()
         {
+            using (UpdateHudMarker.Auto()) UpdateHudBody();
+        }
+
+        private void UpdateHudBody()
+        {
             if (roundText == null) return;
             roundText.text = "ROUND " + round;
             targetText.text = "TARGET " + target;
@@ -981,6 +988,11 @@ namespace DevSim
         }
 
         private void RefreshItemLabels()
+        {
+            using (ItemLabelsMarker.Auto()) RefreshItemLabelsBody();
+        }
+
+        private void RefreshItemLabelsBody()
         {
             if (itemCountLabels == null) return;
             for (int i = 0; i < itemCountLabels.Length; i++)
