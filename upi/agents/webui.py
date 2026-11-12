@@ -111,6 +111,33 @@ def _build_opportunity_ticket():
     return t
 
 
+def _build_candidate_ticket_latest():
+    """从最近一次 I8 证据候选建工单；不读 case/oracle。"""
+    from upi.config.project_profile import active_profile
+    from upi.core.candidates_v2 import generate_candidates
+    from upi.core.evidence_graph import EvidenceGraph
+    from upi.core.evidence_v2 import EvidenceBundleV2, clean_game_evidence
+    from upi.core.ticket import TicketStore, build_candidate_ticket
+
+    prof = active_profile()
+    files = sorted(E.RUNS.glob("*/evidence/evidence_v2.json"),
+                   key=lambda p: p.stat().st_mtime)
+    if not files:
+        raise ValueError("没有证据包；先跑 I8 采集")
+    bundle = clean_game_evidence(
+        EvidenceBundleV2(**json.loads(files[-1].read_text(encoding="utf-8"))))
+    graph = EvidenceGraph.from_bundle(bundle, prof.abs_project)
+    candidates = generate_candidates(bundle, graph, project_root=prof.abs_project,
+                                     limit=8)
+    if not candidates:
+        raise ValueError("证据包里没有可建单的候选")
+    t = build_candidate_ticket(candidates, prof.abs_project,
+                               project_id=prof.profile_id)
+    store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
+    store.save(t)
+    return t
+
+
 def _project_switch_blocked() -> Optional[str]:
     """运行中禁止切换/归档工程，避免把 A 的数据写到 B。"""
     try:
@@ -459,6 +486,7 @@ _INDEX_HTML = r"""<!doctype html>
       <p class="sub">一次列多个候选、按顺序执行；执行一次只落一个 patch。常驻结论只 <b>unverified</b>；批量批准不绕过单个 patch 的权限闸。</p>
       <div style="margin:10px 0 14px"><button id="buildTicketBtn" style="background:#14314a;color:#dbe7f3;border:1px solid #2a4a63;border-radius:8px;padding:9px 14px;cursor:pointer">从当前 cluster 生成工单</button>
         <button id="oppTicketBtn" style="background:#1b3a2d;color:#dbe7f3;border:1px solid #2a6348;border-radius:8px;padding:9px 14px;cursor:pointer;margin-left:6px">从机会生成工单</button>
+        <button id="candTicketBtn" style="background:#2a2340;color:#e3dbf3;border:1px solid #4a3a63;border-radius:8px;padding:9px 14px;cursor:pointer;margin-left:6px">从证据候选生成工单</button>
         <span id="ticketHint" style="color:var(--dim);font-size:12px;margin-left:10px">I3a：建单/审批可用；机会工单来自当前源码扫描。</span></div>
       <div class="panel">
         <h2>工单 <span id="batchMeta">—</span></h2>
@@ -693,6 +721,13 @@ async function buildTicket(){
     await refresh();
     if(r.ticket){ showTicketDetail(r.ticket); }
   }catch(e){ alert("建单失败：" + e.message); }
+}
+async function buildCandidateTicket(){
+  try{
+    const r = await post("/api/tickets/candidates", {});
+    await refresh();
+    if(r.ticket){ showTicketDetail(r.ticket); }
+  }catch(e){ alert("证据候选建单失败：" + e.message); }
 }
 function showTicketDetail(t){
   const items = (t.item_list || t.items || []).map(i => ({...i, tier: i.tier || i.permission_tier}));
@@ -964,6 +999,8 @@ const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
 const oppBtn = $("oppTicketBtn");
 if(oppBtn) oppBtn.addEventListener("click", buildOpportunityTicket);
+const candBtn = $("candTicketBtn");
+if(candBtn) candBtn.addEventListener("click", buildCandidateTicket);
 const createSuiteBtn = $("createSuiteBtn");
 if(createSuiteBtn) createSuiteBtn.addEventListener("click", createSuite);
 const projectSelect = $("projectSelect");
@@ -1194,6 +1231,15 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/tickets/opportunities":
             try:
                 t = _build_opportunity_ticket()
+                self._send_json(200, {"ok": True, "ticket": t.model_dump(),
+                                      "summary": t.summary()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(409, {"ok": False, "error": str(e)[:240]})
+            return
+
+        if parsed.path == "/api/tickets/candidates":
+            try:
+                t = _build_candidate_ticket_latest()
                 self._send_json(200, {"ok": True, "ticket": t.model_dump(),
                                       "summary": t.summary()})
             except Exception as e:  # noqa: BLE001
