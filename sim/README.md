@@ -64,7 +64,8 @@ python scripts/plan_opportunity.py --project sim/project --pattern ui_text_rebui
 - 当前覆盖 6 个 devsim pattern；`sync Addressables` 还没有通用模板；
 - `scripts/e2e_devsim_plan.py`：UI/材质两个 plan 已真实 apply+compile+rollback，6/6；
 - `build_opportunity_ticket()`：机会可落成 BatchTicket（auto pending / semi-needs_human / no-plan needs_human）；
-- Web 工单页“从机会生成工单” → `POST /api/tickets/opportunities`。
+- Web 工单页“从机会生成工单” → `POST /api/tickets/opportunities`；
+- 机会工单审批/执行 E2E 6/6：两个 auto 项 applied_unverified，semi/no-plan 转人工。
 
 ## 尚未完成
 
