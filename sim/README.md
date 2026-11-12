@@ -61,7 +61,8 @@ python scripts/plan_opportunity.py --project sim/project --pattern ui_text_rebui
 - 只读当前源码；
 - `find` 必须在当前文件精确命中一次，否则返回 None（转人工）；
 - 不读 `_refs`、不按 profile_id 分流；
-- 当前覆盖 6 个 devsim pattern；`sync Addressables` 还没有通用模板。
+- 当前覆盖 6 个 devsim pattern；`sync Addressables` 还没有通用模板；
+- `scripts/e2e_devsim_plan.py`：UI/材质两个 plan 已真实 apply+compile+rollback，6/6。
 
 ## 尚未完成
 
