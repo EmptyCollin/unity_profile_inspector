@@ -86,7 +86,7 @@ public static class UpiBoardEvidence
         int[] layers = new int[36];
         for (int i = 0; i < 36; i++) layers[i] = 1;
         g.DebugSetBoard(6, colors, layers);
-        g.DebugResolveStep();
+        g.DebugResolveBoard();
         _resolveFrame = ProfilerDriver.lastFrameIndex;
 
         _startFrame = ProfilerDriver.lastFrameIndex;
@@ -169,7 +169,8 @@ public static class UpiBoardEvidence
                                 "],\"data_tier\":\"A2\"}");
                             continue;
                         }
-                        if (!name.Contains("BoardModel")) continue;
+                        if (!(name.Contains("BoardModel") || name.Contains("ChromaGame")
+                              || name.Contains("DevSim"))) continue;
                         string key = frame + "|" + name;
                         long[] a;
                         if (!funcs.TryGetValue(key, out a)) { a = new long[2]; funcs[key] = a; }

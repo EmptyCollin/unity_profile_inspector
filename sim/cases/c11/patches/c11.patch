@@ -1,0 +1,19 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -1 +1 @@
+-        private void OpenShop()
++        private static readonly ProfilerMarker ShopSyncMarker = new ProfilerMarker("ChromaGame.OpenShop");
++        private int _shopPayloadChars;
++        private void OpenShop()
+@@ -1 +1 @@
+-            StartCoroutine(LoadShopAsync());
++            StartCoroutine(LoadShopAsync());
++            using (ShopSyncMarker.Auto())
++            {
++                for (int i = 0; i < 8; i++)
++                {
++                    var ta = Resources.Load<TextAsset>("DevSim/payload_" + i);
++                    var pad = new string('x', 8192);
++                    _shopPayloadChars += pad.Length + (ta != null ? ta.text.Length : 0);
++                }
++            }

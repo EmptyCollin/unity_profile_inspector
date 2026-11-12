@@ -1,0 +1,22 @@
+{
+  "case_id": "c11",
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/c11.patch"
+    }
+  ],
+  "replay": "c11",
+  "oracle": "c11",
+  "base_hash": "e616c40678022314",
+  "pattern_id": "sync_resources_load_on_shop",
+  "notes": "sync payload load on shop open",
+  "expects": {
+    "windows": [
+      "shop"
+    ],
+    "symbols": [
+      "ChromaGame.OpenShop"
+    ]
+  }
+}

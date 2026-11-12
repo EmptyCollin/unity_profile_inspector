@@ -1,0 +1,22 @@
+{
+  "case_id": "c06",
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/c06.patch"
+    }
+  ],
+  "replay": "c06",
+  "oracle": "c06",
+  "base_hash": "e616c40678022314",
+  "pattern_id": "per_clear_particle_instantiate",
+  "notes": "instantiate/destroy particle per clear",
+  "expects": {
+    "windows": [
+      "board"
+    ],
+    "symbols": [
+      "ChromaGame.ResolveAllSync"
+    ]
+  }
+}

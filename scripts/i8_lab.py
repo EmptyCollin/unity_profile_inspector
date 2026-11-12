@@ -48,6 +48,7 @@ REPLAY = LAB / "replay.json"
 # 取证参数：与产品控制台共用 upi/core/capture_config.py 的单一事实源。
 from upi.core.capture_config import DEFAULTS as CFG_DEFAULTS  # noqa: E402
 from upi.core.capture_config import LIMITS as CFG_LIMITS  # noqa: E402
+from upi.core.capture_config import PROBE_CONFIG_PATH  # noqa: E402
 from upi.core.capture_config import load as load_capture_cfg  # noqa: E402
 from upi.core.capture_config import save as save_capture_cfg  # noqa: E402
 from upi.core.capture_config import write_probe_config as _write_probe_cfg  # noqa: E402
@@ -450,6 +451,31 @@ def _capture_once(tag: str, limit: int = 8) -> list[dict]:
     return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
 
 
+def _capture_marker(limit: int = 8, action: str = "none") -> list[dict]:
+    """通用 marker 窗口（商店等外部动作触发）：动作在探针内部执行。"""
+    cfg = _write_probe_cfg()
+    cfg = {**cfg, "marker_action": action}
+    PROBE_CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    ev = ROOT / "runs" / "_probe" / "marker_evidence.json"
+    _run_probe_file(ROOT / "probe" / "upi_marker_evidence.cs", ev)
+    run_id = "lab_marker"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
+                    "--project", str(PROJECT), "--evidence", str(ev),
+                    "--run-id", run_id, "--scene", "Assets/Scenes/00_Bootstrap.unity"],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
+    out = ROOT / "runs" / run_id / "evidence" / "candidates.json"
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
+                    "--project", str(PROJECT), "--evidence", str(bundle),
+                    "--out", str(out), "--limit", str(limit)],
+                   cwd=str(ROOT), capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", timeout=60)
+    if not out.exists():
+        return []
+    return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+
+
 def _capture_board(limit: int = 8) -> list[dict]:
     ev = ROOT / "runs" / "_probe" / "board_evidence.json"
     _run_probe_file(ROOT / "probe" / "upi_board_evidence.cs", ev)
@@ -542,6 +568,23 @@ def _slim(c: dict) -> dict:
             "anchor": (c.get("code_anchors") or [""])[0]}
 
 
+def _ensure_playing() -> dict:
+    """采集前把游戏拉回 Playing：上一次商店窗口会把 phase 留在 Shop。"""
+    st = _parse_state(_hud_ready())
+    if st.get("phase") == "Shop":
+        _eval(GAME + 'if(g==null) return "no-game"; return g.DebugLeaveShop();')
+        time.sleep(0.25)
+        st = _parse_state(_hud_ready())
+    if st.get("phase") != "Playing":
+        cfg = json.dumps({"seed": 20261112, "autoplay": False, "round_seconds": 30})
+        cfg_js = cfg.replace("\\", "\\\\").replace('"', '\\"')
+        _eval(GAME + f'if(g==null) return "no-game"; g.DebugLoadConfig("{cfg_js}");'
+                    'g.DebugStartRun(); return g.DebugState();')
+        time.sleep(0.25)
+        st = _parse_state(_hud_ready())
+    return st
+
+
 def capture_diagnostic(case_ids: list[str]) -> dict:
     """只采当前目标需要的窗口，并只保留该目标作用域内的候选。"""
     if not case_ids:
@@ -569,12 +612,15 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
                 windows.append(w)
     if not windows:
         return {"ok": False, "error": "所选 case 未声明采集窗口（见 manifest.expects）"}
+    # 商店窗口会把 phase 留在 Shop；固定最后跑，避免影响后续窗口。
+    windows = sorted(windows, key=lambda w: {"board": 0, "hud": 1, "shop": 2}.get(w, 9))
 
     raw: list[dict] = []
     window_info: dict[str, dict] = {}
     asset: dict = {}
 
     if "hud" in windows:
+        _ensure_playing()
         probe = _hud_ready()
         st = _parse_state(probe)
         if probe.get("result") == "no-game" or st.get("raw") == "no-game":
@@ -594,6 +640,7 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
     if "board" in windows:
         # 板子取证器自己触发 resolve（外部触发会因 eval 延迟错过那一帧）；
         # 这里只负责在 resolve 之前把 profiler 打开。
+        _ensure_playing()
         _force_profiler_off()
         on = _eval(PROFILER_ON_SHALLOW_CODE, timeout=30)
         if not on.get("ok"):
@@ -607,14 +654,23 @@ def capture_diagnostic(case_ids: list[str]) -> dict:
         window_info["board"] = {"candidates": len(board), "phase": st.get("phase")}
 
     if "shop" in windows:
-        opened = _open_shop()
-        s = _parse_state(opened)
+        # 商店窗口：浅档 + 外部 open_shop + marker 取证（c11 同步加载靠它）
+        _ensure_playing()
+        _force_profiler_off()
+        on = _eval(PROFILER_ON_SHALLOW_CODE, timeout=30)
+        if not on.get("ok"):
+            raise RuntimeError("打开 profiler 失败：" +
+                               json.dumps(on.get("errors"), ensure_ascii=False)[:200])
+        shop = _capture_marker(CAPTURE_LIMIT, action="shop")
+        raw += shop
+        s = _parse_state(_hud_ready())
         payload = PROJECT / "Assets/Resources/DevSim/payload_0.txt"
         asset = {"payload": "Assets/Resources/DevSim/payload_0.txt",
                  "bytes": (payload.stat().st_size if payload.exists() else None),
                  "phase": s.get("phase"), "shopOpen": s.get("shopOpen"),
                  "state": {k: s.get(k) for k in ("phase", "shopOpen", "coins", "round")}}
-        window_info["shop"] = {"phase": s.get("phase"), "shopOpen": s.get("shopOpen")}
+        window_info["shop"] = {"phase": s.get("phase"), "shopOpen": s.get("shopOpen"),
+                               "candidates": len(shop)}
 
     all_cands = _dedupe(raw)
     mem1 = _editor_mem()

@@ -22,5 +22,9 @@
       "reference_ref": "HUD 应脏标记，不应每帧重建文本",
       "risk": "low"
     }
+  ],
+  "atomic_cases": [
+    "c09",
+    "c02"
   ]
 }

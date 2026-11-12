@@ -15,5 +15,6 @@
       "BoardModel.FindMatches",
       "BoardModel.FindMatchesBody"
     ]
-  }
+  },
+  "pattern_id": "match_scan_allocation"
 }

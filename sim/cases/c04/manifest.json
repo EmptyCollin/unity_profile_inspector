@@ -17,5 +17,6 @@
       "phase": "Shop",
       "shopOpen": true
     }
-  }
+  },
+  "pattern_id": "payload_asset_oversized"
 }

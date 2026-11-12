@@ -22,5 +22,9 @@
       "reference_ref": "匹配扫描不应每帧分配临时列表",
       "risk": "low"
     }
+  ],
+  "atomic_cases": [
+    "c02",
+    "c01"
   ]
 }

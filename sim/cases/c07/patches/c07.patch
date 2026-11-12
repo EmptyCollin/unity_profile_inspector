@@ -1,0 +1,10 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -1 +1 @@
+-        private void Update()
++        private static readonly ProfilerMarker CanvasChurnMarker = new ProfilerMarker("ChromaGame.Update");
++        private void Update()
+@@ -1 +1 @@
+-            using (UpdateMarker.Auto()) UpdateBody();
++            using (CanvasChurnMarker.Auto()) Canvas.ForceUpdateCanvases();
++            using (UpdateMarker.Auto()) UpdateBody();

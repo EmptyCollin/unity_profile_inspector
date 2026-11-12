@@ -30,5 +30,10 @@
       "reference_ref": "商店打开不应同步等待 Addressables",
       "risk": "medium"
     }
+  ],
+  "atomic_cases": [
+    "c05",
+    "c10",
+    "c11"
   ]
 }

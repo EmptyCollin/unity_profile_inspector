@@ -14,5 +14,8 @@
       "reference_ref": "每次消除不应 Instantiate/Destroy UI 粒子",
       "risk": "low"
     }
+  ],
+  "atomic_cases": [
+    "c06"
   ]
 }

@@ -1,0 +1,17 @@
+{
+  "replay_id": "c09",
+  "base_hash": "e616c40678022314",
+  "commands": [
+    {
+      "type": "start_game"
+    },
+    {
+      "type": "wait",
+      "seconds": 3.0
+    },
+    {
+      "type": "stop"
+    }
+  ],
+  "notes": "c09: HUD 窗口（持续游玩）"
+}

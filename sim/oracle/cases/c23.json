@@ -14,5 +14,8 @@
       "reference_ref": "逐帧手写 64 格缩放应由动画系统/脏标记驱动",
       "risk": "medium"
     }
+  ],
+  "atomic_cases": [
+    "c10"
   ]
 }

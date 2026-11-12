@@ -5,5 +5,6 @@
   "scenario": "c21",
   "mixed": false,
   "negative_control": true,
-  "expected_opportunities": []
+  "expected_opportunities": [],
+  "atomic_cases": []
 }

@@ -22,5 +22,9 @@
       "reference_ref": "空闲时每帧全盘扫描提示",
       "risk": "low"
     }
+  ],
+  "atomic_cases": [
+    "c05",
+    "c09"
   ]
 }

@@ -46,16 +46,26 @@ python scripts/compose_cases.py --base sim/project \
 
 ## 当前病例
 
-| case | 病灶 | 形式 |
-|---|---|---|
-| c01 | BoardModel 每次匹配分配 | 整文件 overlay |
-| c02 | HUD 文本每次重建 | ChromaGame patch |
-| c03 | item label 每次重建 | ChromaGame patch（0 context） |
-| c04 | 商店 payload 放大 | 同路径资产 overlay + .meta |
+| case | 病灶 | 窗口 | 期望符号 | 形式 |
+|---|---|---|---|---|
+| c01 | BoardModel 每次匹配分配 | board | BoardModel.FindMatches | 整文件 overlay |
+| c02 | HUD 文本每次重建 | hud | ChromaGame.UpdateHud | ChromaGame patch |
+| c03 | item label 每次重建 | hud | ChromaGame.RefreshItemLabels | ChromaGame patch |
+| c04 | 商店 payload 放大 | shop | 无（断言 phase=Shop/shopOpen） | 资产 overlay + .meta |
+| c05 | 逐格材质实例 | board | ChromaGame.BuildBoard | patch |
+| c06 | 每次消除即时粒子 | board | ChromaGame.ResolveAllSync | patch |
+| c07 | 每帧强制 canvas 布局 | hud | ChromaGame.Update | patch |
+| c08 | 逐格临时纹理 | board | ChromaGame.RefreshTiles | patch |
+| c09 | 空闲全盘 hint 扫描 | hud | ChromaGame.ResolvePendingWhenIdle | patch |
+| c10 | 逐帧手写 tile 缩放 | hud | ChromaGame.UpdateBody | patch |
+| c11 | 商店同步加载 payload | shop | ChromaGame.OpenShop | patch |
+
+manifest 里的 `pattern_id` 与 `sim/oracle/cases` 的 `expected_opportunities` 对齐；
+oracle 的 24 个评测场景通过 `atomic_cases` 组合上述原子病例（混合场景=多原子组合，
+负对照=空组合）。
 
 ## 验证边界
 
-- 组合可编译/可玩：已验证 c01+c02+c03。
-- 组合可同时诊断三病：已验证。
+- 11 个原子病例可同时叠加、编译通过；合并后 11/11 均能出现期望证据（`runs/i8_lab/evidence/candidates.json` 的 `per_case`）；
+- 合并态玩法自测 44/44 通过（`runs/devsim_selftest_*.json`）；
 - 组合性能 verified：未完成。
-- 真实资产 case（同路径 `.asset/.prefab/.unity` 替换）：规则已测，病例未建。

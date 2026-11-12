@@ -1,0 +1,17 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -1 +1 @@
+-        private void RefreshTiles()
++        private static readonly ProfilerMarker TileTextureMarker = new ProfilerMarker("ChromaGame.RefreshTiles");
++        private void RefreshTiles()
+@@ -1 +1 @@
+-                    if (img == null) continue;
+-                    int v = model.Color[r, c];
++                    if (img == null) continue;
++                    using (TileTextureMarker.Auto())
++                    {
++                        var tmpTex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
++                        tmpTex.Apply();
++                        if (tmpTex.width < 0) return;
++                    }
++                    int v = model.Color[r, c];

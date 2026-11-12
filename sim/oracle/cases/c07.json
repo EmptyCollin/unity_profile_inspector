@@ -14,5 +14,8 @@
       "reference_ref": "不应为每格创建独立 Texture2D/Sprite",
       "risk": "medium"
     }
+  ],
+  "atomic_cases": [
+    "c08"
   ]
 }

@@ -1,0 +1,11 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -1 +1 @@
+-        private void BuildBoard(int n)
++        private static readonly ProfilerMarker MaterialChurnMarker = new ProfilerMarker("ChromaGame.BuildBoard");
++        private void BuildBoard(int n)
+@@ -1 +1 @@
+-                    img.color = Palette[model.Color[r, c]];
++                    img.color = Palette[model.Color[r, c]];
++                    using (MaterialChurnMarker.Auto())
++                        img.material = new Material(img.material);

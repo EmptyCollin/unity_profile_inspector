@@ -1,0 +1,22 @@
+{
+  "case_id": "c10",
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/c10.patch"
+    }
+  ],
+  "replay": "c10",
+  "oracle": "c10",
+  "base_hash": "e616c40678022314",
+  "pattern_id": "per_frame_tile_animation",
+  "notes": "per-frame manual tile animation",
+  "expects": {
+    "windows": [
+      "hud"
+    ],
+    "symbols": [
+      "ChromaGame.UpdateBody"
+    ]
+  }
+}

@@ -14,5 +14,8 @@
       "reference_ref": "商店打开不应同步加载 24 个资源",
       "risk": "medium"
     }
+  ],
+  "atomic_cases": [
+    "c11"
   ]
 }

@@ -19,5 +19,6 @@
       "ChromaGame.RefreshItemLabels",
       "ChromaGame.RefreshItemLabelsBody"
     ]
-  }
+  },
+  "pattern_id": "item_label_rebuild_per_frame"
 }

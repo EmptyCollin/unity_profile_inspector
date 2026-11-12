@@ -1,0 +1,22 @@
+--- a/Assets/DevSim/Runtime/ChromaGame.cs
++++ b/Assets/DevSim/Runtime/ChromaGame.cs
+@@ -1 +1 @@
+-        private StepOutcome ResolveAllSync()
++        private static readonly ProfilerMarker ClearFxMarker = new ProfilerMarker("ChromaGame.ResolveAllSync");
++        private StepOutcome ResolveAllSync()
+@@ -1 +1 @@
+-        private StepOutcome ResolveAllSync()
+-        {
+-            var o = new StepOutcome();
++        private StepOutcome ResolveAllSync()
++        {
++            var o = new StepOutcome();
++            using (ClearFxMarker.Auto())
++            {
++                var fx = new GameObject("FxClearLegacy", typeof(RectTransform), typeof(Image));
++                fx.transform.SetParent(boardRoot, false);
++                var fimg = fx.GetComponent<Image>();
++                fimg.color = Color.white;
++                fx.GetComponent<RectTransform>().sizeDelta = new Vector2(14, 14);
++                Destroy(fx, 0.25f);
++            }

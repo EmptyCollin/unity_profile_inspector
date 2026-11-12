@@ -14,5 +14,8 @@
       "reference_ref": "每帧改变侧栏尺寸会触发 Canvas rebuild",
       "risk": "low"
     }
+  ],
+  "atomic_cases": [
+    "c07"
   ]
 }

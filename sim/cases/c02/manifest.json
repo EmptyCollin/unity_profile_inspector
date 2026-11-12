@@ -19,5 +19,6 @@
       "ChromaGame.UpdateHud",
       "ChromaGame.UpdateHudBody"
     ]
-  }
+  },
+  "pattern_id": "ui_text_rebuild_per_frame"
 }

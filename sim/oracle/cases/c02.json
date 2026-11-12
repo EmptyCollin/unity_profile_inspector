@@ -14,5 +14,8 @@
       "reference_ref": "64 个格子不应各持一个 Material 实例",
       "risk": "medium"
     }
+  ],
+  "atomic_cases": [
+    "c05"
   ]
 }

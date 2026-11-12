@@ -1,0 +1,22 @@
+{
+  "case_id": "c08",
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/c08.patch"
+    }
+  ],
+  "replay": "c08",
+  "oracle": "c08",
+  "base_hash": "e616c40678022314",
+  "pattern_id": "per_tile_texture",
+  "notes": "per-tile temp texture churn",
+  "expects": {
+    "windows": [
+      "board"
+    ],
+    "symbols": [
+      "ChromaGame.RefreshTiles"
+    ]
+  }
+}

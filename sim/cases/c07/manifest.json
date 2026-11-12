@@ -1,0 +1,22 @@
+{
+  "case_id": "c07",
+  "patches": [
+    {
+      "file": "Assets/DevSim/Runtime/ChromaGame.cs",
+      "patch": "patches/c07.patch"
+    }
+  ],
+  "replay": "c07",
+  "oracle": "c07",
+  "base_hash": "e616c40678022314",
+  "pattern_id": "canvas_layout_churn",
+  "notes": "force canvas rebuild every frame",
+  "expects": {
+    "windows": [
+      "hud"
+    ],
+    "symbols": [
+      "ChromaGame.Update"
+    ]
+  }
+}
