@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
@@ -96,12 +95,49 @@ def _apply_patch(out: Path, case_dir: Path, cp: CasePatch) -> None:
     target = out / cp.file
     if not target.is_file():
         raise ValueError(f"patch 目标不存在：{cp.file}")
-    cmd = ["git", "apply", "--unsafe-paths", "--whitespace=nowarn",
-           "--directory", str(out), "-p1", str(patch)]
-    r = subprocess.run(cmd, cwd=str(out), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        raise ValueError(f"patch 应用失败 {cp.patch}: {(r.stderr or r.stdout)[:300]}")
+    lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    # 极简 unified diff：只接受以 " " / "+" / "-" 组成的 hunk，按精确旧行匹配。
+    hunks: list[tuple[list[str], list[str]]] = []
+    old: list[str] = []
+    new: list[str] = []
+    in_hunk = False
+    for raw in patch.read_text(encoding="utf-8").splitlines(keepends=True):
+        if raw.startswith("---") or raw.startswith("+++"):
+            continue
+        if raw.startswith("@@"):
+            if in_hunk:
+                hunks.append((old, new))
+            old, new, in_hunk = [], [], True
+            continue
+        if not in_hunk:
+            continue
+        tag, body = raw[:1], raw[1:]
+        if tag == " ":
+            old.append(body); new.append(body)
+        elif tag == "-":
+            old.append(body)
+        elif tag == "+":
+            new.append(body)
+        elif tag == "\\":
+            continue
+        else:
+            raise ValueError(f"非法 patch 行：{raw[:80]!r}")
+    if in_hunk:
+        hunks.append((old, new))
+    if not hunks:
+        raise ValueError(f"patch 没有 hunk：{cp.patch}")
+    for old_lines, new_lines in reversed(hunks):
+        if not old_lines:
+            raise ValueError(f"空 hunk 不支持：{cp.patch}")
+        found = -1
+        for i in range(0, len(lines) - len(old_lines) + 1):
+            if lines[i:i + len(old_lines)] == old_lines:
+                found = i
+                break
+        if found < 0:
+            raise ValueError(f"patch hunk 冲突：{cp.patch}")
+        lines[found:found + len(old_lines)] = new_lines
+    target.write_text("".join(lines), encoding="utf-8")
 
 
 def apply_case(base: Path | str, case_dir: Path | str, out: Path | str) -> CaseRun:
