@@ -9,17 +9,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.case_overlay import apply_case  # noqa: E402
+from upi.core.case_overlay import apply_case, apply_cases  # noqa: E402
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
-    ap.add_argument("--case", required=True)
+    ap.add_argument("--case", action="append", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     try:
-        run = apply_case(a.base, a.case, a.out)
+        if len(a.case) == 1:
+            run = apply_case(a.base, a.case[0], a.out)
+        else:
+            run = apply_cases(a.base, a.case, a.out)
         print(json.dumps({"ok": True, **run.model_dump()}, ensure_ascii=False, indent=2))
         return 0
     except Exception as e:  # noqa: BLE001

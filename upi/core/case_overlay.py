@@ -39,6 +39,13 @@ class CaseRun(BaseModel):
     oracle: str = ""
 
 
+class CombinedRun(BaseModel):
+    case_ids: list[str]
+    base: str
+    workdir: str
+    files: list[str] = Field(default_factory=list)
+
+
 def tree_hash(root: Path, *, subdirs=("Assets", "ProjectSettings")) -> str:
     h = hashlib.sha256()
     for sub in subdirs:
@@ -97,3 +104,45 @@ def apply_case(base: Path | str, case_dir: Path | str, out: Path | str) -> CaseR
             applied.append(rel + ".meta")
     return CaseRun(case_id=manifest.case_id, base=str(base), workdir=str(out),
                    files=applied, replay=manifest.replay, oracle=manifest.oracle)
+
+
+def apply_cases(base: Path | str, case_dirs: list[Path | str],
+                out: Path | str) -> CombinedRun:
+    """把多个无冲突 case 覆盖到同一临时副本。
+
+    当前契约：不同 case 的 overlay 路径必须完全不相交。
+    同一路径的代码组合留给 patch 机制，不能靠整文件替换叠。
+    """
+    base = Path(base).resolve()
+    out = Path(out).resolve()
+    manifests = []
+    for cd in case_dirs:
+        cd = Path(cd).resolve()
+        manifests.append((cd, CaseManifest(**json.loads(
+            (cd / "manifest.json").read_text(encoding="utf-8")))))
+    actual = tree_hash(base)
+    owner: dict[str, str] = {}
+    for cd, m in manifests:
+        if m.base_hash and m.base_hash != actual:
+            raise ValueError(f"{m.case_id} base 哈希不匹配")
+        for rel in m.overlay:
+            if rel in owner:
+                raise ValueError(f"overlay 冲突：{rel} 同时属于 {owner[rel]} 和 {m.case_id}")
+            owner[rel] = m.case_id
+            src = cd / "overlay" / rel
+            if not src.is_file():
+                raise ValueError(f"{m.case_id} overlay 文件缺失：{rel}")
+            if src.suffix.lower() in ASSET_SUFFIXES:
+                if not (cd / "overlay" / (rel + ".meta")).is_file():
+                    raise ValueError(f"{m.case_id} 资产 overlay 缺 .meta：{rel}.meta")
+    _copy_base(base, out)
+    applied: list[str] = []
+    for cd, m in manifests:
+        for rel in m.overlay:
+            shutil.copy2(cd / "overlay" / rel, out / rel)
+            applied.append(rel)
+            if (cd / "overlay" / (rel + ".meta")).is_file():
+                shutil.copy2(cd / "overlay" / (rel + ".meta"), out / (rel + ".meta"))
+                applied.append(rel + ".meta")
+    return CombinedRun(case_ids=[m.case_id for _, m in manifests],
+                       base=str(base), workdir=str(out), files=applied)
