@@ -37,7 +37,10 @@ class SourceIndex:
             return None
         s = symbol.strip()
         if "!" in s:
-            s = s.split("!")[-1]
+            asm, s = s.split("!", 1)
+            # 只有项目程序集才允许落到项目源码；Unity/Editor 原生模块不猜。
+            if not asm.lower().endswith("assembly-csharp.dll"):
+                return None
         s = s.replace("::", ".")
         s = re.sub(r"\([^)]*\)\s*$", "", s)
         if s in self.spans:
@@ -45,6 +48,9 @@ class SourceIndex:
         short = ".".join(s.split(".")[-2:])
         if short in self.spans:
             return self.spans[short]
+        # 有类型前缀但没命中：不要拿同名方法乱配（GISceneManager.Update 不是 ChromaGame.Update）。
+        if "." in s:
+            return None
         method = s.split(".")[-1]
         cands = self.by_method.get(method, [])
         return cands[0] if len(cands) == 1 else None
