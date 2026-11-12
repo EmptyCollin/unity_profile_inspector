@@ -106,6 +106,7 @@ namespace DevSim
         private bool bonusChoiceLocked;
         private bool bonusOpen, overOpen;
         private bool pendingRoundEnd, pendingGameOver;
+        private float busySince;
 
         private sealed class Offer
         {
@@ -872,6 +873,18 @@ namespace DevSim
 
         private void Update()
         {
+            if (busy)
+            {
+                // 兜底：动效协程若因异常中断，busy 不会永久锁死操作与回合结算。
+                if (busySince <= 0f) busySince = Time.unscaledTime;
+                else if (Time.unscaledTime - busySince > 8f)
+                {
+                    Debug.LogWarning("DevSim busy watchdog: released stale animation lock");
+                    busy = false;
+                    busySince = 0f;
+                }
+            }
+            else busySince = 0f;
             if (cfg.legacy_canvas && sideRect != null)
                 sideRect.sizeDelta = new Vector2(652, 560);
             if (cfg.legacy_hint && phase == Phase.Playing) HasMatch();
