@@ -8,6 +8,7 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
+using Unity.Profiling;
 
 namespace DevSim
 {
@@ -25,6 +26,7 @@ namespace DevSim
         private const float BoardPad = 12f, BoardGap = 4f;
 
         private const float DragThreshold = 20f;
+        private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("ChromaGame.Update");
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Boot()
@@ -872,6 +874,11 @@ namespace DevSim
         }
 
         private void Update()
+        {
+            using (UpdateMarker.Auto()) UpdateBody();
+        }
+
+        private void UpdateBody()
         {
             if (busy)
             {

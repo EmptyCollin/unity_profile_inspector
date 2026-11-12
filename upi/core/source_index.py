@@ -13,7 +13,11 @@ from pathlib import Path
 
 from upi.core.evidence_v2 import SourceSpan
 
-_TYPE_RE = re.compile(r"^\s*(?:public|internal|private|protected)?\s*(?:partial\s+)?(?:class|struct|interface)\s+(\w+)")
+_TYPE_RE = re.compile(
+    r"^\s*(?:public|internal|private|protected)?\s*"
+    r"(?:(?:sealed|abstract|static|partial)\s+)*"
+    r"(?:class|struct|interface)\s+(\w+)"
+)
 _METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|internal|static|virtual|override|sealed|async|extern|unsafe|new|partial|abstract)\s+)*"
     r"(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\([^;{}]*\)\s*$"
@@ -31,7 +35,11 @@ class SourceIndex:
         """`Namespace.Type.Method` → 精确；`Type.Method` / `Method` → 唯一命中才返回。"""
         if not symbol:
             return None
-        s = symbol.replace("::", ".")
+        s = symbol.strip()
+        if "!" in s:
+            s = s.split("!")[-1]
+        s = s.replace("::", ".")
+        s = re.sub(r"\([^)]*\)\s*$", "", s)
         if s in self.spans:
             return self.spans[s]
         short = ".".join(s.split(".")[-2:])
@@ -54,13 +62,14 @@ class SourceIndex:
             except OSError:
                 continue
             rel = str(file.relative_to(root)).replace("\\", "/")
-            current_type = ""
+            types: list[tuple[int, str]] = []
             i = 0
             while i < len(lines):
                 line = lines[i]
+                indent = len(line) - len(line.lstrip())
                 tm = _TYPE_RE.match(line)
                 if tm:
-                    current_type = tm.group(1)
+                    types.append((indent, tm.group(1)))
                 mm = _METHOD_RE.match(line)
                 if not mm:
                     i += 1
@@ -69,6 +78,8 @@ class SourceIndex:
                 if method in {"if", "for", "while", "switch", "catch", "using", "return"}:
                     i += 1
                     continue
+                # 方法属于“最近的、缩进更浅的类型”；嵌套类型不会污染外层方法。
+                current_type = next((name for ind, name in reversed(types) if ind < indent), "")
                 end = _find_end(lines, i)
                 if end is None:
                     i += 1

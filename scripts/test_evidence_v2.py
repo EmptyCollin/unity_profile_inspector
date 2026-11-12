@@ -46,6 +46,8 @@ ok("源码索引 Foo.Update", s is not None and s.file.endswith("Foo.cs"), s)
 ok("源码索引行号", s is not None and s.start_line == 4 and s.end_line >= 6, s)
 ok("源码索引 fallback", idx.resolve("Calc") is not None)
 ok("源码索引未知返回 None", idx.resolve("NoSuch.Method") is None)
+ok("源码索引原生符号归一",
+   idx.resolve("Assembly-CSharp.dll!Foo::Update()") is not None)
 
 frame = CallStackFrame(symbol="Foo.Update", source=s)
 bundle = EvidenceBundleV2(
