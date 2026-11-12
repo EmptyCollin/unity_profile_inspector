@@ -97,14 +97,14 @@ def plan_hud_text_cache(project_root: Path | str,
         return None
     body = "\n".join(text.splitlines()[span.start_line - 1:span.end_line])
     pairs = [
-        ('roundText.text = "ROUND " + round;',
-         'if (round != lastHudRound) { roundText.text = "ROUND " + round; lastHudRound = round; }'),
-        ('targetText.text = "TARGET " + target;',
-         'if (target != lastHudTarget) { targetText.text = "TARGET " + target; lastHudTarget = target; }'),
-        ('scoreText.text = "SCORE " + totalScore;',
-         'if (totalScore != lastHudScore) { scoreText.text = "SCORE " + totalScore; lastHudScore = totalScore; }'),
-        ('coinText.text = "COINS " + coins;',
-         'if (coins != lastHudCoins) { coinText.text = "COINS " + coins; lastHudCoins = coins; }'),
+        ('            roundText.text = "ROUND " + round;',
+         '            if (round != lastHudRound) { roundText.text = "ROUND " + round; lastHudRound = round; }'),
+        ('            targetText.text = "TARGET " + target;',
+         '            if (target != lastHudTarget) { targetText.text = "TARGET " + target; lastHudTarget = target; }'),
+        ('            scoreText.text = "SCORE " + totalScore;',
+         '            if (totalScore != lastHudScore) { scoreText.text = "SCORE " + totalScore; lastHudScore = totalScore; }'),
+        ('            coinText.text = "COINS " + coins;',
+         '            if (coins != lastHudCoins) { coinText.text = "COINS " + coins; lastHudCoins = coins; }'),
     ]
     diffs = []
     for old, new in pairs:

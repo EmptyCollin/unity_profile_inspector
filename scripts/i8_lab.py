@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.case_overlay import apply_cases  # noqa: E402
+from upi.core.models import Evidence, Issue, IssueSignature  # noqa: E402
 from upi.core.replay_exec import ReplayExecutor  # noqa: E402
 from upi.core.replay_spec import load_replay, merge_replays  # noqa: E402
 
@@ -61,6 +62,110 @@ def preview(case_ids: list[str]) -> dict:
         (LAB / "replay.json").write_text(merged.model_dump_json(indent=2), encoding="utf-8")
     return {"ok": True, "cases": run.case_ids, "files": run.files,
             "workdir": str(out), "replay": (merged.model_dump() if merged else None)}
+
+
+def _latest_candidate_file() -> Path | None:
+    lab = ROOT / "runs" / "lab" / "evidence" / "candidates.json"
+    if lab.exists():
+        return lab
+    files = sorted((ROOT / "runs").glob("*/evidence/candidates.json"),
+                   key=lambda p: p.stat().st_mtime)
+    files = [p for p in files if "repaired" not in str(p)]
+    return files[-1] if files else None
+
+
+def run_agent_diagnosis() -> dict:
+    """真实 LLM 归因：取最近候选前 2 个，调用 factor_judge。"""
+    from upi.agents.factor_judge import build_hypotheses_for_issue
+    from upi.config.settings import load_config
+
+    p = _latest_candidate_file()
+    if p is None:
+        return {"ok": False, "error": "没有 candidates.json"}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    cands = []
+    for c in data.get("candidates", [])[:2]:
+        anchors = c.get("code_anchors") or []
+        cands.append((c.get("root_cause", ""), anchors))
+    if not cands:
+        return {"ok": False, "error": "候选为空"}
+    issue = Issue(
+        signature=IssueSignature(
+            dim="cpu", metric="hot_path_score",
+            mechanism="hot_path_repeated_work", threshold=0.0),
+        link="cpu",
+        evidence=[Evidence(tool="evidence_candidates", raw_ref=str(p),
+                           value=float(cands and data["candidates"][0].get("score", 0)),
+                           unit="score", data_tier="A2")],
+        magnitude=float(data["candidates"][0].get("score", 0)),
+        deviation_ratio=1.0,
+    )
+    cfg = load_config(ROOT / "llm_config.yaml")
+    hs, archive = build_hypotheses_for_issue(cfg, issue, cands)
+    out = LAB / "diagnose.json"
+    out.write_text(json.dumps({"hypotheses": [h.model_dump() for h in hs],
+                               "archive": archive, "source": str(p)},
+                              ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "path": str(out), "source": str(p),
+            "hypotheses": [{"root_cause": h.root_cause, "confidence": h.confidence,
+                            "code_anchors": h.code_anchors} for h in hs],
+            "tokens": {k: v.get("_meta", {}) for k, v in archive.items()}}
+
+
+def run_repair_plans() -> dict:
+    from upi.core.candidates_v2 import CandidateV2
+    from upi.core.repair_recipe import plan_for_candidate
+
+    p = _latest_candidate_file()
+    if p is None:
+        return {"ok": False, "error": "没有 candidates.json"}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    out = []
+    for c in data.get("candidates", [])[:3]:
+        cand = CandidateV2(**c)
+        plan = plan_for_candidate(cand, PROJECT)
+        out.append({
+            "root_cause": cand.root_cause,
+            "playbook": (plan.playbook_id if plan else ""),
+            "files": (plan.touched_assets if plan else []),
+            "diffs": (len(plan.diffs) if plan else 0),
+            "tier": (plan.permission_tier if plan else "no_recipe"),
+        })
+    return {"ok": True, "source": str(p), "plans": out}
+
+
+def run_repair() -> dict:
+    from upi.agents.fixer import apply_diffs
+    from upi.core.candidates_v2 import CandidateV2
+    from upi.core.repair_recipe import plan_for_candidate
+
+    p = _latest_candidate_file()
+    if p is None:
+        return {"ok": False, "error": "没有 candidates.json"}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    applied = []
+    for c in data.get("candidates", [])[:3]:
+        cand = CandidateV2(**c)
+        plan = plan_for_candidate(cand, PROJECT)
+        if plan is None:
+            continue
+        apply_diffs(plan, root=PROJECT)
+        applied.append({"root_cause": cand.root_cause, "playbook": plan.playbook_id,
+                        "diffs": len(plan.diffs)})
+    if not applied:
+        return {"ok": False, "error": "没有可执行的 recipe（可能 base 已是优化态）"}
+    d = unity("recompile")
+    deadline = time.time() + 20
+    st = {}
+    while time.time() < deadline:
+        st = ((unity("recompile_status").get("data") or {}).get("result") or {})
+        if st.get("status") in {"completed", "up_to_date", "failed"}:
+            break
+        time.sleep(1)
+    if st.get("failed"):
+        restore_base()
+        return {"ok": False, "error": "修复编译失败，已恢复 base", "compile": st}
+    return {"ok": True, "applied": applied, "compile": st}
 
 
 def latest_candidates() -> dict:
@@ -226,6 +331,9 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 <button onclick="applyBase()">应用到 base</button>
 <button onclick="runReplay()">执行 replay</button>
 <button onclick="capture()">采集候选</button>
+<button onclick="diagnose()">Agent 诊断</button>
+<button onclick="repairPlans()">查看修复计划</button>
+<button onclick="repair()">执行修复</button>
 <button onclick="restore()">恢复 base</button>
 <button onclick="loadCandidates()">查看最近候选</button>
 <button onclick="loadPreviewInfo()">查看当前组合</button>
@@ -241,6 +349,9 @@ async function checkEditor(){show(await api('/api/editor'));}
 async function applyBase(){if(!confirm('会临时修改 sim/project，失败自动恢复。继续？'))return;document.getElementById('msg').textContent='应用中...';show(await api('/api/apply',{}));}
 async function runReplay(){document.getElementById('msg').textContent='执行 replay...';show(await api('/api/replay',{}));}
 async function capture(){document.getElementById('msg').textContent='采集中...';show(await api('/api/capture',{}));}
+async function diagnose(){document.getElementById('msg').textContent='Agent 诊断中...';show(await api('/api/diagnose',{}));}
+async function repairPlans(){show(await api('/api/repair_plans',{}));}
+async function repair(){if(!confirm('会修改当前项目并编译，失败自动恢复。继续？'))return;document.getElementById('msg').textContent='修复中...';show(await api('/api/repair',{}));}
 async function restore(){show(await api('/api/restore',{}));}
 async function loadPreviewInfo(){show(await api('/api/preview_info'));}
 async function loadCandidates(){show(await api('/api/candidates'));}
@@ -314,6 +425,24 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/capture":
             try:
                 self._send(200, capture_candidates())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/diagnose":
+            try:
+                self._send(200, run_agent_diagnosis())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/repair_plans":
+            try:
+                self._send(200, run_repair_plans())
+            except Exception as e:  # noqa: BLE001
+                self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if p == "/api/repair":
+            try:
+                self._send(200, run_repair())
             except Exception as e:  # noqa: BLE001
                 self._send(409, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
