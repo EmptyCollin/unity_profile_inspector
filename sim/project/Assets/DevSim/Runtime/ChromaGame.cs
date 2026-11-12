@@ -43,6 +43,9 @@ namespace DevSim
         private readonly Button[,] tileButtons = new Button[N, N];
         private readonly List<Sprite> _sprites = new List<Sprite>();
         private readonly Text[] bonusLabels = new Text[3];
+        private readonly CanvasGroup[] bonusGroups = new CanvasGroup[3];
+        private readonly List<Image> _fxPool = new List<Image>();
+        private int _fxCursor;
         private Text roundText, targetText, scoreText, timeText, coinText, statusText, highText;
         private Text shopCoins, overText;
         private Image timeFill;
@@ -322,6 +325,19 @@ namespace DevSim
             BuildShop();
             BuildBonus();
             BuildOver();
+            BuildFxPool();
+        }
+
+        private void BuildFxPool()
+        {
+            // 基线：粒子池；legacy_particle 分支才 Instantiate/Destroy。
+            for (int i = 0; i < 32; i++)
+            {
+                var img = MakePanel(canvas.transform, 0, 0, 24, 24, Color.white, "Fx" + i);
+                img.raycastTarget = false;
+                img.gameObject.SetActive(false);
+                _fxPool.Add(img);
+            }
         }
 
         private void BuildLobby()
@@ -472,6 +488,7 @@ namespace DevSim
                        new Color(0.12f, 0.18f, 0.25f), 20);
                 bonusLabels[i] = b.GetComponentInChildren<Text>();
                 bonusLabels[i].fontSize = 22;
+                bonusGroups[i] = b.gameObject.AddComponent<CanvasGroup>();
             }
         }
 
@@ -880,9 +897,42 @@ namespace DevSim
 
         private void Burst(int r, int c, int color)
         {
-            var img = MakePanel(canvas.transform, 52 + 6 + c * (Tile + Gap), 134 + 6 + r * (Tile + Gap),
-                                30, 30, color >= 0 ? Palette[color] : Color.white, "fx");
-            StartCoroutine(FadeFx(img));
+            Color col = color >= 0 ? (Color)Palette[color] : Color.white;
+            if (cfg.legacy_particle)
+            {
+                var img = MakePanel(canvas.transform, 52 + 6 + c * (Tile + Gap), 134 + 6 + r * (Tile + Gap),
+                                    30, 30, col, "fx");
+                StartCoroutine(FadeFx(img));
+                return;
+            }
+            if (_fxPool.Count == 0) return;
+            var pooled = _fxPool[_fxCursor];
+            _fxCursor = (_fxCursor + 1) % _fxPool.Count;
+            pooled.gameObject.SetActive(true);
+            pooled.color = col;
+            pooled.rectTransform.anchoredPosition = new Vector2(
+                52 + 6 + c * (Tile + Gap) + 18,
+                -(134 + 6 + r * (Tile + Gap) + 18));
+            pooled.rectTransform.localScale = Vector3.one;
+            pooled.transform.SetAsLastSibling();
+            StartCoroutine(FadePoolFx(pooled));
+        }
+
+        private IEnumerator FadePoolFx(Image img)
+        {
+            float t = 0f;
+            while (t < 0.25f && img != null)
+            {
+                t += Time.deltaTime;
+                var c = img.color; c.a = 1f - t / 0.25f; img.color = c;
+                img.rectTransform.localScale = Vector3.one * (1f + t * 1.5f);
+                yield return null;
+            }
+            if (img != null)
+            {
+                img.gameObject.SetActive(false);
+                img.rectTransform.localScale = Vector3.one;
+            }
         }
 
         private IEnumerator FadeFx(Image img)
@@ -904,7 +954,11 @@ namespace DevSim
             {
                 yield return new WaitForSeconds(0.35f);
                 if (overOpen) yield break;
-                if (bonusOpen) { ChooseBonus(0); continue; }
+                if (bonusOpen)
+                {
+                    if (!cfg.pause_on_bonus) ChooseBonus(0);
+                    continue;
+                }
                 if (shopPanel != null && shopPanel.activeSelf) { CloseShop(); continue; }
                 if (!playing || paused) continue;
                 if (TryAutoSwap()) continue;
@@ -1086,10 +1140,16 @@ namespace DevSim
                 int id = rng.Next(3);
                 bonusIds[i] = id;
                 if (bonusLabels[i] != null) bonusLabels[i].text = names[id];
+                if (bonusGroups[i] != null)
+                {
+                    bonusGroups[i].alpha = 0f;
+                    bonusGroups[i].transform.localScale = new Vector3(0.8f, 0.8f, 1f);
+                }
             }
             bonusPanel.SetActive(true);
             bonusPanel.transform.localScale = new Vector3(0.86f, 0.86f, 1f);
             StartCoroutine(BonusIntro());
+            StartCoroutine(BonusCardsIntro());
             statusText.text = "BONUS — choose one";
         }
 
@@ -1105,6 +1165,32 @@ namespace DevSim
                 yield return null;
             }
             bonusPanel.transform.localScale = Vector3.one;
+        }
+
+        private IEnumerator BonusCardsIntro()
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                float t = 0f;
+                while (t < 0.24f)
+                {
+                    t += Time.deltaTime;
+                    float k = Mathf.SmoothStep(0f, 1f, t / 0.24f);
+                    if (bonusGroups[i] != null)
+                    {
+                        bonusGroups[i].alpha = k;
+                        bonusGroups[i].transform.localScale =
+                            Vector3.Lerp(new Vector3(0.8f, 0.8f, 1f), Vector3.one, k);
+                    }
+                    yield return null;
+                }
+                if (bonusGroups[i] != null)
+                {
+                    bonusGroups[i].alpha = 1f;
+                    bonusGroups[i].transform.localScale = Vector3.one;
+                }
+                yield return new WaitForSeconds(0.06f);
+            }
         }
 
         private void ChooseBonus(int slot)

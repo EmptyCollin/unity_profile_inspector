@@ -20,6 +20,7 @@ namespace DevSim
         public bool legacy_hint = false;
         public bool legacy_anim = false;
         public bool autoplay = false;
+        public bool pause_on_bonus = false;
         public float round_seconds = 30f;
         public int target_base = 600;
         public int start_tier = 1;
