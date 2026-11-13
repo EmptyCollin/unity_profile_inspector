@@ -45,6 +45,9 @@ _SYSTEM = (
 
 _PROMPT_TMPL = """请对以下候选根因逐因子判定。
 
+## 历史参考（仅参考，可能不适用；不得替代本次证据判断）
+{history}
+
 ## Issue 证据（按编号引用）
 {evidence_block}
 
@@ -117,7 +120,7 @@ def _connectivity_ok() -> tuple[bool, str]:
 
 def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
                   code_anchors: list[str], *, agent: str = "diagnose",
-                  client=None) -> tuple[list[FactorJudgment], dict]:
+                  client=None, history: str = "") -> tuple[list[FactorJudgment], dict]:
     """单假设 → FactorJudgment[]（值来自量表，置信度不在这里算）。
 
     返回 (judgments, 原始判定留档)。留档含每因子档位/理由/引用与 token 用量，
@@ -132,6 +135,7 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
 
     evidence_block, alias = _evidence_block(issue)
     prompt = _PROMPT_TMPL.format(
+        history=(history or "（本项目暂无历史；仅凭本次证据判断）"),
         evidence_block=evidence_block, root_cause=root_cause,
         anchors=", ".join(code_anchors) or "（无）")
     _screen_prompt(prompt)
@@ -200,7 +204,8 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
 
 def build_hypotheses_for_issue(cfg: LlmConfig, issue: Issue,
                                candidates: list[tuple[str, list[str]]], *,
-                               agent: str = "diagnose", client=None) -> tuple[list[Hypothesis], dict]:
+                               agent: str = "diagnose", client=None,
+                               history: str = "") -> tuple[list[Hypothesis], dict]:
     """Issue × 候选根因[] → 按 C_attr 降序的 Hypothesis[] + 判定留档。
 
     候选根因应来自 Diagnose 的检索步（代码锚点 + KnowledgeStore 同签名历史）；
@@ -210,7 +215,8 @@ def build_hypotheses_for_issue(cfg: LlmConfig, issue: Issue,
     hs, archive = [], {}
     for root_cause, anchors in candidates:
         judgments, judged = judge_factors(cfg, issue, root_cause, anchors,
-                                          agent=agent, client=client)
+                                          agent=agent, client=client,
+                                          history=history)
         hs.append(build_hypothesis(root_cause, anchors, judgments, issue))
         archive[root_cause] = judged
     return rank(hs), archive

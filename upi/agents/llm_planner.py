@@ -28,6 +28,9 @@ _SYSTEM = (
 
 _PROMPT = """性能问题与候选根因：
 
+## 历史参考（仅参考，可能不适用）
+{history}
+
 ## 证据
 {evidence}
 
@@ -138,7 +141,7 @@ def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict
 
 def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                project_root: Path | str, *, client=None,
-               max_rounds: int = 3) -> tuple[Optional[EditPlan], dict]:
+               max_rounds: int = 3, history: str = "") -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -147,8 +150,10 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
     if not source:
         return None, {"error": "no_source_snippet", "why": "锚点无法定位到工程内源码"}
     evidence, _alias = _evidence_block(issue)
-    prompt = _PROMPT.format(evidence=evidence, root_cause=rc,
-                            anchors=", ".join(anchors) or "（无）", source=source)
+    prompt = _PROMPT.format(
+        history=(history or "（本项目暂无历史；仅凭本次证据）"),
+        evidence=evidence, root_cause=rc,
+        anchors=", ".join(anchors) or "（无）", source=source)
     meta = {"rounds": 0, "tokens_in": 0, "tokens_out": 0}
     last_err = ""
     for rnd in range(1, max_rounds + 1):

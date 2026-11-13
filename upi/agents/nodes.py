@@ -195,8 +195,19 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         from upi.agents.factor_judge import build_hypotheses_for_issue
         from upi.core.evidence_diagnosis import anchors_of
         cfg = load_config(ROOT / "llm_config.yaml")
+        hist = ""
+        try:
+            from upi.core.knowledge import KnowledgeStore, default_path
+            _ks = KnowledgeStore(knowledge_db or default_path())
+            rows = _ks.list_patterns(5)
+            _ks.close()
+            hist = "; ".join(
+                f"{r['pattern_id']}（tier={r['tier']}, playbook={r['playbook_id']}）"
+                for r in rows)
+        except Exception:  # noqa: BLE001 — 历史只是参考，读不到就不附
+            hist = ""
         tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:12]]
-        hs, archive = build_hypotheses_for_issue(cfg, issue, tuples)
+        hs, archive = build_hypotheses_for_issue(cfg, issue, tuples, history=hist)
         tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
                      + (a.get("_meta", {}).get("token_out", 0) or 0)
                      for a in archive.values())
@@ -261,10 +272,21 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             return {"route": "needs_human", "error": "未选择工程，无法规划"}
         from upi.agents.llm_planner import plan_issue
         cfg = load_config(ROOT / "llm_config.yaml")
+        hist = ""
+        try:
+            from upi.core.knowledge import KnowledgeStore, default_path
+            _ks = KnowledgeStore(knowledge_db or default_path())
+            rows = _ks.list_patterns(5)
+            _ks.close()
+            hist = "; ".join(
+                f"{r['pattern_id']}（tier={r['tier']}, playbook={r['playbook_id']}）"
+                for r in rows)
+        except Exception:  # noqa: BLE001
+            hist = ""
         for top in st["hypotheses"]:
             if top["root_cause"] in tried:
                 continue
-            ep, meta = plan_issue(cfg, issue, top, root)
+            ep, meta = plan_issue(cfg, issue, top, root, history=hist)
             E.write_json(run_dir / "plan_llm.json",
                          {"root_cause": top["root_cause"], "meta": meta},
                          what="plan_llm", strict=False)
