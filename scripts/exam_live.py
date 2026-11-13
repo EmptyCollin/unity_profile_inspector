@@ -195,6 +195,7 @@ def main() -> int:
     cp = Checkpoint(run_dir)
     chain: list[dict] = []
     prior_chain: list[dict] = []
+    base_head = ""
     try:
         _cp = run_dir / "chain.json"
         if _cp.exists():
@@ -641,6 +642,11 @@ def main() -> int:
         ok_smoke = bool(CR._smoke(p).get("ok")) if compiled else False
     except Exception as e:  # noqa: BLE001
         print("usability error:", type(e).__name__, e)
+    if ladder_status != "verified" and base_head:
+        if _git_reset(p, base_head):
+            mark("rollback-final", "ok", "未 verified：回滚全部未验证补丁")
+        else:
+            mark("rollback-final", "failed", "最终回滚失败")
     run.usability_ok = bool(compiled and ok_smoke)
     run.usability_note = ("最终可编译/可启动" if run.usability_ok
                           else "最终不可用：编译或启动失败")
