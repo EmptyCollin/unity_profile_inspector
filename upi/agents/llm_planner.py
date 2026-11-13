@@ -113,6 +113,13 @@ def _parse(text: str) -> Optional[dict]:
     return d if isinstance(d, dict) else None
 
 
+def _numeric_only(find: str, repl: str) -> bool:
+    """只改数字/循环上界的“调参式”改动（I15 伪优化门禁）。"""
+    import re
+    norm = lambda s: re.sub(r"\d+", "N", s)  # noqa: E731
+    return norm(find) == norm(repl)
+
+
 def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict]], str]:
     out = []
     for e in edits:
@@ -187,6 +194,12 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
             last_err = err
             # 回喂实际源码片段，最多再试
             prompt += (f"\n\n上次补丁被拒：{err}\n以下是当前源码，请据此重写：\n{source}")
+            continue
+        if diffs and all(_numeric_only(d["find"], d["replace"]) for d in diffs):
+            last_err = ("pseudo_optimization：只改常量/循环上界不算结构修复，"
+                        "请移到初始化/缓存/池化/事件驱动")
+            prompt += (f"\n\n上次补丁被拒：{last_err}。"
+                       "必须改变结构，不能只把数字改小。")
             continue
         return EditPlan(playbook_id="PB-LLM",
                         diffs=diffs,

@@ -119,7 +119,7 @@ def main():
     chk("yes→1.0", byf["proximity"].value == 1.0)
     chk("likely→0.7", byf["competitiveness"].value == 0.7)
     # unclear 档位值由量表保证；prior_hit 答 unclear 且无指针 → 被作废线归零（设计语义）
-    chk("unclear 量表=0.4", FJ.FACTOR_SCALE["unclear"] == 0.4)
+    chk("unclear 量表=0.0（I15 中性）", FJ.FACTOR_SCALE["unclear"] == 0.0)
     chk("unclear 无指针 → 作废归零（防自问自答）", byf["prior_hit"].value == 0.0)
     chk("anchor: 引用保留原样", byf["proximity"].evidence_ref == "anchor:CombatSkillManager.cs:41",
         byf["proximity"].evidence_ref)

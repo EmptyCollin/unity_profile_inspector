@@ -106,8 +106,21 @@ def rank(hs: list[Hypothesis]) -> list[Hypothesis]:
     return sorted(hs, key=lambda h: h.confidence, reverse=True)
 
 
+def supported(h: Hypothesis) -> bool:
+    """I15：证据充分性门槛；全 unclear 不得过线。"""
+    f = h.attribution_factors
+    vals = [f.proximity, f.explains_share, f.competitiveness,
+            f.prior_hit, f.counterfactual, f.mechanism]
+    positives = sum(1 for v in vals if v >= 0.7)
+    key = max(f.explains_share, f.mechanism)
+    return positives >= 2 and key >= 0.7
+
+
 def route(decision: list[Hypothesis]) -> str:
-    """AGENTS §1.3：Top1 < T_attr_min → needs_human。"""
+    """AGENTS §1.3：Top1 < T_attr_min → needs_human；I15 加证据门槛。"""
     if not decision:
         return "needs_human"
-    return "auto_or_semi" if decision[0].confidence >= T_ATTR_MIN else "needs_human"
+    top = decision[0]
+    if top.confidence < T_ATTR_MIN or not supported(top):
+        return "needs_human"
+    return "auto_or_semi"

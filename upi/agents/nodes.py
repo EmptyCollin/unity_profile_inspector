@@ -235,11 +235,21 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         except Exception:  # noqa: BLE001 — 历史只是参考，读不到就不附
             hist = ""
         tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:12]]
+        cards: dict[str, str] = {}
+        for c in ev_cands[:12]:
+            spans = "; ".join(
+                f"{s.file}:{s.start_line}-{s.end_line}"
+                f"({s.symbol})" for s in (c.sources or [])[:3])
+            cards[c.root_cause] = (
+                f"mechanism={c.mechanism}; kind={c.kind}; "
+                f"score={c.score:.2f} (CI {c.score_interval_low:.2f}-"
+                f"{c.score_interval_high:.2f}); evidence_n={c.evidence_n}; "
+                f"spans={spans or 'unknown'}")
         archive: dict = {}
         ev_rounds = 0
         while True:
             hs, judged = build_hypotheses_for_issue(
-                cfg, issue, tuples, history=hist)
+                cfg, issue, tuples, history=hist, cards=cards)
             archive.update(judged)
             from upi.core.attribution import route as _route
             if (_route(hs) != "needs_human"

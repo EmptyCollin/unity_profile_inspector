@@ -78,5 +78,13 @@ except ValidationError:
 bare = c_attr(AttributionFactors())
 chk("⑧ 全零因子先验 <0.5", bare < 0.5, f"({bare:.3f})")
 
-print(f"\n归因单测 {len(PASS)}/8" + (f"，失败 {FAIL}" if FAIL else ""))
+# ⑨ I15：全 unclear（0.0）不得过线
+unclear = build_hypothesis("全不清楚", ["x"], [
+    J("proximity", 0.0), J("explains_share", 0.0),
+    J("competitiveness", 0.0), J("prior_hit", 0.0),
+    J("counterfactual", 0.0), J("mechanism", 0.0)], issue)
+chk("⑨ 全 unclear → needs_human", route([unclear]) == "needs_human"
+    and unclear.confidence < 0.6, f"({unclear.confidence})")
+
+print(f"\n归因单测 {len(PASS)}/9" + (f"，失败 {FAIL}" if FAIL else ""))
 sys.exit(0 if not FAIL else 1)

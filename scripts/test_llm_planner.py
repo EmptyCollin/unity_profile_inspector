@@ -82,6 +82,17 @@ plan3, meta3 = LP.plan_issue(cfg, issue, hyp, PROJECT, client=cli3)
 ok("insufficient_evidence → 无方案", plan3 is None
    and meta3.get("error") == "insufficient_evidence", meta3)
 
+# 3b) I15 伪优化：只改数字/循环上界 → 拒绝
+NUM = json.dumps({"why": "reduce count",
+                  "edits": [{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
+                             "find": "for (int i = 0; i < 32; i++)",
+                             "replace": "for (int i = 0; i < 16; i++)"}]})
+cli3b = FakeClient([NUM])
+plan3b, meta3b = LP.plan_issue(cfg, issue, hyp, PROJECT, client=cli3b,
+                               max_rounds=1)
+ok("1000→10 类调参补丁被拒", plan3b is None
+   and "pseudo_optimization" in str(meta3b.get("error")), meta3b)
+
 # 4) 连续网络错误 → 有界失败，不抛
 cli4 = FakeClient([RuntimeError("timeout"), RuntimeError("timeout"),
                    RuntimeError("timeout")])

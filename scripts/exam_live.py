@@ -90,6 +90,22 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
     return out
 
 
+def _git_head(project: Path) -> str:
+    p = subprocess.run(["git", "-C", str(project), "rev-parse", "HEAD"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+
+def _git_reset(project: Path, ref: str) -> bool:
+    if not ref:
+        return False
+    p = subprocess.run(["git", "-C", str(project), "reset", "--hard", ref],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    return p.returncode == 0
+
+
 def _log_tool_error(run_dir: Path, stage: str, exc: BaseException) -> None:
     import traceback
     rec = {"label": stage, "error": f"{type(exc).__name__}: {exc}",
@@ -397,6 +413,7 @@ def main() -> int:
         ex = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
                                  scene=p / "Assets/Scenes/00_Bootstrap.unity",
                                  mode="regression", replan=_replan)
+        base_head = _git_head(p)
         out = ex.execute(t)
         mark("execute#1", "ok" if out.items[0].status in
              ("applied_unverified",) else "failed",
@@ -484,6 +501,11 @@ def main() -> int:
         def _act(_decision):
             nonlocal ladder_status, target_gone, new_roots, retry_round
             retry_round += 1
+            # I15：互斥假设，重试前先回滚上一次未验证补丁（OR 协议）
+            if base_head:
+                rok = _git_reset(p, base_head)
+                mark("rollback#1", "ok" if rok else "failed",
+                     "重试前回滚首个未验证补丁" if rok else "git reset 失败")
             cfg = N.load_config(ROOT / "llm_config.yaml")
             np, hsel = None, None
             for h in hs:

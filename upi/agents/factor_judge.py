@@ -32,7 +32,7 @@ FACTOR_KEYS = ("proximity", "explains_share", "competitiveness",
                "prior_hit", "counterfactual", "mechanism")
 
 # 判定量表：序数而非连续值——LLM 报"精确多少"没有意义，报档位才可核查
-FACTOR_SCALE = {"yes": 1.0, "likely": 0.7, "unclear": 0.4, "no": 0.0}
+FACTOR_SCALE = {"yes": 1.0, "likely": 0.7, "unclear": 0.0, "no": 0.0}
 
 _SYSTEM = (
     "你是性能归因因子判定器。给你一条性能问题（Issue）的证据与候选根因，"
@@ -55,6 +55,8 @@ _PROMPT_TMPL = """请对以下候选根因逐因子判定。
 ## 候选根因
 root_cause: {root_cause}
 code_anchors: {anchors}
+候选证据卡:
+{candidate_card}
 
 ## 六因子含义（逐个判定，输出同名键）
 - proximity: 候选根因的代码位置是否就在越线现场/热路径上
@@ -121,7 +123,8 @@ def _connectivity_ok() -> tuple[bool, str]:
 
 def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
                   code_anchors: list[str], *, agent: str = "diagnose",
-                  client=None, history: str = "") -> tuple[list[FactorJudgment], dict]:
+                  client=None, history: str = "",
+                  candidate_card: str = "") -> tuple[list[FactorJudgment], dict]:
     """单假设 → FactorJudgment[]（值来自量表，置信度不在这里算）。
 
     返回 (judgments, 原始判定留档)。留档含每因子档位/理由/引用与 token 用量，
@@ -138,7 +141,8 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
     prompt = _PROMPT_TMPL.format(
         history=(history or "（本项目暂无历史；仅凭本次证据判断）"),
         evidence_block=evidence_block, root_cause=root_cause,
-        anchors=", ".join(code_anchors) or "（无）")
+        anchors=", ".join(code_anchors) or "（无）",
+        candidate_card=(candidate_card or "（无额外候选统计）"))
     _screen_prompt(prompt)
 
     cli = client or make_client(cfg.providers[provider])
@@ -212,7 +216,9 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
 def build_hypotheses_for_issue(cfg: LlmConfig, issue: Issue,
                                candidates: list[tuple[str, list[str]]], *,
                                agent: str = "diagnose", client=None,
-                               history: str = "") -> tuple[list[Hypothesis], dict]:
+                               history: str = "",
+                               cards: dict[str, str] | None = None,
+                               ) -> tuple[list[Hypothesis], dict]:
     """Issue × 候选根因[] → 按 C_attr 降序的 Hypothesis[] + 判定留档。
 
     候选根因应来自 Diagnose 的检索步（代码锚点 + KnowledgeStore 同签名历史）；
@@ -223,7 +229,8 @@ def build_hypotheses_for_issue(cfg: LlmConfig, issue: Issue,
     for root_cause, anchors in candidates:
         judgments, judged = judge_factors(cfg, issue, root_cause, anchors,
                                           agent=agent, client=client,
-                                          history=history)
+                                          history=history,
+                                          candidate_card=(cards or {}).get(root_cause, ""))
         hs.append(build_hypothesis(root_cause, anchors, judgments, issue))
         archive[root_cause] = judged
     return rank(hs), archive
