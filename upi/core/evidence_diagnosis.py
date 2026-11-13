@@ -63,8 +63,15 @@ def hypotheses_from_candidates(cands: list[CandidateV2],
     evs = _evidence_refs(cands, evidence_path)
     hs = []
     for c in cands:
-        anchors = ([f"{s.file}:{s.start_line}" for s in c.sources if s.file]
-                   or list(c.code_anchors))
+        anchors: list[str] = []
+        for s in c.sources:
+            if not s.file:
+                continue
+            if s.symbol:
+                anchors.append(f"{s.file}::{s.symbol}")
+            if s.start_line:
+                anchors.append(f"{s.file}:{s.start_line}")
+        anchors = list(dict.fromkeys(anchors)) or list(c.code_anchors)
         ref = c.evidence_ids[0] if c.evidence_ids else (anchors[0] if anchors else "")
         js = [
             FactorJudgment(factor="proximity",

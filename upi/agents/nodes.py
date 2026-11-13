@@ -61,16 +61,21 @@ def _scene_for(subject: str) -> Optional[Path]:
 
 
 def _ctx(st: dict) -> tuple[Path, Optional[Path]]:
-    """从 state 取 (工程根, 被改机制的场景)。
-
-    机制优先取 issue.fixture（真正在修的那个），取不到才兜底 profile.fix_subject：
-    走到兜底说明确实没有上下文，此时用"有模板的那个机制"比 None 更能让
-    rollback 复位到可解释的场景。兜底也拿不到 ⇒ 返回 None，由 rollback
-    自行处理（不会静默改错工程）。
-    """
+    """从 state 取 (工程根, 场景)：state 显式值优先，其次 issue 携带，最后档案派生。"""
     iss = st.get("issue") or {}
-    subject = iss.get("fixture") or _prof().fix_subject
-    return _project(), _scene_for(subject)
+    proj = st.get("project")
+    if proj:
+        proj = Path(proj)
+    else:
+        proj = _project()
+    scene = st.get("scene") or iss.get("scene")
+    if scene:
+        return proj, Path(scene)
+    try:
+        subject = iss.get("fixture") or _prof().fix_subject
+        return proj, _scene_for(subject)
+    except Exception:  # noqa: BLE001 — 无档案/无场景：交给调用方按无场景处理
+        return proj, None
 
 
 def _why_not_auto(plan: EditPlan) -> str:
@@ -249,6 +254,66 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
     knowledge_db 可注入（单测写临时库，不污染仓库 patterns.db 与成功率分母）。"""
 
     def detect(st: dict) -> dict:
+        # 产品默认：从运行证据包构造 Issue（不再跑夹具束的 m1_detect）。
+        if not _legacy_fixture_diag_enabled():
+            try:
+                from upi.core.candidates_v2 import generate_candidates
+                from upi.core.evidence_diagnosis import load_latest_bundle
+                from upi.core.models import Evidence
+                bundle, ev_path = load_latest_bundle()
+                root = None
+                try:
+                    root = _prof().abs_project
+                except Exception:  # noqa: BLE001
+                    root = None
+                cands = (generate_candidates(bundle, project_root=root, limit=1)
+                         if bundle is not None else [])
+            except Exception as e:  # noqa: BLE001 — 证据链不可用按“无证据”处理
+                E.atomic_write_text(run_dir / "detect_evidence_error.txt",
+                                    f"证据检测失败：{type(e).__name__}: {e}\n")
+                cands, bundle, ev_path = [], None, None
+            if cands:
+                c = cands[0]
+                alloc = c.kind == "allocation"
+                metric = "gc_alloc_per_frame" if alloc else "frame_time_ms"
+                det_id = ("DET-CPU-GC-FRAMEALLOC" if alloc
+                          else "DET-LOAD-FRAMESPIKE")
+                sig = {"dim": "gc" if alloc else "frame", "metric": metric,
+                       "mechanism": c.mechanism, "threshold": 0.0,
+                       "threshold_source": "evidence(no absolute line)"}
+                ev = Evidence(tool="evidence_v2", raw_ref=str(ev_path),
+                              value=float(c.score),
+                              unit="bytes" if alloc else "ms", data_tier="A2")
+                model = Issue(signature=sig, link="cpu", evidence=[ev],
+                              magnitude=float(c.score), deviation_ratio=0.0,
+                              explains_share_of_regression=1.0,
+                              state="confirmed")
+                issue = {"id": f"ISS-{bundle.run_id}",
+                         "fixture": (st.get("fixture") or bundle.project_id
+                                     or "project"),
+                         "detector": det_id, "metric": metric,
+                         "magnitude": float(c.score), "deviation_ratio": 0.0,
+                         "evidence": {"source": "evidence_v2",
+                                      "ref": str(ev_path), "score": c.score},
+                         "state": "confirmed", "anchor": c.mechanism,
+                         "signature": sig, "source": "evidence",
+                         "scene": bundle.scene,
+                         "issue_model": model.model_dump()}
+                return {"findings": [{"kind": "issue",
+                                      "fixture": issue["fixture"],
+                                      "metric": metric,
+                                      "magnitude": float(c.score),
+                                      "detector": det_id,
+                                      "signature": sig}],
+                        "issue": issue, "route": "proceed",
+                        "detection_ref": str(ev_path)}
+            if bundle is not None:
+                return {"route": "needs_human",
+                        "error": "证据包存在但没有工程内候选（证据不足，I2）"}
+            return {"route": "needs_human",
+                    "error": ("insufficient_evidence：没有运行证据包"
+                              "（先跑一轮证据采集；夹具束仅 legacy 开关可用）")}
+
         # 复用 m1_detect 的判据链，但只取"当前夹具"这一条 Issue 进循环
         det_fp = _run_detect()
         findings = []
@@ -281,8 +346,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
     def diagnose(st: dict) -> dict:
         issue_d = st["issue"]
-        det = next(d for d in DEFAULT_REGISTRY if d.id == issue_d["detector"])
-        issue = Issue(**issue_d["issue_model"]) if "issue_model" in issue_d else _rebuild_issue(det, issue_d)
+        det = next((d for d in DEFAULT_REGISTRY if d.id == issue_d.get("detector")),
+                   None)
+        if "issue_model" in issue_d:
+            issue = Issue(**issue_d["issue_model"])
+        elif det is not None:
+            issue = _rebuild_issue(det, issue_d)
+        else:
+            return {"route": "needs_human",
+                    "error": "Issue 既无 issue_model 也无已知 detector（I2）"}
         # 产品默认：诊断来自运行证据候选（不读夹具目录、不匹配代码文本）。
         ev_cands = []
         ev_path = None
@@ -326,11 +398,12 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 只能写"请拒批并要求补证"）。数值不是新估计——min_delta 直接搬运
         # 标定绝对阈（I1：来自标定工具，且 G1 判定本就以它为零改善线，
         # "修复至少要压下 k·σ/min_magnitude 才算数"是判据的重述不是承诺）。
-        exp = {"metric": det.metric, "direction": "down",
-               "min_delta": det.thresholds.min_magnitude,
-               "source": f"calibration:{det.calibration_file or 'inline'}",
-               "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"}
-        hs = [h.model_copy(update={"expected_effect": exp}) for h in hs]
+        if det is not None:
+            exp = {"metric": det.metric, "direction": "down",
+                   "min_delta": det.thresholds.min_magnitude,
+                   "source": f"calibration:{det.calibration_file or 'inline'}",
+                   "note": "改善低于此线 G1 即判 not_significant（预期=判据重述）"}
+            hs = [h.model_copy(update={"expected_effect": exp}) for h in hs]
         # 假设台账：Top1 记 adopted，其余记 not_adopted（不是失败，但要有结局字段）。
         # 台账写失败不打断诊断，但必须留痕，否则"落选假设没有记录"会静默复发。
         try:
@@ -457,15 +530,20 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # verify 节点跑在 fix 之后，届时夹具已是修复态——再采"before"
         # 等于拿修复态数据冒充改前，两侧对比直接失真。before 束与改前态
         # fresh 都在此刻（已快照、未 execute、仍是缺陷态）采集。
-        before = resample(fixture, f"{run_dir.name}/pre_attempt_{stamp}")
-        floor_before, fb_err = None, None
-        try:
-            floor_before = gc_floor_measure(fixture)
-        except Exception as e:  # noqa: BLE001 — 缺侧即盲区，fail-open 到未评估
-            fb_err = str(e)[:160]
+        evidence_mode = (st.get("issue", {}).get("source") == "evidence")
+        if evidence_mode:
+            before = None
+            floor_before, fb_err = None, "evidence mode: 无夹具基线"
+        else:
+            before = resample(fixture, f"{run_dir.name}/pre_attempt_{stamp}")
+            floor_before, fb_err = None, None
+            try:
+                floor_before = gc_floor_measure(fixture)
+            except Exception as e:  # noqa: BLE001 — 缺侧即盲区，fail-open 到未评估
+                fb_err = str(e)[:160]
 
         rep = fixer.execute(ep, snap, project_path=proj, scene_path=scene,
-                            root=_prof().git_root, human_approved=bool(note.strip()),
+                            root=_groot, human_approved=bool(note.strip()),
                             approval_note=note)
         rec = {"kind": "fix", "ts": stamp, "git_ref": snap.git_ref,
                "root_cause": top["root_cause"],
@@ -474,8 +552,10 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             return {"snapshot": snap.to_dict(), "route": "needs_human",
                     "error": f"fix {rep['status']}: {rep.get('why','')[:120]}",
                     "records": st.get("records", []) + [rec]}
-        pre = {"stamp": stamp, "before_path": before["_path"],
-               "floor_before": floor_before, "floor_before_err": fb_err}
+        pre = {"stamp": stamp,
+               "before_path": (before or {}).get("_path", ""),
+               "floor_before": floor_before, "floor_before_err": fb_err,
+               "evidence": evidence_mode}
         # attempts 不在这里 +1（真机实测撞出的语义错）：配额计的是
         # "评估过一次的完整尝试"。verify 崩溃（仪器漂移/编辑器消失）会
         # 回滚且不出 verdict——那是一次作废，不该吃掉 G11 的唯一配额，
@@ -486,6 +566,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
     def verify(st: dict) -> dict:
         pre = st["pre_attempt"]                  # fix 节点写入前锁定的基线
+        if pre.get("evidence"):
+            # 证据模式：没有夹具 before/after，也没有 replay 套件可复验。
+            # 已应用但只能记 unverified，不冒充 resolved（G21）。
+            return {"route": "needs_human",
+                    "records": st.get("records", []) + [{
+                        "kind": "verify", "status": "unverified",
+                        "why": "证据模式：无 replay 套件，未做同协议复验"}],
+                    "error": ("证据模式：补丁已应用，但缺少 replay 套件，"
+                              "无法同协议复验（unverified）")}
         stamp = pre["stamp"]
         before = json.loads(Path(pre["before_path"]).read_text(encoding="utf-8"))
         before["_path"] = pre["before_path"]

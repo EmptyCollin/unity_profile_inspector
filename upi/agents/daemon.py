@@ -227,7 +227,10 @@ def load_runtime_conf() -> dict:
     #   而且"用户没写"会被当成"清单与档案不一致"告警，把没配错的东西
     #   报成配错了。判据只能是"值非空"。
     _pf = active_profile()
-    _prof_fixtures = _pf.fixture_universe()
+    # I9c：夹具清单只在显式 legacy 评测模式下作为缺省；真实工程默认不采夹具。
+    import os as _os
+    _legacy = _os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() == "1"
+    _prof_fixtures = _pf.fixture_universe() if _legacy else []
     _cfg_fixtures = [f for f in (merged.get("fixtures") or []) if f]
     if not _cfg_fixtures:
         merged["fixtures"] = _prof_fixtures
@@ -238,7 +241,7 @@ def load_runtime_conf() -> dict:
         # 是"档案配错了"，方向整个错位。所以不一致必须当场说出来。
         _extra = [f for f in _cfg_fixtures if f not in _prof_fixtures]
         _absent = [f for f in _prof_fixtures if f not in _cfg_fixtures]
-        if _extra or _absent:
+        if _legacy and (_extra or _absent):
             degraded.append(f"fixtures_mismatch(in={_extra},out={_absent})")
             E.emit("profile_fixtures_mismatch", profile=_pf.profile_id,
                    configured=_cfg_fixtures, from_profile=_prof_fixtures,

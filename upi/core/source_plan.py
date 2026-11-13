@@ -17,12 +17,12 @@ from upi.core.source_index import SourceIndex
 
 
 def anchor_method(anchor: str) -> str:
-    """把 `File.cs::Method` / `File.cs:123` / `Type.Method` 归一成方法名（可能为空）。"""
+    """把 `File.cs::Method` / `Type.Method` 归一成方法名；纯 `file:line` 返回空。"""
     a = (anchor or "").strip()
     if "::" in a:
         a = a.split("::", 1)[1]
-    if ":" in a and not a.startswith("Assets"):
-        a = a.split(":", 1)[0]
+    elif a.rsplit(":", 1)[-1].isdigit():
+        return ""                       # 只有文件:行号，没有方法名
     return a.split(".")[-1].strip()
 
 

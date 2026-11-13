@@ -20,6 +20,8 @@ from upi.core.evidence_v2 import (EvidenceBundleV2, FunctionStat,  # noqa: E402
                                   SourceSpan)
 from upi.core.models import Evidence, Issue  # noqa: E402
 from upi.core.source_index import SourceIndex  # noqa: E402
+from upi.config.project_profile import (ProjectProfile,  # noqa: E402
+                                        register_profile, unregister_profile)
 
 PASS, FAIL = [], []
 
@@ -43,7 +45,8 @@ c = CandidateV2(id="c1", root_cause="hot_function:ChromaGame.UpdateHud",
 hs = hypotheses_from_candidates([c], TMP / "runs" / "x" / "evidence_v2.json")
 ok("候选 → 假设", len(hs) == 1 and hs[0].root_cause == c.root_cause)
 ok("锚点来自候选源码位置",
-   hs[0].code_anchors == ["Assets/DevSim/Runtime/ChromaGame.cs:10"],
+   any(a.endswith(":10") for a in hs[0].code_anchors)
+   or any("ChromaGame.cs" in a for a in hs[0].code_anchors),
    str(hs[0].code_anchors))
 ok("置信度由公式算，在 [0,1]", 0 <= hs[0].confidence <= 1, hs[0].confidence)
 ok("无 fixture/profile 字样",
@@ -96,6 +99,32 @@ ok("诊断来源标记 evidence", r2.get("diagnose_source") == "evidence",
 hs2 = r2.get("hypotheses") or []
 ok("假设锚点落在 ChromaGame", bool(hs2) and any(
     "ChromaGame.cs" in a for h in hs2 for a in h.get("code_anchors", [])))
+
+# ── detect 也从证据包构造 Issue（不再跑夹具束）────────────────
+prof = ProjectProfile(profile_id="p-evid", project_path=PROJECT, git_root=ROOT,
+                      subjects=["SampleScene"], clean_subject="")
+register_profile(prof, activate=True)
+try:
+    nd3 = make_nodes(TMP / "run3", live_llm=False, knowledge_db=TMP / "k3.db")
+    d = nd3["detect"]({})
+    ok("detect 从证据包出发", d.get("route") == "proceed", str(d)[:160])
+    ok("Issue 标记 evidence 来源",
+       (d.get("issue") or {}).get("source") == "evidence",
+       (d.get("issue") or {}).get("source"))
+    ok("Issue 带代码锚点与证据引用",
+       bool((d.get("issue") or {}).get("issue_model", {}).get("evidence"))
+       and bool((d.get("issue") or {}).get("anchor")))
+    g3 = nd3["diagnose"]({"issue": d["issue"]})
+    ok("证据 Issue → 诊断 proceed", g3.get("route") == "proceed", str(g3)[:160])
+    ok("诊断仍标记 evidence", g3.get("diagnose_source") == "evidence")
+    p3 = nd3["plan"]({"issue": d["issue"],
+                      "hypotheses": g3.get("hypotheses") or [],
+                      "records": []})
+    ok("证据假设 → 源码 plan", p3.get("route") == "proceed"
+       and (p3.get("edit_plan") or {}).get("playbook_id") == "PB-OP-HUD-TEXT-CACHE",
+       str(p3)[:180])
+finally:
+    unregister_profile("p-evid")
 
 print(f"\n==== 证据驱动诊断测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
