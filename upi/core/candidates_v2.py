@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -188,4 +189,29 @@ def generate_candidates(bundle: EvidenceBundleV2,
                 c.source_kind = "evidence+fingerprint"
 
     out.sort(key=lambda c: (c.score + c.score * c.prior, c.prior), reverse=True)
+    # 资产证据（度量，不是代码模式）：Resources 下超大文件，放最后避免主导函数排序
+    try:
+        if project_root:
+            res = Path(project_root) / "Assets" / "Resources"
+            if res.is_dir():
+                for p in sorted(res.rglob("*")):
+                    if not p.is_file() or p.suffix.lower() not in (
+                            ".txt", ".bytes", ".json", ".asset"):
+                        continue
+                    size = p.stat().st_size
+                    if size <= 128 * 1024:
+                        continue
+                    rel = p.relative_to(project_root).as_posix()
+                    out.append(CandidateV2(
+                        id=f"cand-asset-{len(out)}",
+                        root_cause=f"oversized_resource_asset:{rel}",
+                        mechanism="oversized_resource_asset", kind="asset",
+                        code_anchors=[rel],
+                        sources=[SourceSpan(file=rel, start_line=1, end_line=1)],
+                        evidence_ids=[], score=float(size) / 1024.0,
+                        score_interval_low=float(size) / 1024.0,
+                        score_interval_high=float(size) / 1024.0,
+                        interval_basis="file_size", evidence_n=1))
+    except Exception:  # noqa: BLE001 — 资产扫描失败不影响代码候选
+        pass
     return out[:limit]

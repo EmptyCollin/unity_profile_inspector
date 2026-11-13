@@ -34,6 +34,25 @@ def load_latest_bundle(project_id: str = "") -> tuple[Optional[EvidenceBundleV2]
     return None, None
 
 
+def anchors_of(c: CandidateV2) -> list[str]:
+    """候选 → 可规划锚点：`file::symbol`（方法）+ `file:line`（定位）。
+
+    深档候选可能带绝对路径/程序集符号：这里统一归一成工程内相对路径，
+    避免把运行目录/工程名带进提示词（泄漏筛查会拒发）。
+    """
+    from upi.core.findings import normalize_file, normalize_method
+    anchors: list[str] = []
+    for s in c.sources:
+        if not s.file:
+            continue
+        f = normalize_file(s.file)
+        if s.symbol:
+            anchors.append(f"{f}::{normalize_method(s.symbol)}")
+        if s.start_line:
+            anchors.append(f"{f}:{s.start_line}")
+    return list(dict.fromkeys(anchors)) or [normalize_file(a) for a in c.code_anchors]
+
+
 def candidates_from_latest(project_root, project_id: str = "",
                            limit: int = 12) -> tuple[list[CandidateV2],
                                                      Optional[EvidenceBundleV2],
@@ -43,55 +62,3 @@ def candidates_from_latest(project_root, project_id: str = "",
         return [], None, None
     cands = generate_candidates(bundle, project_root=project_root, limit=limit)
     return cands, bundle, path
-
-
-def _evidence_refs(cands: list[CandidateV2], path: Optional[Path]) -> list[Evidence]:
-    """每个候选至少一条真实证据引用（raw_ref 指向落盘文件）。"""
-    out: list[Evidence] = []
-    for c in cands:
-        if not c.evidence_ids:
-            continue
-        out.append(Evidence(tool="evidence_v2", raw_ref=str(path or ""),
-                            value=float(c.score), unit="score", data_tier="A2"))
-    return out
-
-
-def anchors_of(c: CandidateV2) -> list[str]:
-    """候选 → 可规划锚点：`file::symbol`（方法）+ `file:line`（定位）。"""
-    anchors: list[str] = []
-    for s in c.sources:
-        if not s.file:
-            continue
-        if s.symbol:
-            anchors.append(f"{s.file}::{s.symbol}")
-        if s.start_line:
-            anchors.append(f"{s.file}:{s.start_line}")
-    return list(dict.fromkeys(anchors)) or list(c.code_anchors)
-
-
-def hypotheses_from_candidates(cands: list[CandidateV2],
-                               evidence_path: Optional[Path] = None) -> list:
-    """候选 → 假设。因子取值来自候选的结构化事实（锚点/证据数/机制/先验），
-    不来自代码阅读的主观判断；置信度由 attribution 公式算。"""
-    evs = _evidence_refs(cands, evidence_path)
-    hs = []
-    for c in cands:
-        anchors = anchors_of(c)
-        ref = c.evidence_ids[0] if c.evidence_ids else (anchors[0] if anchors else "")
-        js = [
-            FactorJudgment(factor="proximity",
-                           value=0.7 if anchors else 0.3, evidence_ref=ref),
-            FactorJudgment(factor="explains_share",
-                           value=0.6 if c.evidence_n >= 2 else 0.4,
-                           evidence_ref=ref),
-            FactorJudgment(factor="mechanism",
-                           value=0.8 if c.mechanism else 0.2, evidence_ref=ref),
-            FactorJudgment(factor="competitiveness", value=0.5, evidence_ref=ref),
-            FactorJudgment(factor="prior_hit",
-                           value=min(1.0, max(0.0, float(c.prior))),
-                           evidence_ref=ref),
-            FactorJudgment(factor="counterfactual", value=0.5, evidence_ref=ref),
-        ]
-        hs.append(build_hypothesis(c.root_cause, anchors or list(c.code_anchors),
-                                   js, issue_evidence=evs))
-    return rank(hs)

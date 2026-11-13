@@ -120,6 +120,54 @@ def capture_window(project: Path, run_id: str, limit: int) -> list[dict]:
 
 
 ACTION_CMDS = {"set_board", "resolve", "resolve_board", "swap", "open_shop"}
+EV_DEEP = ROOT / "runs" / "_probe" / "evidence_v1.json"
+DEEP_ON = ("UnityEngine.Profiling.Profiler.enabled=true;"
+           "UnityEditorInternal.ProfilerDriver.enabled=true;"
+           "UnityEditorInternal.ProfilerDriver.profileEditor=true;"
+           "UnityEditorInternal.ProfilerDriver.deepProfiling=true;"
+           "UnityEngine.Profiling.Profiler.enableAllocationCallstacks=true;"
+           "UnityEditorInternal.ProfilerDriver.ClearAllFrames();return \"deep\";")
+
+
+def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
+    """一次 bounded 深档采集（8 帧/8 线程），补分配点与调用栈候选。"""
+    CFG.write_text(json.dumps({"evidence_threads": 8, "evidence_frames": 8,
+                               "evidence_budget_ms": 6000}), encoding="utf-8")
+    try:
+        EV_DEEP.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _eval(project, PROFILER_OFF, timeout=30)
+    _eval(project, DEEP_ON, timeout=30)
+    try:
+        time.sleep(1.2)
+        d = unity("script eval", "--file", str(ROOT / "probe" / "upi_evidence_v1.cs"),
+                  "--project-path", str(project), "--timeout", "120")
+        if not d.get("success"):
+            return []
+        deadline = time.time() + 45
+        while time.time() < deadline and not EV_DEEP.exists():
+            time.sleep(0.3)
+        if not EV_DEEP.exists():
+            return []
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
+                        "--project", str(project), "--evidence", str(EV_DEEP),
+                        "--run-id", run_id, "--scene",
+                        "Assets/Scenes/00_Bootstrap.unity"],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+        bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
+        out = ROOT / "runs" / run_id / "evidence" / "candidates.json"
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
+                        "--project", str(project), "--evidence", str(bundle),
+                        "--out", str(out), "--limit", str(limit)],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+        if not out.exists():
+            return []
+        return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+    finally:
+        _eval(project, PROFILER_OFF, timeout=30)
 
 
 def run_and_capture(project: Path, run_id: str, limit: int,
@@ -148,6 +196,14 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             k = str(c.get("root_cause") or "")
             if k and k not in merged:
                 merged[k] = c
+        # 深档一窗：补分配点/调用栈（marker 看不到的 GC 证据）
+        try:
+            for c in deep_capture(project, f"{run_id}_deep", limit):
+                k = str(c.get("root_cause") or "")
+                if k and k not in merged:
+                    merged[k] = c
+        except Exception as e:  # noqa: BLE001 — 深档失败不拖垮整个采集
+            print("deep capture skipped:", type(e).__name__, e)
         return list(merged.values())
     finally:
         _eval(project, PROFILER_OFF, timeout=30)

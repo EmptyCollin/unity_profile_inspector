@@ -220,9 +220,16 @@ def score_run(paper: dict, run: RunFindings) -> dict:
           for (m, f, meth, mt, _acc) in exp
           if not any(x["mechanism"] == m and x["anchor"] == f"{f}::{meth}"
                      for x in matched)]
+    # FP：不属于任何期望（含 accept_methods 容忍）的 finding；与是否已匹配无关
+    def _matches_any(f) -> bool:
+        for _m, _f, _meth, _mt, _acc in exp:
+            if any(_anchor_matches(a, _f, _meth, _acc) for a in f.anchors):
+                return True
+        return False
+
     fp = [{"finding_id": f.finding_id, "mechanism": f.mechanism,
            "anchors": [f"{a.file}::{a.method}" for a in f.anchors]}
-          for i, f in enumerate(findings) if i not in used]
+          for f in findings if not _matches_any(f)]
 
     repairs = {r.finding_id: r for r in run.repairs if r.finding_id}
     repair_rows = []
@@ -242,7 +249,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
     discovery = {
         "expected": len(exp), "found": len(findings),
         "tp": len(matched), "fp": len(fp), "fn": len(fn),
-        "precision": round(len(matched) / max(1, len(findings)), 4),
+        "precision": round(len(matched) / max(1, len(matched) + len(fp)), 4),
         "recall": round(len(matched) / max(1, len(exp)), 4) if exp else None,
         "matched": matched, "false_positive": fp, "missed": fn,
     }

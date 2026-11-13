@@ -171,8 +171,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         ev_path = None
         if True:  # I10: 只走运行证据
             try:
-                from upi.core.evidence_diagnosis import (candidates_from_latest,
-                                                         hypotheses_from_candidates)
+                from upi.core.evidence_diagnosis import candidates_from_latest
                 root = st.get("project")
                 if not root:
                     root = _prof().abs_project
@@ -696,25 +695,6 @@ def _rebuild_issue(det, issue_d: dict) -> Issue:
                  deviation_ratio=float(r.get("deviation_ratio", 0) or 0),
                  explains_share_of_regression=1.0, state="confirmed",
                  low_confidence=False)
-
-
-def _offline_hypotheses(cands, issue) -> list:
-    """离线替身：不调用 LLM，用候选检索的结构化命中直接构造 FactorJudgment
-    （每个 anchor 命中即该因子 likely）——用于在没有真推理的情况下把状态机
-    流程跑通。真实归因质量必须靠 --live-llm 验证，替身不产出对外置信度结论。"""
-    from upi.core.attribution import FactorJudgment, build_hypothesis
-    hs = []
-    for root_cause, anchors in cands:
-        js = [FactorJudgment(factor="proximity", value=0.7,
-                             evidence_ref="anchor:" + (anchors[0] if anchors else "")),
-              FactorJudgment(factor="explains_share", value=0.6, evidence_ref="e0"),
-              FactorJudgment(factor="mechanism", value=0.8, evidence_ref="e0"),
-              FactorJudgment(factor="competitiveness", value=0.5, evidence_ref="e0"),
-              FactorJudgment(factor="prior_hit", value=0.5, evidence_ref="e0"),
-              FactorJudgment(factor="counterfactual", value=0.5, evidence_ref="e0")]
-        hs.append(build_hypothesis(root_cause, anchors, js, issue))
-    from upi.core.attribution import rank
-    return rank(hs)
 
 
 def _pattern_id(issue_d: dict, top: dict) -> str:

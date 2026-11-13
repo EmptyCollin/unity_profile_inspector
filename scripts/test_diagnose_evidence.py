@@ -14,8 +14,7 @@ from _compose import compose  # noqa: E402
 from upi.agents.nodes import make_nodes  # noqa: E402
 from upi.core import events as E  # noqa: E402
 from upi.core.candidates_v2 import CandidateV2  # noqa: E402
-from upi.core.evidence_diagnosis import (candidates_from_latest,  # noqa: E402
-                                         hypotheses_from_candidates)
+from upi.core.evidence_diagnosis import candidates_from_latest  # noqa: E402
 from upi.core.evidence_v2 import (EvidenceBundleV2, FunctionStat,  # noqa: E402
                                   SourceSpan)
 from upi.core.models import Evidence, Issue  # noqa: E402
@@ -34,24 +33,6 @@ def ok(name: str, cond: bool, detail: str = ""):
 TMP = Path(tempfile.mkdtemp(prefix="upi_diag_ev_"))
 E.isolate(TMP / "runs")
 PROJECT = compose(["c02"])          # HUD 缺陷工程，源码里能解析到 UpdateHudBody
-
-# ── 适配层：CandidateV2 → Hypothesis ──────────────────────────
-c = CandidateV2(id="c1", root_cause="hot_function:ChromaGame.UpdateHud",
-                mechanism="hot_path", kind="function",
-                sources=[SourceSpan(file="Assets/DevSim/Runtime/ChromaGame.cs",
-                                    start_line=10, end_line=20,
-                                    symbol="ChromaGame.UpdateHud")],
-                evidence_ids=["fn:1"], score=12.0, evidence_n=3)
-hs = hypotheses_from_candidates([c], TMP / "runs" / "x" / "evidence_v2.json")
-ok("候选 → 假设", len(hs) == 1 and hs[0].root_cause == c.root_cause)
-ok("锚点来自候选源码位置",
-   any(a.endswith(":10") for a in hs[0].code_anchors)
-   or any("ChromaGame.cs" in a for a in hs[0].code_anchors),
-   str(hs[0].code_anchors))
-ok("置信度由公式算，在 [0,1]", 0 <= hs[0].confidence <= 1, hs[0].confidence)
-ok("无 fixture/profile 字样",
-   "fixture" not in json.dumps(hs[0].model_dump(), ensure_ascii=False))
-ok("证据引用非空", len(hs[0].attribution_factors.model_dump()) == 6)
 
 # ── 空证据：不猜，明确 insufficient ────────────────────────────
 empty_cands, _, _ = candidates_from_latest(PROJECT, limit=5)

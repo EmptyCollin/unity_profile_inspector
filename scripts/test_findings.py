@@ -77,7 +77,7 @@ ok("方法不符 → FN+FP", d3["tp"] == 0 and d3["fp"] == 1, str(d3))
 
 extra = mkrun("r4", anchors=[("Assets/A.cs", "UpdateHud")], findings_n=2)
 d4 = F.score_run(paper, extra)["dimensions"]["discovery"]
-ok("多余 finding 记 FP", d4["tp"] == 1 and d4["fp"] == 1, str(d4))
+ok("同锚点重复不计 FP（冗余非误报）", d4["tp"] == 1 and d4["fp"] == 0, str(d4))
 
 # ── 判分：负对照 / 修复 / 可复现 ──────────────────────
 neg_paper = {"expectations": []}
