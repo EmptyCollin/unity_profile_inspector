@@ -25,6 +25,9 @@ from upi.core.findings import (Anchor, AttributionInfo, RepairRecord,  # noqa: E
                                RunFindings, ToolFinding, new_run_id, save_run,
                                score_run)
 from upi.core.protocol import build as fp_build, digest as fp_digest, file_hash  # noqa: E402
+from upi.core.mode_caps import caps  # noqa: E402
+from upi.core.retry_policy import (is_stagnant, max_attempts,  # noqa: E402
+                                   next_untried)
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
@@ -254,26 +257,39 @@ def main() -> int:
         save_run(run)
     retry_obs: dict = {}
     retry_stop = ""
+    tried = {str((plan_hyp or {}).get("root_cause") or "")}
+    seen_hashes = {_diff_hash(plan)}
+    retry_round = 0
+    max_steps = max_attempts("regression")
     if ladder_status == "needs_recheck" and target is not None:
         from upi.core.agent_loop import run_loop
 
-        def _decide(_state):
-            return ({"tool": "plan_patch"} if not retry_obs
-                    else {"stop": True, "reason": "retried"})
+        def _decide(state):
+            last = state.get("last") or {}
+            if retry_round > 0 and last.get("ladder") not in ("needs_recheck", None):
+                return {"stop": True, "reason": "clean"}
+            if retry_round >= max_steps:
+                return {"stop": True, "reason": "budget"}
+            return {"tool": "plan_patch"}
 
         def _act(_decision):
-            nonlocal ladder_status, target_gone, new_roots
+            nonlocal ladder_status, target_gone, new_roots, retry_round
+            retry_round += 1
             cfg = N.load_config(ROOT / "llm_config.yaml")
-            np, hsel = None, None
-            for h in hs:
-                np, _m = plan_issue(cfg, _issue(d["issue"]), h, p)
-                if np is not None:
-                    hsel = h
-                    break
+            hsel = next_untried(hs, tried)
+            if hsel is None:
+                return {"error": "no_new_hypothesis"}
+            np, _m = plan_issue(cfg, _issue(d["issue"]), hsel, p)
             if np is None:
-                return {"error": "no_plan"}
-            tid2 = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-retry"
-            iid2 = "it-retry"
+                return {"error": "no_plan_for_hypothesis"}
+            tried.add(str(hsel.get("root_cause") or ""))
+            hh = _diff_hash(np)
+            if is_stagnant(hh, seen_hashes):
+                return {"error": "stagnant: 同一 diff 重复"}
+            seen_hashes.add(hh)
+            tid2 = ("bt-" + time.strftime("%Y%m%d_%H%M%S")
+                    + f"-r{retry_round}")
+            iid2 = f"it-r{retry_round}"
             it2 = TicketItem(item_id=iid2, cluster_id="llm-retry", metric="llm",
                              shape="llm_plan", kind="llm", count=1,
                              pattern_id="llm", playbook_id=np.playbook_id,
@@ -311,15 +327,16 @@ def main() -> int:
                 "new_clusters": new, "guards_ok": True})
             ladder_status, target_gone, new_roots = l2.status, gone, new
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
+            attempt_no = len(run.attempts) + 1
             run.repairs.append(RepairRecord(
                 finding_id=target.finding_id, plan_id=np.playbook_id,
                 files=np.touched_assets,
                 compile_ok=(o2.items[0].status in ("applied", "applied_unverified")),
                 runnable=None, verdict=l2.status, metric_delta=None,
-                attempt_no=2, ticket_id=tid2, diff_hash=_diff_hash(np),
+                attempt_no=attempt_no, ticket_id=tid2, diff_hash=_diff_hash(np),
                 stop_reason=l2.status))
             run.attempts.append({
-                "attempt_no": 2,
+                "attempt_no": attempt_no,
                 "hypothesis": str((hsel or {}).get("root_cause") or ""),
                 "plan_id": np.playbook_id, "diff_hash": _diff_hash(np),
                 "ticket_id": tid2, "item_status": o2.items[0].status,
@@ -328,7 +345,7 @@ def main() -> int:
             save_run(run)
             return {"ladder": l2.status, "status": o2.items[0].status}
 
-        res = run_loop("regression", _decide, _act, max_steps=1)
+        res = run_loop("regression", _decide, _act, max_steps=max_steps)
         retry_stop = res.stop_reason
         print("agent loop:", res.stop_reason, res.steps, retry_obs)
 
@@ -378,7 +395,8 @@ def _make_collector(project: Path, project_id: str, replay: str):
     from upi.core.evidence_request import fulfill
 
     def collector(req):
-        if req.kind in ("source", "callstack"):
+        if req.kind in ("source", "callstack", "code_search", "ast_callgraph",
+                        "asset_inventory", "reference_graph", "settings"):
             return fulfill(req, "regression", project).model_dump()
         if req.kind == "replay_window":
             tag = "evidence_req_" + time.strftime("%H%M%S")
