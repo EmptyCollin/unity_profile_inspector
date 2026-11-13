@@ -647,6 +647,21 @@ def main() -> int:
             mark("rollback-final", "ok", "未 verified：回滚全部未验证补丁")
         else:
             mark("rollback-final", "failed", "最终回滚失败")
+    try:
+        from upi.core.site_audit import sites_remaining
+        sa = sites_remaining(p, [{"find": d.get("find", ""),
+                                  "replace": d.get("replace", "")}
+                                 for d in (plan.diffs if plan else [])])
+        (run_dir / "site_audit.json").write_text(
+            json.dumps(sa, ensure_ascii=False, indent=2), encoding="utf-8")
+        if sa and ladder_status == "verified":
+            ladder_status = "needs_recheck"
+            mark("site-audit", "failed",
+                 "补丁删除的机制仍有站点残留：" + ", ".join(sa))
+        else:
+            mark("site-audit", "ok", f"剩余站点={sum(len(v) for v in sa.values())}")
+    except Exception as e:  # noqa: BLE001
+        mark("site-audit", "failed", f"{type(e).__name__}: {e}")
     run.usability_ok = bool(compiled and ok_smoke)
     run.usability_note = ("最终可编译/可启动" if run.usability_ok
                           else "最终不可用：编译或启动失败")
