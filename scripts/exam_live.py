@@ -89,6 +89,41 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
     return out
 
 
+def _capture_once(project: Path, project_id: str, replay: str,
+                  run_dir: Path, label: str, *,
+                  two_pass: bool = False, retries: int = 1):
+    """采集子进程；失败落 tool_errors.jsonl 并重试一次。返回 (ok, out)。"""
+    last = None
+    for attempt in range(retries + 1):
+        cmd = [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
+               "--project", str(project), "--project-id", project_id,
+               "--replay", replay, "--no-save"]
+        if two_pass:
+            cmd.append("--two-pass")
+        try:
+            last = subprocess.run(cmd, cwd=str(ROOT), capture_output=True,
+                                  text=True, encoding="utf-8",
+                                  errors="replace", timeout=2400)
+            if last.returncode == 0:
+                return True, last
+            err = {"label": label, "attempt": attempt + 1,
+                   "returncode": last.returncode,
+                   "stdout": (last.stdout or "")[-2000:],
+                   "stderr": (last.stderr or "")[-2000:]}
+        except Exception as e:  # noqa: BLE001
+            err = {"label": label, "attempt": attempt + 1,
+                   "returncode": -1,
+                   "stdout": "", "stderr": f"{type(e).__name__}: {e}"}
+        try:
+            with (run_dir / "tool_errors.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(err, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+        if attempt < retries:
+            time.sleep(1.5)
+    return False, last
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
@@ -124,13 +159,10 @@ def main() -> int:
     baseline_runs: list[dict] = []
     n_base = max(1, int(a.baselines))
     for bi in range(n_base):
-        r = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
-             "--project", str(p), "--project-id", a.project_id,
-             "--replay", a.replay, "--no-save", "--two-pass"],
-            cwd=str(ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=2400)
-        if r.returncode != 0:
+        okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
+                                 f"baseline#{bi + 1}", two_pass=True,
+                                 retries=1)
+        if not okcap:
             mark(f"baseline#{bi + 1}", "failed",
                  (r.stdout or r.stderr)[-160:])
             save_chain()
@@ -271,13 +303,15 @@ def main() -> int:
     try:
         from upi.core.verify_ladder import evaluate as _ladder
         before_roots = before_roots0
-        # 修复后再采一次（同 replay、同协议）
-        r2 = subprocess.run([sys.executable, str(ROOT / "scripts" / "capability_run.py"),
-                             "--project", str(p), "--project-id", a.project_id,
-                             "--replay", a.replay, "--no-save"],
-                            cwd=str(ROOT), capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", timeout=1800)
-        print("post-capture:", (r2.stdout or r2.stderr)[-160:])
+        # 修复后再采一次（同 replay、同协议）；失败重试一次，仍失败降级 unverified
+        okcap, r2 = _capture_once(p, a.project_id, a.replay, run_dir,
+                                  "post-capture#1", two_pass=False, retries=1)
+        print("post-capture:", ((r2.stdout or r2.stderr)[-160:]
+                                if r2 is not None else "failed"))
+        if not okcap:
+            ladder_status = "unverified"
+            mark("verify#1", "unverified", "post-capture 失败（已重试）；降级 unverified")
+            raise RuntimeError("post-capture unavailable")
         after_cands, _, _ = candidates_from_latest(p, limit=12)
         after_roots = {str(c.root_cause).split(":", 1)[-1] for c in after_cands}
         target_rc = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
@@ -323,7 +357,8 @@ def main() -> int:
         def _decide(state):
             last = state.get("last") or {}
             if retry_round > 0 and last.get("ladder") not in ("needs_recheck", None):
-                return {"stop": True, "reason": "clean"}
+                return {"stop": True,
+                        "reason": f"ladder:{last.get('ladder')}"}
             if retry_round >= max_steps:
                 return {"stop": True, "reason": "budget"}
             return {"tool": "plan_patch"}
@@ -377,12 +412,30 @@ def main() -> int:
                                      mode="regression", replan=_replan).execute(t2)
             mark(f"execute#{len(run.attempts)+1}", "ok" if o2.items[0].status in
                  ("applied_unverified",) else "failed", o2.items[0].status)
-            r3 = subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
-                 "--project", str(p), "--project-id", a.project_id,
-                 "--replay", a.replay, "--no-save"],
-                cwd=str(ROOT), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=1800)
+            okcap, r3 = _capture_once(p, a.project_id, a.replay, run_dir,
+                                      f"post-capture#retry", two_pass=False,
+                                      retries=1)
+            if not okcap:
+                attempt_no = len(run.attempts) + 1
+                run.repairs.append(RepairRecord(
+                    finding_id=target.finding_id, plan_id=np.playbook_id,
+                    files=np.touched_assets,
+                    compile_ok=(o2.items[0].status in
+                                ("applied", "applied_unverified")),
+                    runnable=None, verdict="unverified", metric_delta=None,
+                    attempt_no=attempt_no, ticket_id=tid2,
+                    diff_hash=_diff_hash(np), stop_reason="tool_error"))
+                run.attempts.append({
+                    "attempt_no": attempt_no,
+                    "hypothesis": str((hsel or {}).get("root_cause") or ""),
+                    "plan_id": np.playbook_id, "ticket_id": tid2,
+                    "item_status": o2.items[0].status,
+                    "ladder": "unverified", "stop_reason": "tool_error"})
+                save_run(run)
+                mark(f"verify#{attempt_no}", "unverified",
+                     "post-capture 失败（已重试）；降级 unverified，已记账")
+                retry_obs["ladder"] = "unverified"
+                return {"ladder": "unverified"}
             after_c, _, _ = candidates_from_latest(p, limit=12)
             after_k = {str(c.root_cause).split(":", 1)[-1] for c in after_c}
             tkey = str((hsel or {}).get("root_cause") or "").split(":", 1)[-1]
