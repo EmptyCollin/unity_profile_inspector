@@ -506,6 +506,7 @@ def main() -> int:
                                      mode="regression", replan=_replan).execute(t2)
             mark(f"execute#{len(run.attempts)+1}", "ok" if o2.items[0].status in
                  ("applied_unverified",) else "failed", o2.items[0].status)
+            attempt_no = len(run.attempts) + 1
             okcap, r3 = _capture_once(p, a.project_id, a.replay, run_dir,
                                       f"post-capture#retry", two_pass=False,
                                       retries=1)
@@ -546,7 +547,6 @@ def main() -> int:
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
             mark(f"verify#{attempt_no}", l2.status,
                  f"hyp={str((hsel or {}).get('root_cause',''))[:80]}")
-            attempt_no = len(run.attempts) + 1
             run.repairs.append(RepairRecord(
                 finding_id=target.finding_id, plan_id=np.playbook_id,
                 files=np.touched_assets,

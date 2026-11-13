@@ -160,7 +160,14 @@ def main() -> int:
     log("步骤 2/8：清空习得数据与白纸工程")
     clean_learned()
     if PROJECT.exists():
-        shutil.rmtree(PROJECT, ignore_errors=True)
+        for _ in range(3):
+            shutil.rmtree(PROJECT, ignore_errors=True)
+            if not PROJECT.exists():
+                break
+            time.sleep(2)
+    if PROJECT.exists():
+        subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", str(PROJECT)],
+                       capture_output=True, text=True)
     if PROJECT.exists():
         raise SystemExit("test_project 删除失败，停止（不触碰其它文件）")
 
