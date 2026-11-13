@@ -162,10 +162,17 @@ def score() -> dict:
                 "dimensions": {"discovery": None, "no_false_positive": None,
                                "repair": None, "reproducible": None}}
     from upi.core.findings import score_run
+    res = score_run(paper, run)
+    cp = run.path().parent / "chain.json"
+    if cp.exists():
+        try:
+            res["chain"] = json.loads(cp.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
     return {"ok": True, "evaluated": True,
             "paper": {"cases": paper.get("cases"),
                       "created_at": paper.get("created_at")},
-            **score_run(paper, run)}
+            **res}
 
 
 HTML = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
@@ -222,7 +229,17 @@ function renderChart(r){
     <div class="small">归因：Top1 ${(d.attribution&&d.attribution.top1_hit)?'命中':'未命中'} · 证据引用 ${d.attribution&&d.attribution.evidence_refs_ratio!=null?d.attribution.evidence_refs_ratio:'-'} · ECE ${d.attribution&&d.attribution.ece!=null?d.attribution.ece:'样本不足'}</div>
     <div class="small">可复现：${rs.consistent===null?'无法评估（1 次运行）':(rs.consistent?'一致':'不一致')} · 运行数 ${rs.runs||1}</div>`;
 }
-async function loadScore(){const r=await api('/api/score');mark(r);renderChart(r);show('score',r);}
+function renderChain(r){
+  const el=document.getElementById('score'); const c=r.chain||{};
+  const steps=c.steps||[];
+  if(!steps.length){el.innerHTML='<div class="small">链路：本次 run 没有 chain.json（旧 run）</div>';return;}
+  const rows=steps.map(s=>`<tr><td>${esc(s.step)}</td><td>${esc(s.status)}</td><td>${esc(s.at_s)}s</td><td>${esc(s.detail||'')}</td></tr>`).join('');
+  el.innerHTML=`<table style="width:100%;border-collapse:collapse">
+    <tr class="small"><th align="left">步骤</th><th align="left">状态</th><th align="left">累计耗时</th><th align="left">说明</th></tr>
+    ${rows}</table>
+    <div class="small">折返 ${esc(c.backtracks??0)} 次 · 基线：${esc((c.baseline&&c.baseline.reason)||'未记录')}</div>`;
+}
+async function loadScore(){const r=await api('/api/score');mark(r);renderChart(r);renderChain(r);}
 init();
 </script></body></html>"""
 

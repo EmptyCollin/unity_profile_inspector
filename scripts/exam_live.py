@@ -99,6 +99,21 @@ def main() -> int:
     run_id = new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    chain: list[dict] = []
+    t_start = time.time()
+
+    def mark(step: str, status: str = "ok", detail: str = "") -> None:
+        chain.append({"step": step, "status": status,
+                      "at_s": round(time.time() - t_start, 2),
+                      "detail": detail[:200]})
+
+    def save_chain() -> None:
+        (run_dir / "chain.json").write_text(json.dumps(
+            {"steps": chain, "backtracks": max(0, len(run.attempts) - 1),
+             "baseline": {"ran": False,
+                          "reason": "本场只做单次 replay 复验；未跑 3 次基线，"
+                                    "所以 verdict=observed 而非 verified"}},
+            ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 1) 证据采集（r 轻采 → 选窗 → r′ 窗口深采）
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "capability_run.py"),
@@ -107,6 +122,8 @@ def main() -> int:
                        cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=2400)
     print("capture:", (r.stdout or r.stderr)[-300:])
+    mark("capture(r+r')", "ok" if r.returncode == 0 else "failed",
+         (r.stdout or r.stderr)[-160:])
     if r.returncode != 0:
         return 1
     from upi.core.evidence_diagnosis import candidates_from_latest
@@ -121,14 +138,19 @@ def main() -> int:
                       mode="regression",
                       evidence_collector=collector)
     d = nd["detect"]({"project": str(p)})
+    mark("detect", d.get("route", ""), str(d.get("error", ""))[:120])
     print("detect:", d.get("route"), str(d.get("error", ""))[:120])
     if d.get("route") != "proceed":
+        save_chain()
         return 1
     g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
+    mark("diagnose", g.get("route", ""),
+         f"tokens={g.get('tokens_used')} hyps={len(g.get('hypotheses') or [])}")
     print("diagnose:", g.get("route"), g.get("diagnose_source"),
           "tokens", g.get("tokens_used"))
     if g.get("route") != "proceed":
         print("diagnose error:", g.get("error"))
+        save_chain()
         return 1
     hs = g.get("hypotheses") or []
     print("top1:", hs[0].get("root_cause"), "conf", hs[0].get("confidence"))
@@ -163,8 +185,11 @@ def main() -> int:
         if plan is not None:
             plan_hyp = h
             break
+    mark("plan", "ok" if plan is not None else "failed",
+         f"{(plan_hyp or {}).get('root_cause','')} playbook={getattr(plan,'playbook_id','')}")
     if plan is None:
         print("no LLM plan")
+        save_chain()
         return 1
 
     # 5) 工单（人=用户代理，全部批准）
@@ -208,6 +233,9 @@ def main() -> int:
                              scene=p / "Assets/Scenes/00_Bootstrap.unity",
                              mode="regression", replan=_replan)
     out = ex.execute(t)
+    mark("execute#1", "ok" if out.items[0].status in
+         ("applied_unverified",) else "failed",
+         f"{out.items[0].status} {out.items[0].error[:80]}")
     print("execute:", out.status)
     for it in out.items:
         print(" item:", it.status, it.error[:100])
@@ -234,6 +262,7 @@ def main() -> int:
             "new_clusters": new_roots, "guards_ok": True})
         ladder_status = ladder.status
         print("ladder:", ladder.status, ladder.reason)
+        mark("verify#1", ladder.status, ladder.reason[:160])
         (run_dir / "verify_ladder.json").write_text(
             ladder.model_dump_json(indent=2), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
@@ -319,6 +348,8 @@ def main() -> int:
             o2 = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
                                      scene=p / "Assets/Scenes/00_Bootstrap.unity",
                                      mode="regression", replan=_replan).execute(t2)
+            mark(f"execute#{len(run.attempts)+1}", "ok" if o2.items[0].status in
+                 ("applied_unverified",) else "failed", o2.items[0].status)
             r3 = subprocess.run(
                 [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
                  "--project", str(p), "--project-id", a.project_id,
@@ -335,6 +366,8 @@ def main() -> int:
                 "new_clusters": new, "guards_ok": True})
             ladder_status, target_gone, new_roots = l2.status, gone, new
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
+            mark(f"verify#{attempt_no}", l2.status,
+                 f"hyp={str((hsel or {}).get('root_cause',''))[:80]}")
             attempt_no = len(run.attempts) + 1
             run.repairs.append(RepairRecord(
                 finding_id=target.finding_id, plan_id=np.playbook_id,
@@ -371,6 +404,8 @@ def main() -> int:
     run.usability_ok = bool(compiled and ok_smoke)
     run.usability_note = ("最终可编译/可启动" if run.usability_ok
                           else "最终不可用：编译或启动失败")
+    mark("usability", "ok" if run.usability_ok else "failed",
+         f"compile={compiled} smoke={ok_smoke}")
     for r in run.repairs:
         if r.compile_ok:
             r.runnable = ok_smoke
@@ -382,6 +417,10 @@ def main() -> int:
     paper = json.loads((ROOT / "runs" / "i8_lab" / "paper.json")
                        .read_text(encoding="utf-8"))
     score = score_run(paper, run)
+    mark("score", "ok",
+         f"tp={score['dimensions']['discovery'].get('tp')} "
+         f"fn={score['dimensions']['discovery'].get('fn')}")
+    save_chain()
     print(json.dumps(score, ensure_ascii=False, indent=1))
     # 9) 归纳总结：只提议入库，等用户在 UI 批/驳
     try:
