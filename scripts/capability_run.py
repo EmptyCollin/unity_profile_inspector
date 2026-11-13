@@ -328,6 +328,9 @@ def run_and_capture(project: Path, run_id: str, limit: int,
         (run_dir / "pass1_windows.json").write_text(
             json.dumps(wins, ensure_ascii=False, indent=2), encoding="utf-8")
         if not enable_deep:
+            (run_dir / "merged_candidates.json").write_text(
+                json.dumps(list(merged.values()), ensure_ascii=False, indent=2),
+                encoding="utf-8")
             return list(merged.values())
         try:
             from upi.core.capture_policy import plan_for
@@ -353,6 +356,9 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                 print("deep capture skipped: no anomaly trigger")
         except Exception as e:  # noqa: BLE001
             print("deep capture skipped:", type(e).__name__, e)
+        (run_dir / "merged_candidates.json").write_text(
+            json.dumps(list(merged.values()), ensure_ascii=False, indent=2),
+            encoding="utf-8")
         return list(merged.values())
     finally:
         _eval(project, PROFILER_OFF, timeout=30)
@@ -369,6 +375,8 @@ def run_two_pass_capture(project: Path, run_id: str, limit: int,
     timeline = json.loads((run_dir / "pass1_timeline.json").read_text(encoding="utf-8"))
     planned = plan_deep_windows(wins, max_n=3, margin=12)
     if not planned:
+        (run_dir / "merged_candidates.json").write_text(
+            json.dumps(light, ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "two_pass.json").write_text(json.dumps(
             {"status": "no_window", "windows": [],
              "reason": "r 未产生异常窗口"}, ensure_ascii=False, indent=2),
@@ -380,11 +388,14 @@ def run_two_pass_capture(project: Path, run_id: str, limit: int,
     merged = {str(c.get("root_cause") or ""): c for c in light}
     for c in deep:
         merged.setdefault(str(c.get("root_cause") or ""), c)
+    merged_list = list(merged.values())
+    (run_dir / "merged_candidates.json").write_text(
+        json.dumps(merged_list, ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "two_pass.json").write_text(json.dumps(
         {"status": "done", "windows": [w.model_dump() for w in planned],
          "light": len(light), "deep": len(deep)},
         ensure_ascii=False, indent=2), encoding="utf-8")
-    return list(merged.values())
+    return merged_list
 
 
 def _anchor_of(c: dict) -> list[Anchor]:

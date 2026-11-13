@@ -110,8 +110,21 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                         root = _prof().abs_project
                     except Exception:  # noqa: BLE001
                         root = None
-                cands = (generate_candidates(bundle, project_root=root, limit=1)
-                         if bundle is not None else [])
+                cands = []
+                # 优先吃采集端合并候选（两遍 replay 的 light+deep 结果）
+                try:
+                    from upi.core.candidates_v2 import CandidateV2
+                    merged_files = sorted(
+                        E.RUNS.glob("*/merged_candidates.json"),
+                        key=lambda p: p.stat().st_mtime)
+                    if merged_files:
+                        raw = json.loads(merged_files[-1].read_text(encoding="utf-8"))
+                        cands = [CandidateV2(**c) for c in raw][:1]
+                except Exception:  # noqa: BLE001
+                    cands = []
+                if not cands:
+                    cands = (generate_candidates(bundle, project_root=root, limit=1)
+                             if bundle is not None else [])
             except Exception as e:  # noqa: BLE001 — 证据链不可用按“无证据”处理
                 E.atomic_write_text(run_dir / "detect_evidence_error.txt",
                                     f"证据检测失败：{type(e).__name__}: {e}\n")
