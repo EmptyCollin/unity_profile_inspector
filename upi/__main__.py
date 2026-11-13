@@ -76,8 +76,17 @@ def cmd_status(_args=None) -> int:
 
     cal = sorted((ROOT / "baselines").glob("thresholds_*.json"),
                  key=lambda p: p.stat().st_mtime) if (ROOT / "baselines").is_dir() else []
-    print(f"  阈值标定        : {cal[-1].name if cal else '缺失（§8.1 禁止未标定检测）'}")
-    ok = ok and bool(cal)
+    if cal:
+        basis = "未知"
+        try:
+            basis = json.loads(cal[-1].read_text(encoding="utf-8")).get(
+                "noise_basis") or "noise_calibration"
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"  阈值标定        : {cal[-1].name}（basis={basis}）")
+    else:
+        # 无阈值不是致命：绝对线照常可用；只是相对判据不可用（I9d）
+        print("  阈值标定        : 未标定（仅绝对线；相对判据 insufficient_evidence）")
 
     bundle = (ROOT / "calibration" / "multiwin_full_summary.json")
     print(f"  标定数据束      : {'存在' if bundle.exists() else '缺失'}")

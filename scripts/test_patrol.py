@@ -629,9 +629,10 @@ def main():
     try:
         r_l0 = P.calibrate_round({"windows": 4}, caldir=TMP / "cal_l0",
                                  baselines_dir=_cal_bdir)
-        check("L0 ⇒ 拒标并说清出路（配基准或只用绝对下限）",
-              r_l0["blindspot"] and "噪声基准" in r_l0["blindspot"]
-              and "下限" in r_l0["blindspot"], str(r_l0["blindspot"])[:80])
+        check("L0 ⇒ 不拒标，写 L0 占位阈值（降级不是拒判）",
+              r_l0.get("blindspot") is None
+              and r_l0.get("noise_basis") == "L0"
+              and bool(r_l0.get("thresholds")), str(r_l0)[:120])
         check("L0 拒在采样之前（不起编辑器，省一整轮成本）", _rs_calls == [],
               str(len(_rs_calls)))
     finally:

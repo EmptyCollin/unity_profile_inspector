@@ -418,6 +418,8 @@ def main() -> int:
     ap.add_argument("--fixtures", nargs="*", default=None)
     ap.add_argument("--windows", type=int, default=5)
     ap.add_argument("--merge", action="store_true")
+    ap.add_argument("--l0", action="store_true",
+                    help="无噪声基准时生成 L0 占位阈值（仅绝对线，相对判据不可用）")
     ap.add_argument("--no-summary", action="store_true",
                     help="临时工作束（A4 交替块实验等）不落摘要——摘要文件名按会话固定，"
                          "写到隔离目录会留下多份 *_summary.json 误导 load_multwin 的优先级")
@@ -431,7 +433,7 @@ def main() -> int:
     CALDIR.mkdir(parents=True, exist_ok=True)
 
     if args.merge:
-        return do_merge()
+        return do_merge(l0=args.l0)
 
     FULL_SESSION = args.session in ("idle", "full")
     IDLE_ONLY = args.session == "idle"
@@ -573,15 +575,33 @@ def between_windows(wins: list[dict]) -> dict:
     return out
 
 
-def do_merge() -> int:
+def do_merge(l0: bool = False) -> int:
     fp_full = CALDIR / "multiwin_full.json"
     if not fp_full.exists():
         print("缺 multiwin_full.json")
         return 1
     full = json.loads(fp_full.read_text(encoding="utf-8"))
-    clean = full["fixtures"].get(_PROF.clean_subject, {})
+    clean = full["fixtures"].get(_PROF.clean_subject, {}) if _PROF.clean_subject else {}
     if "error" in clean or not clean.get("windows"):
-        print(f"full 会话对照机制 {_PROF.clean_subject} 数据缺失")
+        if l0:
+            out = {"source": fp_full.name,
+                   "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                   "protocol": full.get("protocol"),
+                   "noise_basis": "L0",
+                   "thresholds": {},
+                   "note": ("本工程没有噪声基准：只生成绝对线占位。"
+                            "相对判据一律 insufficient_evidence，误报率 not_measurable。")}
+            blob = json.dumps(out, sort_keys=True).encode()
+            h = hashlib.sha256(blob).hexdigest()[:12]
+            dest_dir = ROOT / _PROF.baselines_dir_rel
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"thresholds_{h}.json"
+            dest.write_text(json.dumps(out, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+            print(f"合并完成（L0：无噪声基准，仅绝对线）→ {dest.name}")
+            return 0
+        print(f"full 会话对照机制 {_PROF.clean_subject or '(未配置)'} 数据缺失；"
+              "如确认只用绝对线，加 --l0")
         return 1
     bw = between_windows(clean["windows"])
 

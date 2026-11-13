@@ -335,6 +335,7 @@ def main() -> int:
                  "import sys;sys.path.insert(0,%r);"
                  "import scripts.m1_multiwin as MW;"
                  "from upi.tooling import checklist as CL;"
+                 "CL._ensure();"
                  "print('U', MW.default_fixture_list(True));"
                  "print('Q', MW.default_fixture_list(False));"
                  "print('C', CL.CLEAN_ID)" % str(ROOT)],
@@ -401,8 +402,9 @@ def main() -> int:
             r = subprocess.run([sys.executable, "-c",
                                 "import sys;sys.path.insert(0,%r);"
                                 "from upi.config.project_profile import load_profile;"
-                                "from upi.tooling.checklist import FIXTURE_SPEC;"
-                                "print(FIXTURE_SPEC == load_profile(%r).fixture_spec)"
+                                "from upi.tooling import checklist as CL;"
+                                "CL._ensure();"
+                                "print(CL.FIXTURE_SPEC == load_profile(%r).fixture_spec)"
                                 % (str(ROOT), PID)],
                                capture_output=True, text=True, timeout=120,
                                env=dict(os.environ, UPI_PROFILE=PID),

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -43,14 +44,15 @@ try:
     req = urllib.request.Request(
         f"http://127.0.0.1:{ui.port}/api/tickets/opportunities?token=t",
         data=b"{}", method="POST", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    ok("机会建单 API", data.get("ok") is True and data.get("ticket"), data)
-    items = (data.get("ticket") or {}).get("items") or []
-    ok("工单包含机会", len(items) >= 9, len(items))
-    ok("工单带 project_id", (data.get("ticket") or {}).get("project_id") == entry.project_id)
-    ok("至少一个 auto plan", any(i.get("permission_tier") == "auto" and i.get("plan")
-                                  for i in items))
+    code, data = 200, {}
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        code = e.code
+        data = json.loads(e.read().decode("utf-8"))
+    ok("静态扫描≠建单：接口明确拒绝", code == 409 and data.get("ok") is False, data)
+    ok("拒绝理由说明“仅线索”", "线索" in str(data.get("error", "")), data.get("error"))
 finally:
     ui.stop()
 

@@ -57,17 +57,25 @@ def fmt_rate(v) -> str:
     return "无观测" if v is None else f"{v:.3f}"
 
 
-# 阶段 7：路径来自 profile（工程侧数据的位置），但**保持模块属性形态**——
-# scripts/check_fixture_split.py 靠覆盖 CL.FIXTURE_SPEC 把体检表整体隔离到
-# 临时目录（那里有注释明说）。改成函数就没这个入口了，所以这里在导入时取一次值。
-FIXTURE_SPEC = active_profile().fixture_spec
+# 路径来自 profile，但**不在导入期读**（I9e）：未选择工程/无夹具规格时，
+# 体检项如实“未计算”，而不是让 import 直接失败。测试仍可覆盖这两个全局。
+FIXTURE_SPEC = None
+CLEAN_ID = None
 
 
-# 对照机制名（负样本的 id）：内置档案里就是 "CLEAN"，但新工程可能叫别的。
-# 它不是纯标签——split_of() 用 `fid == CLEAN_ID` 判第三态，写死会让新工程的
-# 负样本被错分成 tuning/holdout，混进检出率分母（§8.1 要防的正是这个）。
-# 与 FIXTURE_SPEC 同口径在导入时取一次值，供测试覆盖入口。
-CLEAN_ID = active_profile().clean_subject
+def _ensure() -> None:
+    """首次使用时才解析当前档案；解析失败保持 None（调用方按未计算处理）。"""
+    global FIXTURE_SPEC, CLEAN_ID
+    if FIXTURE_SPEC is not None and CLEAN_ID is not None:
+        return
+    try:
+        p = active_profile()
+    except Exception:  # noqa: BLE001
+        return
+    if FIXTURE_SPEC is None:
+        FIXTURE_SPEC = p.fixture_spec
+    if CLEAN_ID is None:
+        CLEAN_ID = p.clean_subject
 
 
 def split_of() -> dict[str, str]:
@@ -86,6 +94,9 @@ def split_of() -> dict[str, str]:
     读者会误读成"调参侧反而更差"。建模上分开，才不依赖自觉。
     """
     try:
+        _ensure()
+        if FIXTURE_SPEC is None:
+            return {}
         spec = json.loads(FIXTURE_SPEC.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
@@ -101,6 +112,7 @@ def split_of() -> dict[str, str]:
 
 def defect_split() -> dict[str, str]:
     """只留缺陷夹具的 tuning/holdout 两类（负样本按 §8.1 不参与检出率分组）。"""
+    _ensure()
     return {k: v for k, v in split_of().items() if v != CLEAN_ID}
 
 
@@ -115,6 +127,7 @@ def compute(db: Path | str | None = None) -> dict:
 
 
 def _compute(c) -> dict:
+    _ensure()
     out: dict[str, dict] = {}
 
     # ── 1) tuning_holdout_gap：按 fixture_spec 的 holdout 标记分组实测 ──
@@ -158,7 +171,8 @@ def _compute(c) -> dict:
     else:
         out["tuning_holdout_gap"] = {
             "value": None, "ok": None, "n": 0,
-            "why": f"夹具规格 {FIXTURE_SPEC.name} 缺 holdout 字段或值非 0/1 ⇒ 不猜测"
+            "why": f"夹具规格 {FIXTURE_SPEC.name if FIXTURE_SPEC else '(未配置)'} "
+                   "缺 holdout 字段或值非 0/1 ⇒ 不猜测"
                    "分组（默认成 tuning 会把留出夹具喂进调参，正是 §8.1 要防的）"}
 
     # ── 2) clean_fp_rate：对照机制自比自，任何 detected 即误报（D6 口径）──
@@ -180,7 +194,8 @@ def _compute(c) -> dict:
         "value": (alerts / total) if total else None,
         "ok": None if not total else bool(alerts == 0),
         "n": total,
-        "why": (f"{CLEAN_ID} 自比自：阈值来自 {CLEAN_ID} 自身，任何 detected 都是误报"
+        "why": (f"{CLEAN_ID or '(未配置)'} 自比自：阈值来自 "
+                f"{CLEAN_ID or '(未配置)'} 自身，任何 detected 都是误报"
                 f"（{n_runs_with} 轮的 detection.json 带 fp_selfcheck 字段）"
                 if total else "无任何 detection.json 带 fp_selfcheck 字段")}
 

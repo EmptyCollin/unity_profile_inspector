@@ -105,3 +105,7 @@ projects/
 .dsh-acl-reports/
 
 test_project/
+
+baselines/
+
+knowledge/*.db

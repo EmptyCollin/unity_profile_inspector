@@ -64,8 +64,7 @@ def main() -> int:
         page.click("#oppTicketBtn")
         page.wait_for_timeout(700)
         html = page.content()
-        ok("机会建单后出现工单", "PB-OP" in html or "opportunity" in html
-           or "cpuMainThreadFrameTimeMs" in html)
+        ok("静态扫描不再建单（仅线索）", "PB-OP" not in html)
         b.close()
     print(f"\n==== 浏览器 Web 验收: {len(PASS)} 通过, {len(FAIL)} 失败")
     return 1 if FAIL else 0

@@ -1351,12 +1351,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/tickets/opportunities":
-            try:
-                t = _build_opportunity_ticket()
-                self._send_json(200, {"ok": True, "ticket": t.model_dump(),
-                                      "summary": t.summary()})
-            except Exception as e:  # noqa: BLE001
-                self._send_json(409, {"ok": False, "error": str(e)[:240]})
+            # I9e：静态机会扫描只是线索，不再建单（避免“按代码文本匹配”进入修复链）
+            self._send_json(409, {
+                "ok": False,
+                "error": "静态扫描仅作线索，不建单；请基于运行证据生成候选/工单（I9e）"})
             return
 
         if parsed.path == "/api/tickets/candidates":

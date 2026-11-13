@@ -372,19 +372,32 @@ def calibrate_round(cfg_mon: dict, caldir: Path | None = None,
     """
     from upi.core.floor_check import resolve_noise_basis
     prof = active_profile()
-    out = {"channel": "calibrate", "blindspot": None, "thresholds": None}
+    out = {"channel": "calibrate", "blindspot": None, "thresholds": None,
+           "noise_basis": None}
     _clean = prof.clean_subject
     basis = resolve_noise_basis(_clean, bool(_clean))
+    out["noise_basis"] = basis
     out["fixtures"] = prof.fixture_universe()   # 留痕用：这轮到底采了哪些机制
-    if basis == "L0":
-        out["blindspot"] = ("本工程档案未配噪声基准（clean_subject 为空）："
-                            "噪声标定需要一个低活动的基准场景来量抖动，没有它就没有可标的量。"
-                            "出路二选一：① 给档案配一个基准场景（如主菜单/空场景）；"
-                            "② 不标定，只用绝对下限腿（界面 f 配表）——此时相对检出"
-                            "一律落 insufficient_evidence，误报率 not_measurable")
-        return out
     workdir = caldir or (ROOT / prof.cal_dir_rel)
     workdir.mkdir(parents=True, exist_ok=True)
+    if basis == "L0":
+        # 没有噪声基准：不采样本轮（省一次十几分钟的编辑器占用），直接写 L0 占位。
+        # 相对判据明确不可用，绝对线照常工作（I9d：降级，不是拒判）。
+        import hashlib
+        bdir = baselines_dir or (ROOT / prof.baselines_dir_rel)
+        bdir.mkdir(parents=True, exist_ok=True)
+        doc = {"source": "l0-inline",
+               "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "protocol": {"noise_basis": "L0"},
+               "noise_basis": "L0", "thresholds": {},
+               "note": ("无噪声基准：只写绝对线占位，未采样；"
+                        "相对判据一律 insufficient_evidence，误报率 not_measurable。")}
+        h = hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()[:12]
+        fp = bdir / f"thresholds_{h}.json"
+        fp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        out["thresholds"] = str(fp)
+        out["merge_output"] = ["L0：跳过采样，仅写占位阈值"]
+        return out
     cmd = [sys.executable, str(ROOT / "scripts" / "m1_multiwin.py"),
            "--session", "full", "--windows", str(int(cfg_mon.get("windows", 4))),
            "--caldir", str(workdir)]

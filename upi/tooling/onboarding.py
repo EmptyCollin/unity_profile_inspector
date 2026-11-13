@@ -204,7 +204,7 @@ def calibration_next_steps(prof: ProjectProfile) -> list[str]:
                      "（无标定 ⇒ 相对判定不可信，UI 会停在 uncalibrated，§8.1）")
     if prof.clean_subject:
         steps.append(f"噪声基准 = {prof.clean_subject}：采束时必须同轮在场，"
-                     "缺它按采集失败拒判（L2 前提，不降级）")
+                     f"缺它按 L0 处理（只出绝对线，不拒标）")
     else:
         steps.append("未配噪声基准 ⇒ L0：只出绝对下限与发作线，"
                      "误报率 not_measurable（不许留空冒充 0）")
