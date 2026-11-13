@@ -22,6 +22,7 @@ class CaseState:
     reason: str = ""
     snapshot_ref: str = ""
     patch_id: str = ""
+    ticket_id: str = ""
 
     def can_attempt(self) -> bool:
         return self.status not in ("verified", "failed", "skipped") \
