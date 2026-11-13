@@ -209,7 +209,16 @@ def main() -> int:
         case.remaining_sites = [f"{pat}: {', '.join(files)}"
                                 for pat, files in sa.items()]
         print("verify", case.case_id, v.status, v.reason)
-        return v.status
+        from upi.core.repair_loop import Observation
+        import hashlib
+        pl = plans.get(case.case_id)
+        dh = hashlib.sha256(
+            json.dumps(pl.model_dump() if pl else {}, sort_keys=True,
+                       ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+        return Observation(
+            verdict=v.status, target_gone=gone, new_clusters=new,
+            sites_remaining=sum(len(x) for x in sa.values()),
+            reason=v.reason, diff_hash=dh)
 
     def rollback(case):
         return X._git_reset(p, bases.get(case.case_id, ""))

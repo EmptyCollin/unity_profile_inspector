@@ -79,8 +79,10 @@ def _read_snippets(project_root: Path, anchors: list[str], *,
         if method:
             m = method.split(".")[-1]
             import re as _re
-            decl = _re.compile(r"\b(?:void|bool|int|float|string|IEnumerator)\s+"
-                               + _re.escape(m) + r"\s*\(")
+            decl = _re.compile(
+                r"\b(?:void|bool|int|float|string|IEnumerator|"
+                r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\])\s+"
+                + _re.escape(m) + r"\s*\(")
             for i, ln in enumerate(lines):
                 if decl.search(ln):
                     start = i
@@ -100,8 +102,10 @@ def _read_snippets(project_root: Path, anchors: list[str], *,
                 if started and depth <= 0:
                     end = j + 1
                     break
-        lo = max(0, start - before)
+        lo = start if method else max(0, start - before)
         hi = end if end is not None else min(len(lines), start + after)
+        if end is not None and (end - start) <= 6:
+            hi = min(len(lines), end + after)
         chunks.append(f"### {f}（行 {lo+1}-{hi}）\n" + "\n".join(lines[lo:hi]))
     return "\n\n".join(chunks), texts
 

@@ -8,10 +8,11 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from upi.core.repair_queue import CaseState, RepairQueue
+from upi.core.repair_loop import Observation, decide_next
 
 PlanFn = Callable[[CaseState], bool]
 ApplyFn = Callable[[CaseState], bool]
-VerifyFn = Callable[[CaseState], str]
+VerifyFn = Callable[[CaseState], object]
 RollbackFn = Callable[[CaseState], bool]
 
 
@@ -46,22 +47,37 @@ def run_queue(queue: RepairQueue, *, plan: PlanFn, apply: ApplyFn,
             queue.mark(case.case_id, "failed", reason="apply_failed")
             res.events.append({"case": case.case_id, "status": "apply_failed"})
             continue
-        status = str(verify(case) or "failed")
-        if status == "verified":
+        raw = verify(case)
+        if isinstance(raw, Observation):
+            obs = raw
+        else:
+            obs = Observation(str(raw or "failed"), reason=str(raw or ""))
+        seen = getattr(case, "_seen_hashes", set())
+        action = decide_next(obs, attempts=case.attempts,
+                             max_attempts=case.max_attempts,
+                             seen_hashes=seen)
+        case.last_action = action
+        if obs.diff_hash:
+            seen.add(obs.diff_hash)
+            setattr(case, "_seen_hashes", seen)
+        if action == "verified" or obs.verdict == "verified":
             queue.mark(case.case_id, "verified", verdict="verified")
             res.events.append({"case": case.case_id, "status": "verified"})
             continue
         # 未通过：只回滚这个病例
         rollback(case)
-        if case.attempts < case.max_attempts:
+        if action in ("refine_same_root", "alternative_patch",
+                      "fix_remaining_sites") and case.attempts < case.max_attempts:
             queue.mark(case.case_id, "diagnosed",
-                       reason=f"{status};retry",
-                       verdict=status)
-            res.events.append({"case": case.case_id, "status": status,
+                       reason=f"{obs.verdict};{action}",
+                       verdict=obs.verdict)
+            res.events.append({"case": case.case_id, "status": obs.verdict,
+                               "action": action,
                                "retry": case.attempts + 1})
             continue
         queue.mark(case.case_id,
-                   "partial_fix" if status == "partial_fix" else "failed",
-                   reason=status, verdict=status)
-        res.events.append({"case": case.case_id, "status": status})
+                   "partial_fix" if obs.verdict == "partial_fix" else "failed",
+                   reason=obs.reason or obs.verdict, verdict=obs.verdict)
+        res.events.append({"case": case.case_id, "status": obs.verdict,
+                           "action": action})
     return res

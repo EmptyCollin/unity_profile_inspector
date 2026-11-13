@@ -24,6 +24,7 @@ class CaseState:
     patch_id: str = ""
     ticket_id: str = ""
     remaining_sites: list[str] = field(default_factory=list)
+    last_action: str = ""
 
     def can_attempt(self) -> bool:
         return self.status not in ("verified", "failed", "skipped") \

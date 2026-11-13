@@ -65,7 +65,8 @@ def _scope(text: str, needle: str) -> str:
         return text
     head = text[:idx]
     starts = list(re.finditer(
-        r"\b(?:void|bool|int|float|string|IEnumerator)\s+\w+\s*\(", head))
+        r"\b(?:void|bool|int|float|string|IEnumerator|"
+        r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\])\s+\w+\s*\(", head))
     if not starts:
         return text
     start = starts[-1].start()
