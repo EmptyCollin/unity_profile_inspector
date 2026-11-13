@@ -149,7 +149,8 @@ def main() -> int:
             return False
         pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
                               candidate_card=cards.get(case.case_id, ""),
-                              remaining_sites=case.remaining_sites)
+                              remaining_sites=case.remaining_sites,
+                              strategy=case.last_action)
         print("plan", case.case_id, bool(pl), meta.get("error", ""))
         plan_errors[case.case_id] = meta
         if pl is None:

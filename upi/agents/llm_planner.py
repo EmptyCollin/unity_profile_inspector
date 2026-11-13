@@ -43,6 +43,9 @@ code_anchors: {anchors}
 ## 上次未覆盖的同类站点
 {remaining_sites}
 
+## 本次修复策略
+{strategy}
+
 ## 相关源码（当前工程，未修改）
 {source}
 
@@ -186,7 +189,8 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                max_rounds: int = 3, history: str = "",
                candidate_card: str = "",
                retry_insufficient: bool = False,
-               remaining_sites: list[str] | None = None) -> tuple[Optional[EditPlan], dict]:
+               remaining_sites: list[str] | None = None,
+               strategy: str = "") -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -202,6 +206,7 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
         candidate_card=(candidate_card or "（无额外候选统计）"),
         remaining_sites=("\n".join(remaining_sites) if remaining_sites
                          else "（无）"),
+        strategy=(strategy or "首次尝试：给最小结构修复"),
         source=source)
     meta = {"rounds": 0, "tokens_in": 0, "tokens_out": 0}
     last_err = ""
