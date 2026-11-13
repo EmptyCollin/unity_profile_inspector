@@ -109,3 +109,6 @@ test_project/
 baselines/
 
 knowledge/*.db
+
+calibration/
+dashboard/
