@@ -94,6 +94,8 @@ def main() -> int:
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--project-id", default="test_project")
+    ap.add_argument("--baselines", type=int, default=3,
+                    help="修复前同协议基线次数（<2 则无法 verified）")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -101,6 +103,8 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     chain: list[dict] = []
     t_start = time.time()
+    baseline_meta: dict = {"ran": False, "count": 0, "hits": 0,
+                           "reason": "尚未运行基线"}
 
     def mark(step: str, status: str = "ok", detail: str = "") -> None:
         chain.append({"step": step, "status": status,
@@ -110,25 +114,35 @@ def main() -> int:
     def save_chain() -> None:
         (run_dir / "chain.json").write_text(json.dumps(
             {"steps": chain, "backtracks": max(0, len(run.attempts) - 1),
-             "baseline": {"ran": False,
-                          "reason": "本场只做单次 replay 复验；未跑 3 次基线，"
-                                    "所以 verdict=observed 而非 verified"}},
+             "baseline": baseline_meta},
             ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 1) 证据采集（r 轻采 → 选窗 → r′ 窗口深采）
-    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "capability_run.py"),
-                        "--project", str(p), "--project-id", a.project_id,
-                        "--replay", a.replay, "--no-save", "--two-pass"],
-                       cwd=str(ROOT), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=2400)
-    print("capture:", (r.stdout or r.stderr)[-300:])
-    mark("capture(r+r')", "ok" if r.returncode == 0 else "failed",
-         (r.stdout or r.stderr)[-160:])
-    if r.returncode != 0:
-        return 1
+    # 1) 修复前基线：同协议 replay 跑 N 次（默认 3）
     from upi.core.evidence_diagnosis import candidates_from_latest
-    _pre_cands, _, _ = candidates_from_latest(p, limit=12)
-    before_roots0 = {str(c.root_cause).split(":", 1)[-1] for c in _pre_cands}
+    baseline_runs: list[dict] = []
+    n_base = max(1, int(a.baselines))
+    for bi in range(n_base):
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
+             "--project", str(p), "--project-id", a.project_id,
+             "--replay", a.replay, "--no-save", "--two-pass"],
+            cwd=str(ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=2400)
+        if r.returncode != 0:
+            mark(f"baseline#{bi + 1}", "failed",
+                 (r.stdout or r.stderr)[-160:])
+            save_chain()
+            return 1
+        _cands, _, _ = candidates_from_latest(p, limit=12)
+        roots = sorted({str(c.root_cause).split(":", 1)[-1] for c in _cands})
+        baseline_runs.append({"index": bi, "roots": roots})
+        mark(f"baseline#{bi + 1}", "ok", f"roots={len(roots)}")
+        print(f"baseline #{bi + 1}: roots={len(roots)}")
+    before_roots0 = set(baseline_runs[-1]["roots"])
+    baseline_meta.update({"ran": True, "count": len(baseline_runs),
+                          "reason": f"已跑 {len(baseline_runs)} 次同协议基线"})
+    (run_dir / "baselines.json").write_text(json.dumps(
+        baseline_runs, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 2) detect → diagnose（live LLM）
     from upi.core.project_store import knowledge_db as _knowledge_db
@@ -191,6 +205,16 @@ def main() -> int:
         print("no LLM plan")
         save_chain()
         return 1
+    target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
+    baseline_hits = sum(1 for b in baseline_runs
+                        if target_key0 in set(b["roots"]))
+    baseline_ok = baseline_hits >= 2 and len(baseline_runs) >= 3
+    baseline_meta.update({"hits": baseline_hits, "target": target_key0,
+                          "ok": baseline_ok})
+    (run_dir / "baselines.json").write_text(json.dumps(
+        {"runs": baseline_runs, "target": target_key0,
+         "hits": baseline_hits, "ok": baseline_ok},
+        ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 5) 工单（人=用户代理，全部批准）
     store = TicketStore()
@@ -259,7 +283,8 @@ def main() -> int:
         new_roots = sorted(after_roots - before_roots - {target_rc})
         ladder = _ladder("regression", replay_once=lambda: {
             "protocol_ok": True, "target_gone": target_gone,
-            "new_clusters": new_roots, "guards_ok": True})
+            "new_clusters": new_roots, "guards_ok": True},
+            baselines=lambda: baseline_ok)
         ladder_status = ladder.status
         print("ladder:", ladder.status, ladder.reason)
         mark("verify#1", ladder.status, ladder.reason[:160])
@@ -361,9 +386,13 @@ def main() -> int:
             tkey = str((hsel or {}).get("root_cause") or "").split(":", 1)[-1]
             gone = tkey not in after_k
             new = sorted(after_k - before_roots - {tkey})
+            retry_hits = sum(1 for b in baseline_runs
+                             if tkey in set(b["roots"]))
             l2 = evaluate("regression", replay_once=lambda: {
                 "protocol_ok": True, "target_gone": gone,
-                "new_clusters": new, "guards_ok": True})
+                "new_clusters": new, "guards_ok": True},
+                baselines=lambda: (retry_hits >= 2
+                                   and len(baseline_runs) >= 3))
             ladder_status, target_gone, new_roots = l2.status, gone, new
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
             mark(f"verify#{attempt_no}", l2.status,
