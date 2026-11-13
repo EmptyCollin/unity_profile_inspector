@@ -276,16 +276,24 @@ def main() -> int:
             nonlocal ladder_status, target_gone, new_roots, retry_round
             retry_round += 1
             cfg = N.load_config(ROOT / "llm_config.yaml")
-            hsel = next_untried(hs, tried)
-            if hsel is None:
-                return {"error": "no_new_hypothesis"}
-            np, _m = plan_issue(cfg, _issue(d["issue"]), hsel, p)
+            np, hsel = None, None
+            for h in hs:
+                if str(h.get("root_cause") or "") in tried:
+                    continue
+                cand, _m = plan_issue(cfg, _issue(d["issue"]), h, p)
+                if cand is None:
+                    tried.add(str(h.get("root_cause") or ""))
+                    continue
+                hh = _diff_hash(cand)
+                if is_stagnant(hh, seen_hashes):
+                    tried.add(str(h.get("root_cause") or ""))
+                    continue
+                np, hsel = cand, h
+                break
             if np is None:
-                return {"error": "no_plan_for_hypothesis"}
+                return {"error": "no_plan_for_untried"}
             tried.add(str(hsel.get("root_cause") or ""))
             hh = _diff_hash(np)
-            if is_stagnant(hh, seen_hashes):
-                return {"error": "stagnant: 同一 diff 重复"}
             seen_hashes.add(hh)
             tid2 = ("bt-" + time.strftime("%Y%m%d_%H%M%S")
                     + f"-r{retry_round}")

@@ -312,7 +312,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
         "compiled": len({r["finding_id"] for r in repair_rows if r["compile_ok"]}),
         "runnable": len({r["finding_id"] for r in repair_rows if r["runnable"]}),
         "effective": len({r["finding_id"] for r in repair_rows if r["effective"]}),
-        "attempts": len(repair_rows),
+        "attempts": len(run.repairs),
         "rows": repair_rows,
     }
     # 可复现：同一协议指纹、且在本考卷生成之后的多次运行，findings 位置集合是否一致
