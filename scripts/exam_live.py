@@ -305,73 +305,77 @@ def main() -> int:
         cp.save(step="plan", status="done",
                 data={"plan": plan.model_dump(),
                       "plan_hyp": (plan_hyp or {})})
-        target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
-    if resume_eval and cp.done("execute#1"):
-        print("resume: execute already done；为避免重复写入，拒绝从执行后续跑")
-        save_chain()
-        return 1
-        baseline_hits = sum(1 for b in baseline_runs
-                            if target_key0 in set(b["roots"]))
-        baseline_ok = baseline_hits >= 2 and len(baseline_runs) >= 3
-        baseline_meta.update({"hits": baseline_hits, "target": target_key0,
-                              "ok": baseline_ok})
-        (run_dir / "baselines.json").write_text(json.dumps(
-            {"runs": baseline_runs, "target": target_key0,
-             "hits": baseline_hits, "ok": baseline_ok},
-            ensure_ascii=False, indent=2), encoding="utf-8")
+    target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
+    baseline_hits = sum(1 for b in baseline_runs
+                        if target_key0 in set(b["roots"]))
+    baseline_ok = baseline_hits >= 2 and len(baseline_runs) >= 3
+    baseline_meta.update({"hits": baseline_hits, "target": target_key0,
+                          "ok": baseline_ok})
+    (run_dir / "baselines.json").write_text(json.dumps(
+        {"runs": baseline_runs, "target": target_key0,
+         "hits": baseline_hits, "ok": baseline_ok},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    resume_verify_only = bool(resume_eval and cp.done("execute#1"))
 
-    # 5) 工单（人=用户代理，全部批准）
-    store = TicketStore()
-    tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-llm"
-    iid = "it-llm"
-    item = TicketItem(item_id=iid, cluster_id="llm", metric="llm",
-                      shape="llm_plan", kind="llm", count=1,
-                      pattern_id="llm", playbook_id=plan.playbook_id,
-                      permission_tier=plan.permission_tier,
-                      plan=plan.model_dump(), status="pending",
-                      item_approve_token=_item_token(tid, iid))
-    t = BatchTicket(ticket_id=tid, project_id="paper", mode="regression",
-                    created_at=E.now(), status="awaiting_approval",
-                    items=[item], approve_token=_token(tid, [item]))
-    store.save(t)
-    print("approve batch:", approve(t, approver="user",
-                                    note="用户授权：全部批准",
-                                    token=t.approve_token))
-    if item.permission_tier != "auto":
-        print("approve item:", approve_item(
-            t, iid, approver="user", note="用户授权：全部批准",
-            token=item.item_approve_token))
-    store.save(t)
+    if resume_verify_only:
+        out = SimpleNamespace(status="done", items=[SimpleNamespace(
+            status=str(cp.load().get("item_status", "applied_unverified")),
+            error="")])
+        mark("resume", "ok", "verify-only：复用执行结果，不重复 apply")
+    else:
+        # 5) 工单（人=用户代理，全部批准）
+        store = TicketStore()
+        tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-llm"
+        iid = "it-llm"
+        item = TicketItem(item_id=iid, cluster_id="llm", metric="llm",
+                          shape="llm_plan", kind="llm", count=1,
+                          pattern_id="llm", playbook_id=plan.playbook_id,
+                          permission_tier=plan.permission_tier,
+                          plan=plan.model_dump(), status="pending",
+                          item_approve_token=_item_token(tid, iid))
+        t = BatchTicket(ticket_id=tid, project_id="paper", mode="regression",
+                        created_at=E.now(), status="awaiting_approval",
+                        items=[item], approve_token=_token(tid, [item]))
+        store.save(t)
+        print("approve batch:", approve(t, approver="user",
+                                        note="用户授权：全部批准",
+                                        token=t.approve_token))
+        if item.permission_tier != "auto":
+            print("approve item:", approve_item(
+                t, iid, approver="user", note="用户授权：全部批准",
+                token=item.item_approve_token))
+        store.save(t)
 
-    def snap_fn(attempt, project, scene, fp):
-        return SN.snapshot(attempt, project, scene, fp,
-                           root=Path(project).resolve())
+        def snap_fn(attempt, project, scene, fp):
+            return SN.snapshot(attempt, project, scene, fp,
+                               root=Path(project).resolve())
 
-    def _replan(item, oldplan, err):
-        """编译失败回喂：换一个假设重新出补丁（考试模式最多 2 次）。"""
-        cfg = N.load_config(ROOT / "llm_config.yaml")
-        issue_obj = _issue(d["issue"])
-        for h in hs:
-            np, _m = plan_issue(cfg, issue_obj, h, p)
-            if np is not None:
-                return np
-        return None
+        def _replan(item, oldplan, err):
+            """编译失败回喂：换一个假设重新出补丁（考试模式最多 2 次）。"""
+            cfg = N.load_config(ROOT / "llm_config.yaml")
+            issue_obj = _issue(d["issue"])
+            for h in hs:
+                np, _m = plan_issue(cfg, issue_obj, h, p)
+                if np is not None:
+                    return np
+            return None
 
-    ex = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
-                             scene=p / "Assets/Scenes/00_Bootstrap.unity",
-                             mode="regression", replan=_replan)
-    out = ex.execute(t)
-    mark("execute#1", "ok" if out.items[0].status in
-         ("applied_unverified",) else "failed",
-         f"{out.items[0].status} {out.items[0].error[:80]}")
-    cp.save(step="execute#1", status="done",
-            data={"item_status": out.items[0].status})
+        ex = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
+                                 scene=p / "Assets/Scenes/00_Bootstrap.unity",
+                                 mode="regression", replan=_replan)
+        out = ex.execute(t)
+        mark("execute#1", "ok" if out.items[0].status in
+             ("applied_unverified",) else "failed",
+             f"{out.items[0].status} {out.items[0].error[:80]}")
+        cp.save(step="execute#1", status="done",
+                data={"item_status": out.items[0].status})
     print("execute:", out.status)
     for it in out.items:
         print(" item:", it.status, it.error[:100])
 
     # 6) 修复后 replay 一次：目标还在？出现新问题？（先不烧 3 次基线）
     ladder_status, target_gone, new_roots = "unverified", None, []
+    ladder_stop_reason = ""
     try:
         from upi.core.verify_ladder import evaluate as _ladder
         before_roots = before_roots0
@@ -382,6 +386,7 @@ def main() -> int:
                                 if r2 is not None else "failed"))
         if not okcap:
             ladder_status = "unverified"
+            ladder_stop_reason = "tool_error"
             mark("verify#1", "unverified", "post-capture 失败（已重试）；降级 unverified")
             raise RuntimeError("post-capture unavailable")
         after_cands, _, _ = candidates_from_latest(p, limit=12)
@@ -394,6 +399,7 @@ def main() -> int:
             "new_clusters": new_roots, "guards_ok": True},
             baselines=lambda: baseline_ok)
         ladder_status = ladder.status
+        ladder_stop_reason = ladder.status
         print("ladder:", ladder.status, ladder.reason)
         mark("verify#1", ladder.status, ladder.reason[:160])
         cp.save(step="verify#1", status="done",
@@ -405,14 +411,15 @@ def main() -> int:
 
     # 7) 受控 Agent loop：replay 一次不干净 → 换方案再试一次（regression 预算内）
     target = findings[0] if findings else None
-    if target is not None:
+    if target is not None and not resume_verify_only:
         run.repairs.append(RepairRecord(
             finding_id=target.finding_id, plan_id=plan.playbook_id,
             files=plan.touched_assets,
             compile_ok=(out.items[0].status in ("applied", "applied_unverified")),
             runnable=None, verdict=ladder_status,
             attempt_no=1, ticket_id=t.ticket_id,
-            diff_hash=_diff_hash(plan), stop_reason=ladder_status))
+            diff_hash=_diff_hash(plan),
+            stop_reason=(ladder_stop_reason or ladder_status)))
         run.attempts.append({
             "attempt_no": 1, "hypothesis": str((plan_hyp or {}).get("root_cause") or ""),
             "plan_id": plan.playbook_id, "diff_hash": _diff_hash(plan),
@@ -425,7 +432,8 @@ def main() -> int:
     seen_hashes = {_diff_hash(plan)}
     retry_round = 0
     max_steps = max_attempts("regression")
-    if ladder_status == "needs_recheck" and target is not None:
+    if (ladder_status == "needs_recheck" and target is not None
+            and not resume_verify_only):
         from upi.core.agent_loop import run_loop
 
         def _decide(state):
@@ -578,6 +586,9 @@ def main() -> int:
                           else "最终不可用：编译或启动失败")
     mark("usability", "ok" if run.usability_ok else "failed",
          f"compile={compiled} smoke={ok_smoke}")
+    if resume_verify_only and run.repairs:
+        run.repairs[-1].verdict = ladder_status
+        run.repairs[-1].stop_reason = ladder_stop_reason or ladder_status
     for r in run.repairs:
         if r.compile_ok:
             r.runnable = ok_smoke
