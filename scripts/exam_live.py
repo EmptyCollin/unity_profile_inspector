@@ -104,6 +104,9 @@ def main() -> int:
     print("capture:", (r.stdout or r.stderr)[-300:])
     if r.returncode != 0:
         return 1
+    from upi.core.evidence_diagnosis import candidates_from_latest
+    _pre_cands, _, _ = candidates_from_latest(p, limit=12)
+    before_roots0 = {str(c.root_cause).split(":", 1)[-1] for c in _pre_cands}
 
     # 2) detect → diagnose（live LLM）
     nd = N.make_nodes(run_dir, live_llm=True,
@@ -131,7 +134,7 @@ def main() -> int:
     # 3) 写 findings（LLM 诊断产物）
     findings = findings_from_hypotheses(run_id, hs, archive)
     run = RunFindings(
-        run_id=run_id, project_id=a.project_id, mode="resident",
+        run_id=run_id, project_id=a.project_id, mode="regression",
         protocol_fingerprint=fp_digest(fp_build(
             replay_script_hash=file_hash(Path(a.replay)), data_tier="A2",
             editor_mode="gui")),
@@ -143,11 +146,13 @@ def main() -> int:
     # 4) LLM 规划（第一个能出方案的假设）
     plan = None
     meta = {}
+    plan_hyp = None
     for h in hs:
         plan, meta = plan_issue(N.load_config(ROOT / "llm_config.yaml"),
                                 _issue(d["issue"]), h, p)
         print("plan:", h.get("root_cause"), "->", bool(plan), meta.get("error", ""))
         if plan is not None:
+            plan_hyp = h
             break
     if plan is None:
         print("no LLM plan")
@@ -163,7 +168,7 @@ def main() -> int:
                       permission_tier=plan.permission_tier,
                       plan=plan.model_dump(), status="pending",
                       item_approve_token=_item_token(tid, iid))
-    t = BatchTicket(ticket_id=tid, project_id="paper", mode="resident",
+    t = BatchTicket(ticket_id=tid, project_id="paper", mode="regression",
                     created_at=E.now(), status="awaiting_approval",
                     items=[item], approve_token=_token(tid, [item]))
     store.save(t)
@@ -180,27 +185,72 @@ def main() -> int:
         return SN.snapshot(attempt, project, scene, fp,
                            root=Path(project).resolve())
 
+    def _replan(item, oldplan, err):
+        """编译失败回喂：换一个假设重新出补丁（考试模式最多 2 次）。"""
+        cfg = N.load_config(ROOT / "llm_config.yaml")
+        issue_obj = _issue(d["issue"])
+        for h in hs:
+            np, _m = plan_issue(cfg, issue_obj, h, p)
+            if np is not None:
+                return np
+        return None
+
     ex = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
-                             scene=p / "Assets/Scenes/00_Bootstrap.unity")
+                             scene=p / "Assets/Scenes/00_Bootstrap.unity",
+                             mode="regression", replan=_replan)
     out = ex.execute(t)
     print("execute:", out.status)
     for it in out.items:
         print(" item:", it.status, it.error[:100])
 
-    # 6) 修复记账 + 冒烟
+    # 6) 修复后 replay 一次：目标还在？出现新问题？（先不烧 3 次基线）
+    ladder_status, target_gone, new_roots = "unverified", None, []
+    try:
+        from upi.core.verify_ladder import evaluate as _ladder
+        before_roots = before_roots0
+        # 修复后再采一次（同 replay、同协议）
+        r2 = subprocess.run([sys.executable, str(ROOT / "scripts" / "capability_run.py"),
+                             "--project", str(p), "--project-id", a.project_id,
+                             "--replay", a.replay, "--no-save"],
+                            cwd=str(ROOT), capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=1800)
+        print("post-capture:", (r2.stdout or r2.stderr)[-160:])
+        after_cands, _, _ = candidates_from_latest(p, limit=12)
+        after_roots = {str(c.root_cause).split(":", 1)[-1] for c in after_cands}
+        target_rc = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
+        target_gone = target_rc not in after_roots
+        new_roots = sorted(after_roots - before_roots - {target_rc})
+        ladder = _ladder("regression", replay_once=lambda: {
+            "protocol_ok": True, "target_gone": target_gone,
+            "new_clusters": new_roots, "guards_ok": True})
+        ladder_status = ladder.status
+        print("ladder:", ladder.status, ladder.reason)
+        (run_dir / "verify_ladder.json").write_text(
+            ladder.model_dump_json(indent=2), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        print("ladder error:", type(e).__name__, e)
+
+    # 7) 最终可用性门禁：编译 + 启动冒烟
     ok_smoke = False
+    compiled = False
     try:
         import capability_run as CR
-        ok_smoke = bool(CR._smoke(p).get("ok"))
+        st = CR._compile(p)
+        compiled = (not st.get("failed")
+                    and st.get("status") in {"completed", "up_to_date"})
+        ok_smoke = bool(CR._smoke(p).get("ok")) if compiled else False
     except Exception as e:  # noqa: BLE001
-        print("smoke error:", type(e).__name__, e)
+        print("usability error:", type(e).__name__, e)
+    run.usability_ok = bool(compiled and ok_smoke)
+    run.usability_note = ("最终可编译/可启动" if run.usability_ok
+                          else "最终不可用：编译或启动失败")
     target = findings[0] if findings else None
     if target is not None:
         run.repairs = [RepairRecord(
             finding_id=target.finding_id, plan_id=plan.playbook_id,
-            files=plan.touched_assets, compile_ok=(out.items[0].status in
-                                                   ("applied", "applied_unverified")),
-            runnable=ok_smoke, verdict="unverified", metric_delta=None)]
+            files=plan.touched_assets,
+            compile_ok=(out.items[0].status in ("applied", "applied_unverified")),
+            runnable=ok_smoke, verdict=ladder_status, metric_delta=None)]
     save_run(run)
 
     # 7) 评分（与 Lab 同口径）
