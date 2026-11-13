@@ -38,6 +38,10 @@ def evaluate(mode: str, *,
         return LadderResult(mode=mode, status="unverified",
                             replay_ok=False,
                             reason="协议指纹不一致，禁止对比")
+    if once.get("not_reproduced"):
+        return LadderResult(mode=mode, status="not_reproduced",
+                            replay_ok=True,
+                            reason="同 replay 未复现目标：记 not_reproduced，不硬报")
     target_gone = bool(once.get("target_gone"))
     new = [str(x) for x in (once.get("new_clusters") or [])]
     guards_ok = bool(once.get("guards_ok", True))

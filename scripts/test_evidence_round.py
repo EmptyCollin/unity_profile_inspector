@@ -107,7 +107,8 @@ try:
 finally:
     FJ.build_hypotheses_for_issue = real
 ok("resident 只补采一次", len(collected) == 1, len(collected))
-ok("仍定不了因 → needs_human", r2.get("route") == "needs_human", str(r2)[:120])
+ok("仍定不了因 → insufficient_evidence",
+   r2.get("route") == "insufficient_evidence", str(r2)[:120])
 
 print(f"\n==== 证据补采回路测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

@@ -48,7 +48,8 @@ issue = Issue(signature={"dim": "gc", "metric": "gc_alloc_per_frame",
 nd = make_nodes(TMP / "run1", live_llm=False, knowledge_db=TMP / "k1.db")
 r = nd["diagnose"]({"issue": {"detector": "DET-CPU-GC-FRAMEALLOC",
                               "issue_model": issue.model_dump()}})
-ok("空证据 ⇒ needs_human", r.get("route") == "needs_human", str(r)[:160])
+ok("空证据 ⇒ insufficient_evidence",
+   r.get("route") == "insufficient_evidence", str(r)[:160])
 ok("空证据 ⇒ 文案写明 insufficient_evidence",
    "insufficient_evidence" in str(r.get("error", "")))
 
@@ -75,7 +76,7 @@ nd2 = make_nodes(TMP / "run2", live_llm=False, knowledge_db=TMP / "k2.db")
 r2 = nd2["diagnose"]({"issue": {"issue_model": issue.model_dump(),
                                 "source": "evidence"},
                       "project": str(PROJECT)})
-ok("有证据但离线 ⇒ 拒下结论", r2.get("route") == "needs_human"
+ok("有证据但离线 ⇒ not_measured", r2.get("route") == "not_measured"
    and "未测推理" in str(r2.get("error", "")), str(r2)[:160])
 
 # ── 真 LLM 诊断（打桩，不联网）──────────────────────────────
@@ -128,12 +129,12 @@ try:
        bool((d.get("issue") or {}).get("issue_model", {}).get("evidence"))
        and bool((d.get("issue") or {}).get("anchor")))
     g3 = nd3["diagnose"]({"issue": d["issue"]})
-    ok("离线诊断被拒（必须 LLM）", g3.get("route") == "needs_human"
+    ok("离线诊断 ⇒ not_measured", g3.get("route") == "not_measured"
        and "未测推理" in str(g3.get("error", "")), str(g3)[:120])
     p3 = nd3["plan"]({"issue": d["issue"],
                       "hypotheses": g3.get("hypotheses") or [],
                       "records": []})
-    ok("离线规划必须被拒（必须 LLM）", p3.get("route") == "needs_human"
+    ok("离线规划 ⇒ not_measured", p3.get("route") == "not_measured"
        and "LLM" in str(p3.get("error", "")), str(p3)[:160])
 
     # 同一 Issue 走 LLM 诊断 + LLM 规划（两者都打桩，不联网）

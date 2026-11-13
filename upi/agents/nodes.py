@@ -152,9 +152,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                         "issue": issue, "route": "proceed",
                         "detection_ref": str(ev_path)}
             if bundle is not None:
-                return {"route": "needs_human",
+                return {"route": "insufficient_evidence",
+                        "exit_code": "insufficient_evidence",
                         "error": "证据包存在但没有工程内候选（证据不足，I2）"}
-            return {"route": "needs_human",
+            return {"route": "insufficient_evidence",
+                    "exit_code": "insufficient_evidence",
                     "error": ("insufficient_evidence：没有运行证据包"
                               "（先跑一轮证据采集；夹具束仅 legacy 开关可用）")}
 
@@ -167,7 +169,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         elif det is not None:
             issue = _rebuild_issue(det, issue_d)
         else:
-            return {"route": "needs_human",
+            return {"route": "insufficient_evidence",
+                    "exit_code": "insufficient_evidence",
                     "error": "Issue 既无 issue_model 也无已知 detector（I2）"}
         # 产品默认：诊断来自运行证据候选（不读夹具目录、不匹配代码文本）。
         ev_cands = []
@@ -183,13 +186,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
                                     f"证据候选读取失败：{type(e).__name__}: {e}\n")
         if not ev_cands:
-            return {"route": "needs_human",
+            return {"route": "insufficient_evidence",
+                    "exit_code": "insufficient_evidence",
                     "error": ("insufficient_evidence：没有运行证据候选"
                               "（不读夹具目录/代码正则；先跑一轮证据采集）"),
                     "tokens_used": 0}
         if not live_llm:
             # I10：诊断主体是 LLM；离线只做测量，不给“结论”
-            return {"route": "needs_human",
+            return {"route": "not_measured",
+                    "exit_code": "not_measured",
                     "error": "未测推理：诊断必须由 LLM 给出（live_llm=False）",
                     "tokens_used": 0,
                     "diagnose_source": "offline_not_measured"}
@@ -280,7 +285,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         from upi.core.attribution import route as attr_route
         decision = attr_route(hs)
         if decision == "needs_human":
-            return {"hypotheses": [h.model_dump() for h in hs], "route": "needs_human",
+            return {"hypotheses": [h.model_dump() for h in hs],
+                    "route": "insufficient_evidence",
+                    "exit_code": "insufficient_evidence",
                     "error": f"Top1 归因置信度低于门槛（attr_route={decision}）",
                     "tokens_used": tokens, "diagnose_source": diag_source}
         return {"hypotheses": [h.model_dump() for h in hs], "route": "proceed",
@@ -292,7 +299,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         tried = {r.get("root_cause") for r in st.get("records", [])
                  if r.get("kind") == "fix"}
         if not live_llm:
-            return {"route": "needs_human",
+            return {"route": "not_measured", "exit_code": "not_measured",
                     "error": "规划必须由 LLM 给出（live_llm=False ⇒ 未测推理）"}
         issue_d = st.get("issue") or {}
         det = next((d for d in DEFAULT_REGISTRY if d.id == issue_d.get("detector")),
@@ -302,13 +309,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         elif det is not None:
             issue = _rebuild_issue(det, issue_d)
         else:
-            return {"route": "needs_human", "error": "缺少 Issue 模型，无法规划"}
+            return {"route": "no_plan", "exit_code": "no_plan",
+                    "error": "缺少 Issue 模型，无法规划"}
         try:
             root = _prof().abs_project
         except Exception:  # noqa: BLE001
             root = st.get("project")
         if not root:
-            return {"route": "needs_human", "error": "未选择工程，无法规划"}
+            return {"route": "blocked", "exit_code": "blocked",
+                    "error": "未选择工程，无法规划"}
         from upi.agents.llm_planner import plan_issue
         cfg = load_config(ROOT / "llm_config.yaml")
         hist = ""
@@ -332,8 +341,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             if ep is not None:
                 return {"edit_plan": ep.model_dump(), "route": "proceed",
                         "llm_plan": meta}
-        return {"route": "needs_human",
-                "error": f"LLM 未给出可执行方案（试过 {len(tried)} 条），转人工"}
+        return {"route": "no_plan", "exit_code": "no_plan",
+                "error": f"LLM 未给出可执行方案（试过 {len(tried)} 条）"}
 
     def fix(st: dict) -> dict:
         ep = EditPlan(**st["edit_plan"])
@@ -665,6 +674,20 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         v = st.get("verdict")
         if v:
             final["verdict_status"] = v["status"] if isinstance(v, dict) else v.status
+        # I13d：任何终态都必须留下 exit.json（状态、原因、上下文）
+        try:
+            from upi.core.exits import record_exit
+            _route = str(st.get("route") or "")
+            _code = str(st.get("exit_code") or
+                        {"needs_human": "blocked", "proceed": "failed"}.get(
+                            _route, _route or "failed"))
+            record_exit(run_dir, stage="escalate", code=_code,
+                        reason=str(st.get("error") or _route or "terminal"),
+                        mode=mode, details={"route": _route,
+                                            "attempts": final["attempts"]})
+        except Exception as e:  # noqa: BLE001 — 出口落盘失败不阻断报告
+            E.atomic_write_text(run_dir / "exit_error.txt",
+                                f"出口落盘失败：{type(e).__name__}: {e}\n")
 
         # 未验证写入不得留在工程里（路由测试实测撞出的缺口）：预算拦停发生在
         # fix 写入**之后**、verify 之前——夹具会停在修复态，既污染后续检出

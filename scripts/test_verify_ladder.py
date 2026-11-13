@@ -24,6 +24,9 @@ ok("常驻永不 verified", r.status == "unverified", r.status)
 r = evaluate("regression", replay_once=lambda: {"target_gone": False})
 ok("目标仍在 → needs_recheck", r.status == "needs_recheck", r.status)
 
+r = evaluate("regression", replay_once=lambda: {"not_reproduced": True})
+ok("未复现 → not_reproduced", r.status == "not_reproduced", r.status)
+
 r = evaluate("regression", replay_once=lambda: {"target_gone": True,
                                                 "new_clusters": ["new-a"]})
 ok("出现新 cluster → needs_recheck", r.status == "needs_recheck"

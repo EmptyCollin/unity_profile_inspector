@@ -148,14 +148,16 @@ def _wrap(name: str, fn, tracer: Tracer):
 
 
 def _route_or(next_name: str):
-    """条件路由：needs_human 走 escalate，否则走既定节点。"""
+    """条件路由：任何终态出口走 escalate，否则走既定节点。"""
     def r(st: RunState) -> str:
-        return "escalate" if st.get("route") == "needs_human" else next_name
+        from upi.core.exits import is_terminal
+        return "escalate" if is_terminal(str(st.get("route") or "")) else next_name
     return r
 
 
 def _after_verify(st: RunState) -> str:
-    if st.get("route") == "needs_human":
+    from upi.core.exits import is_terminal
+    if is_terminal(str(st.get("route") or "")):
         return "escalate"
     v = st.get("verdict") or {}
     status = v.get("status") if isinstance(v, dict) else getattr(v, "status", None)
