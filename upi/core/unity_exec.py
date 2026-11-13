@@ -73,13 +73,19 @@ class UnityTicketExecutor:
                  execute_fn: ExecuteFn = default_execute,
                  observe_fn: ObserveFn = default_observe,
                  project: Optional[Path] = None,
-                 scene: Optional[Path] = None):
+                 scene: Optional[Path] = None,
+                 mode: str = "resident",
+                 replan=None):
         self.store = store
         self.snapshot_fn = snapshot_fn
         self.execute_fn = execute_fn
         self.observe_fn = observe_fn
         self.project = project or _profile().abs_project
         self.scene = scene if scene is not None else default_scene()
+        self.mode = mode
+        self.replan = replan
+        from upi.core.mode_caps import caps
+        self.caps = caps(mode)
 
     def _keep_commit(self, snap: Snapshot, ticket: BatchTicket, item: TicketItem) -> None:
         """把已 applied 的 patch 提交，保证下一 patch 的快照仍然干净。"""
@@ -137,34 +143,54 @@ class UnityTicketExecutor:
                 _pid = _profile().profile_id
             except Exception:  # noqa: BLE001 — 无激活工程时指纹标 unknown，不阻断执行
                 _pid = "unknown"
-            fp = f"resident:{_pid}:{item.cluster_id}"
-            try:
-                snap = self.snapshot_fn(attempt, self.project, self.scene, fp)
-                rep = self.execute_fn(
-                    plan, snap, project_path=self.project, scene_path=self.scene,
-                    approval_note=f"batch {ticket.ticket_id} approved by {ticket.approver}",
-                )
-                st = str((rep or {}).get("status") or "")
-                if st == "applied":
-                    self._keep_commit(snap, ticket, item)
-                    item.status = "applied_unverified"
-                    item.observation = self.observe_fn() or {}
-                    ticket.results.append({
-                        "item_id": item.item_id, "metric": item.metric,
-                        "status": item.status, "observation": item.observation,
-                    })
-                elif st == "compile_failed_rolled_back":
-                    item.status = "rolled_back"
-                    item.error = "compile_failed"
-                    stopped = True
-                else:
+            fp = f"{ticket.mode}:{_pid}:{item.cluster_id}"
+            retries = 0
+            while True:
+                try:
+                    snap = self.snapshot_fn(f"{attempt}-r{retries}",
+                                            self.project, self.scene, fp)
+                    rep = self.execute_fn(
+                        plan, snap, project_path=self.project, scene_path=self.scene,
+                        approval_note=(f"batch {ticket.ticket_id} approved by "
+                                       f"{ticket.approver}"),
+                    )
+                    st = str((rep or {}).get("status") or "")
+                    if st == "applied":
+                        self._keep_commit(snap, ticket, item)
+                        item.status = "applied_unverified"
+                        item.observation = self.observe_fn() or {}
+                        ticket.results.append({
+                            "item_id": item.item_id, "metric": item.metric,
+                            "status": item.status, "observation": item.observation,
+                        })
+                        break
+                    if st == "compile_failed_rolled_back":
+                        # I11b：编译失败回喂规划；有界重试后回滚，但继续下一个条目
+                        if (self.replan is not None
+                                and retries < self.caps.max_compile_retries):
+                            retries += 1
+                            newp = self.replan(
+                                item, plan,
+                                str((rep or {}).get("why") or "compile_failed"))
+                            if newp is not None:
+                                plan = newp
+                                item.plan = newp.model_dump()
+                                item.playbook_id = newp.playbook_id
+                                item.error = ""
+                                continue
+                        item.status = "rolled_back"
+                        item.error = "compile_failed（重试用尽，已回滚）"
+                        break
                     item.status = "failed"
-                    item.error = f"{st}: {str((rep or {}).get('why') or '')[:160]}"
+                    item.error = (f"{st}: "
+                                  f"{str((rep or {}).get('why') or '')[:160]}")
                     stopped = True
-            except Exception as e:  # noqa: BLE001
-                item.status = "failed"
-                item.error = f"{type(e).__name__}: {e}"[:200]
-                stopped = True
+                    break
+                except Exception as e:  # noqa: BLE001
+                    item.status = "failed"
+                    item.error = f"{type(e).__name__}: {e}"[:200]
+                    stopped = True
+                    break
         ticket.status = "done"
         self.store.save(ticket)
         return ticket

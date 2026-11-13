@@ -103,8 +103,35 @@ out2 = UnityTicketExecutor(store, snapshot_fn=snap, execute_fn=ex_bad,
                             observe_fn=obs, project=TMP,
                             scene=TMP / "s.tscene").execute(t2)
 ok("编译失败 rolled_back", out2.items[0].status == "rolled_back")
-ok("失败后停止", out2.items[1].status == "skipped")
-ok("只执行一个", len(called) == 1)
+ok("编译失败不阻断后续（I11b）", out2.items[1].status in
+   ("applied_unverified", "rolled_back"))
+ok("两条都执行（没有 stopped）", len(called) == 2)
+
+# 编译失败 → 回喂重规划一次 → 第二次成功（resident 上限 1）
+t2b = build_ticket(cs[:1], fp_store=fp, plan_provider=lambda c, pb: plan())
+approved(t2b)
+tries = []
+replans = []
+
+
+def ex_retry(plan, snap, **kw):
+    tries.append(1)
+    return ({"status": "compile_failed_rolled_back"} if len(tries) == 1
+            else {"status": "applied"})
+
+
+def replan(item, plan, err):
+    replans.append(err)
+    return plan
+
+
+out2b = UnityTicketExecutor(store, snapshot_fn=snap, execute_fn=ex_retry,
+                            observe_fn=obs, project=TMP,
+                            scene=TMP / "s.tscene", replan=replan).execute(t2b)
+ok("编译失败回喂重规划后成功",
+   out2b.items[0].status == "applied_unverified" and len(tries) == 2,
+   (out2b.items[0].status, len(tries)))
+ok("重规划被调用一次", len(replans) == 1, replans)
 
 # execute 抛异常：failed + 停止
 t3 = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: plan(), limit=8)
