@@ -43,6 +43,12 @@ code_anchors: {anchors}
 ## 相关源码（当前工程，未修改）
 {source}
 
+## 判断规则
+- 若源码里存在每帧创建/分配、但对象未被使用或可缓存/池化/移到初始化，直接给结构修复；
+- 局部临时对象若创建后只做 Apply/读取自身属性等自检、未参与渲染或状态，视为可删除浪费；
+- 不要因为缺少“耗时占比”就拒绝；源码结构本身就是证据；
+- 只改数字/循环上界不算修复。
+
 ## 输出 JSON
 {{"why":"一句话说明为什么这样改", "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
 """
@@ -66,13 +72,28 @@ def _read_snippets(project_root: Path, anchors: list[str], *,
         texts[f] = text
         lines = text.splitlines()
         start = 0
+        end = None
         if method:
             m = method.split(".")[-1]
             for i, ln in enumerate(lines):
                 if ("void " + m) in ln or (" " + m + "(") in ln or (m + "(") in ln:
                     start = i
                     break
-        lo, hi = max(0, start - before), min(len(lines), start + after)
+            # 只取方法体（大括号配对），避免把相邻方法带进补丁范围
+            depth = 0
+            started = False
+            for j in range(start, len(lines)):
+                for ch in lines[j]:
+                    if ch == "{":
+                        depth += 1
+                        started = True
+                    elif ch == "}":
+                        depth -= 1
+                if started and depth <= 0:
+                    end = j + 1
+                    break
+        lo = max(0, start - before)
+        hi = end if end is not None else min(len(lines), start + after)
         chunks.append(f"### {f}（行 {lo+1}-{hi}）\n" + "\n".join(lines[lo:hi]))
     return "\n\n".join(chunks), texts
 
@@ -151,7 +172,8 @@ def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict
 def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                project_root: Path | str, *, client=None,
                max_rounds: int = 3, history: str = "",
-               candidate_card: str = "") -> tuple[Optional[EditPlan], dict]:
+               candidate_card: str = "",
+               retry_insufficient: bool = False) -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -186,6 +208,12 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
             prompt += f"\n\n上次输出不是合法 JSON。只输出 JSON。原始输出：{text[:400]}"
             continue
         if str(doc.get("why", "")).strip() == "insufficient_evidence":
+            if retry_insufficient and rnd < max_rounds:
+                prompt += ("\n\n上一次判证据不足。若源码中存在每帧创建/分配且"
+                           "未被使用或可缓存/池化/移到初始化，必须给出结构修复，"
+                           "不要因缺少耗时占比拒绝。")
+                last_err = "insufficient_evidence"
+                continue
             return None, {"error": "insufficient_evidence",
                           "why": "LLM 判断证据不足", **meta}
         edits = doc.get("edits") or []
@@ -204,6 +232,11 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                         "请移到初始化/缓存/池化/事件驱动")
             prompt += (f"\n\n上次补丁被拒：{last_err}。"
                        "必须改变结构，不能只把数字改小。")
+            continue
+        if diffs and not all(d["find"] in source for d in diffs):
+            last_err = "patch_outside_hypothesis：补丁不在该假设的源码片段内"
+            prompt += (f"\n\n上次补丁被拒：{last_err}。"
+                       "只能修改给定源码片段里的代码。")
             continue
         return EditPlan(playbook_id="PB-LLM",
                         diffs=diffs,

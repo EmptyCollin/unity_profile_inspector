@@ -90,6 +90,7 @@ def main() -> int:
         cands, _, _ = candidates_from_latest(p, limit=12)
         baseline_runs.append({str(c.root_cause).split(":", 1)[-1]
                               for c in cands})
+        last_cands = cands
         print("baseline", i + 1, "roots", len(baseline_runs[-1]))
     (run_dir / "baselines.json").write_text(
         json.dumps([sorted(x) for x in baseline_runs], ensure_ascii=False,
@@ -119,6 +120,16 @@ def main() -> int:
     save_run(run)
 
     cfg = N.load_config(ROOT / "llm_config.yaml")
+    cards = {}
+    for c in (last_cands or []):
+        spans = "; ".join(
+            f"{s.file}:{s.start_line}-{s.end_line}({s.symbol})"
+            for s in (c.sources or [])[:3])
+        cards[str(c.root_cause)] = (
+            f"mechanism={c.mechanism}; kind={c.kind}; score={c.score:.2f} "
+            f"(CI {c.score_interval_low:.2f}-{c.score_interval_high:.2f}); "
+            f"evidence_n={c.evidence_n}; spans={spans or 'unknown'}")
+    plan_errors: dict[str, dict] = {}
     queue = RepairQueue(max_cases=a.max_cases)
     by_root = {}
     for i, h in enumerate(hs):
@@ -135,8 +146,10 @@ def main() -> int:
         h = next((x for x in hs if str(x.get("root_cause")) == case.case_id), None)
         if h is None:
             return False
-        pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p)
+        pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
+                              candidate_card=cards.get(case.case_id, ""))
         print("plan", case.case_id, bool(pl), meta.get("error", ""))
+        plan_errors[case.case_id] = meta
         if pl is None:
             return False
         plans[case.case_id] = pl
@@ -200,6 +213,8 @@ def main() -> int:
     res = run_queue(queue, plan=plan, apply=apply, verify=verify,
                     rollback=rollback, max_cases=a.max_cases)
     print("queue", res.summary())
+    (run_dir / "plan_meta.json").write_text(
+        json.dumps(plan_errors, ensure_ascii=False, indent=2), encoding="utf-8")
 
     for case in queue.cases:
         pl = plans.get(case.case_id)

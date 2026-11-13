@@ -234,9 +234,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 for r in rows)
         except Exception:  # noqa: BLE001 — 历史只是参考，读不到就不附
             hist = ""
-        hist = hist.replace("test_project", "project")
+        _pname = Path(str(root)).name if root else ""
+        if _pname:
+            hist = hist.replace(_pname, "project")
         tuples = [(c.root_cause, [a.replace(str(root), "").replace(
-            "test_project", "project") for a in anchors_of(c)])
+            _pname, "project") for a in anchors_of(c)])
             for c in ev_cands[:12]]
         cards: dict[str, str] = {}
         for c in ev_cands[:12]:
@@ -244,7 +246,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 f"{s.file}:{s.start_line}-{s.end_line}"
                 f"({s.symbol})" for s in (c.sources or [])[:3])
             span_text = (spans or "unknown").replace(str(root), "")
-            span_text = span_text.replace("test_project", "project")
+            if _pname:
+                span_text = span_text.replace(_pname, "project")
             span_text = span_text.replace("\\", "/")
             cards[c.root_cause] = (
                 f"mechanism={c.mechanism}; kind={c.kind}; "
