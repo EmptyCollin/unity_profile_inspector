@@ -386,9 +386,23 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 tokens = 0
             diag_source = "fixture_legacy"
         elif ev_cands:
-            hs = hypotheses_from_candidates(ev_cands, ev_path)
-            tokens = 0
-            diag_source = "evidence"
+            if live_llm:
+                # 真 LLM 诊断：证据候选 → 六因子判定（提示词已做泄漏筛查）
+                from upi.agents.factor_judge import build_hypotheses_for_issue
+                from upi.core.evidence_diagnosis import anchors_of
+                cfg = load_config(ROOT / "llm_config.yaml")
+                tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:4]]
+                hs, archive = build_hypotheses_for_issue(cfg, issue, tuples)
+                tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
+                             + (a.get("_meta", {}).get("token_out", 0) or 0)
+                             for a in archive.values())
+                E.write_json(run_dir / "diagnose_archive.json", archive,
+                             what="diagnose_archive", strict=False)
+                diag_source = "evidence_llm"
+            else:
+                hs = hypotheses_from_candidates(ev_cands, ev_path)
+                tokens = 0
+                diag_source = "evidence"
         else:
             return {"route": "needs_human",
                     "error": ("insufficient_evidence：没有运行证据候选"

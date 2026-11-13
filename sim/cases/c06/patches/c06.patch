@@ -13,7 +13,7 @@
 +            var o = new StepOutcome();
 +            using (ClearFxMarker.Auto())
 +            {
-+                var fx = new GameObject("FxClearLegacy", typeof(RectTransform), typeof(Image));
++                var fx = new GameObject("FxClear", typeof(RectTransform), typeof(Image));
 +                fx.transform.SetParent(boardRoot, false);
 +                var fimg = fx.GetComponent<Image>();
 +                fimg.color = Color.white;

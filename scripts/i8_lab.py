@@ -175,6 +175,10 @@ h1{font-size:22px;margin:0 0 6px}.card{background:#17212c;border:1px solid #2a3a
 label{display:block;margin:7px 0}button{background:#1e4e3a;color:#dbe7f3;border:1px solid #2e7a58;border-radius:7px;padding:8px 14px;cursor:pointer;margin:4px 6px 4px 0}
 pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-height:460px;overflow:auto}
 .small{color:#8da2b5}.ok{color:#5ee0a0}.bad{color:#ff8b8b}.hint{background:#131c25;border-left:3px solid #2e7a58;padding:8px 10px;margin:8px 0}
+.grp{margin:10px 0}.bar{display:flex;align-items:center;gap:8px;margin:3px 0}
+.bar span{width:64px;color:#8da2b5}.bar b{width:32px;text-align:right}
+.track{flex:1;background:#0b1117;border-radius:6px;height:12px;overflow:hidden}
+.track i{display:block;height:100%}.okbar{background:#2e7a58}.badbar{background:#a33}.warnbar{background:#b8862e}
 </style></head><body>
 <h1>I8 考卷台 <span class="small">出考卷 + 按能力看得分</span></h1>
 <div class="card"><b>怎么考试</b>
@@ -188,9 +192,10 @@ pre{white-space:pre-wrap;background:#0b1117;padding:10px;border-radius:7px;max-h
 <button onclick="loadScore()">查看得分</button>
 <span id="msg" class="small"></span></div>
 <div class="card"><b>当前考卷</b><pre id="paper">还没有考卷</pre></div>
-<div class="card"><b>能力得分</b><pre id="score">未评估</pre></div>
+<div class="card"><b>能力得分</b><div id="scoreChart"></div><pre id="score">未评估</pre></div>
 <script>
 async function api(path, body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return await r.json();}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sel(){return [...document.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);}
 function show(id,r){document.getElementById(id).textContent=JSON.stringify(r,null,2);}
 function mark(r){const el=document.getElementById('msg');el.className=r.ok?'ok small':'bad small';el.textContent=r.ok?(r.evaluated===false?'未评估：'+(r.reason||''):'完成'):'失败：'+(r.error||'');}
@@ -201,7 +206,21 @@ async function init(){
   const p=await api('/api/paper'); if(p.ok) show('paper',p.paper);
 }
 async function generate(){const r=await api('/api/paper',{cases:sel()});mark(r);if(r.ok)show('paper',r.paper);}
-async function loadScore(){const r=await api('/api/score');mark(r);show('score',r);}
+function bar(label, value, max, cls){const p=max>0?Math.min(100,Math.round(value/max*100)):0;
+  return `<div class="bar"><span>${label}</span><div class="track"><i class="${cls}" style="width:${p}%"></i></div><b>${value}</b></div>`;}
+function renderChart(r){
+  const el=document.getElementById('scoreChart'); const d=r.dimensions||{};
+  if(!r.evaluated){el.innerHTML='<div class="small">未评估：'+(r.reason||'')+'</div>';return;}
+  const dv=d.discovery||{}, rp=d.repair||{}, rs=d.reproducible||{};
+  const maxD=Math.max(1,dv.expected||0);
+  const maxR=Math.max(1,rp.matched||0);
+  el.innerHTML=`
+    <div class="small">run ${esc(r.run&&r.run.run_id||'')} · 精度 ${dv.precision??'-'} · 召回 ${dv.recall??'-'}</div>
+    <div class="grp"><b>发现</b>${bar('TP',dv.tp||0,maxD,'okbar')}${bar('FP',dv.fp||0,maxD,'badbar')}${bar('FN',dv.fn||0,maxD,'warnbar')}</div>
+    <div class="grp"><b>修复</b>${bar('编译',rp.compiled||0,maxR,'okbar')}${bar('可运行',rp.runnable||0,maxR,'okbar')}${bar('有效',rp.effective||0,maxR,'warnbar')}</div>
+    <div class="small">可复现：${rs.consistent===null?'无法评估（1 次运行）':(rs.consistent?'一致':'不一致')} · 运行数 ${rs.runs||1}</div>`;
+}
+async function loadScore(){const r=await api('/api/score');mark(r);renderChart(r);show('score',r);}
 init();
 </script></body></html>"""
 

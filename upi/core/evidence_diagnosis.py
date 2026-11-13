@@ -56,6 +56,19 @@ def _evidence_refs(cands: list[CandidateV2], path: Optional[Path]) -> list[Evide
     return out
 
 
+def anchors_of(c: CandidateV2) -> list[str]:
+    """候选 → 可规划锚点：`file::symbol`（方法）+ `file:line`（定位）。"""
+    anchors: list[str] = []
+    for s in c.sources:
+        if not s.file:
+            continue
+        if s.symbol:
+            anchors.append(f"{s.file}::{s.symbol}")
+        if s.start_line:
+            anchors.append(f"{s.file}:{s.start_line}")
+    return list(dict.fromkeys(anchors)) or list(c.code_anchors)
+
+
 def hypotheses_from_candidates(cands: list[CandidateV2],
                                evidence_path: Optional[Path] = None) -> list:
     """候选 → 假设。因子取值来自候选的结构化事实（锚点/证据数/机制/先验），
@@ -63,15 +76,7 @@ def hypotheses_from_candidates(cands: list[CandidateV2],
     evs = _evidence_refs(cands, evidence_path)
     hs = []
     for c in cands:
-        anchors: list[str] = []
-        for s in c.sources:
-            if not s.file:
-                continue
-            if s.symbol:
-                anchors.append(f"{s.file}::{s.symbol}")
-            if s.start_line:
-                anchors.append(f"{s.file}:{s.start_line}")
-        anchors = list(dict.fromkeys(anchors)) or list(c.code_anchors)
+        anchors = anchors_of(c)
         ref = c.evidence_ids[0] if c.evidence_ids else (anchors[0] if anchors else "")
         js = [
             FactorJudgment(factor="proximity",

@@ -2,13 +2,13 @@
 +++ b/Assets/DevSim/Runtime/ChromaGame.cs
 @@ -1 +1 @@
 -        private void UpdateBody()
-+        private static readonly ProfilerMarker LegacyAnimMarker = new ProfilerMarker("ChromaGame.UpdateBody");
++        private static readonly ProfilerMarker AnimMarker = new ProfilerMarker("ChromaGame.UpdateBody");
 +        private void UpdateBody()
 @@ -1 +1 @@
 -            ResolvePendingWhenIdle();
 -            if (Time.unscaledTime >= nextHud)
 +            ResolvePendingWhenIdle();
-+            using (LegacyAnimMarker.Auto())
++            using (AnimMarker.Auto())
 +            {
 +                if (tileRects != null)
 +                    for (int r = 0; r < boardN; r++)

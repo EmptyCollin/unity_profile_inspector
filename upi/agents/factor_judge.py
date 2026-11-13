@@ -69,6 +69,26 @@ class JudgeError(RuntimeError):
     """判定链失败（模型未过门禁 / 输出非 JSON / 结构非法）。"""
 
 
+# 提示词泄漏筛查（考试/盲测要求）：运行目录、工程名、case/oracle 不得进入模型。
+_LEAK_TOKENS = ("test_project", "oracle", "case_id", "sim/cases", "exam")
+
+
+def _safe_ref(ref: str) -> str:
+    """证据引用只给文件名，不给 runs/<run>/... 与工程绝对路径。"""
+    r = str(ref or "").strip()
+    if not r:
+        return ""
+    return f"evidence:{Path(r).name}"
+
+
+def _screen_prompt(prompt: str) -> None:
+    low = prompt.lower()
+    hits = [t for t in _LEAK_TOKENS if t in low]
+    if hits:
+        # fail-closed：宁可判不出，也不把测试信息送进模型
+        raise JudgeError("提示词泄漏筛查失败：包含 " + ", ".join(hits))
+
+
 def _evidence_block(issue: Issue) -> tuple[str, dict[str, Evidence]]:
     """Issue.evidence 编成 e0/e1/... 引用表；返回文本 + 编号→Evidence 映射。"""
     lines, alias = [], {}
@@ -76,8 +96,9 @@ def _evidence_block(issue: Issue) -> tuple[str, dict[str, Evidence]]:
         k = f"e{i}"
         alias[k] = ev
         nb = f" σ±{ev.noise_band:g}" if ev.noise_band else ""
+        ref = _safe_ref(ev.raw_ref)
         lines.append(f"{k}: [{ev.tool}/{ev.data_tier}] {ev.value:g}{ev.unit}{nb}"
-                     + (f"  源:{ev.raw_ref}" if ev.raw_ref else ""))
+                     + (f"  源:{ref}" if ref else ""))
     return "\n".join(lines), alias
 
 
@@ -113,6 +134,7 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
     prompt = _PROMPT_TMPL.format(
         evidence_block=evidence_block, root_cause=root_cause,
         anchors=", ".join(code_anchors) or "（无）")
+    _screen_prompt(prompt)
 
     cli = client or make_client(cfg.providers[provider])
     kwargs = dict(

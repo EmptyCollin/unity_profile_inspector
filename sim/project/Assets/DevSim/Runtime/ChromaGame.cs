@@ -607,7 +607,7 @@ namespace DevSim
             return sp;
         }
 
-        /// <summary>不缓存的同款色块贴图；劣化路径用它制造“每格一份纹理”，外观与共享贴图完全一致。</summary>
+        /// <summary>同款色块贴图，按需创建；外观与共享贴图一致。</summary>
         private Sprite MakeTileSprite(int size)
         {
             int S = Mathf.Clamp(size, 16, 160);
@@ -1992,7 +1992,7 @@ namespace DevSim
         }
 
         // ───────────────────────── deterministic debug API ─────────────────────────
-        // 供外部确定性测试与 replay 取证使用；不读期望答案。
+        // 供外部确定性测试与 replay 取证使用。
 
         [Serializable]
         public sealed class DebugStateDto
