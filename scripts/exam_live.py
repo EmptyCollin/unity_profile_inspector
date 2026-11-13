@@ -91,8 +91,13 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
 
 def _capture_once(project: Path, project_id: str, replay: str,
                   run_dir: Path, label: str, *,
-                  two_pass: bool = False, retries: int = 1):
+                  two_pass: bool = False, retries: int = 1,
+                  checkpoint=None):
     """采集子进程；失败落 tool_errors.jsonl 并重试一次。返回 (ok, out)。"""
+    if checkpoint is not None and checkpoint.done(label):
+        if (run_dir / "merged_candidates.json").exists():
+            print(f"capture resume: skip {label}")
+            return True, None
     last = None
     for attempt in range(retries + 1):
         cmd = [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
@@ -105,6 +110,11 @@ def _capture_once(project: Path, project_id: str, replay: str,
                                   text=True, encoding="utf-8",
                                   errors="replace", timeout=2400)
             if last.returncode == 0:
+                if checkpoint is not None:
+                    try:
+                        checkpoint.save(step=label, status="done")
+                    except Exception:  # noqa: BLE001
+                        pass
                 return True, last
             err = {"label": label, "attempt": attempt + 1,
                    "returncode": last.returncode,
@@ -131,11 +141,15 @@ def main() -> int:
     ap.add_argument("--project-id", default="test_project")
     ap.add_argument("--baselines", type=int, default=3,
                     help="修复前同协议基线次数（<2 则无法 verified）")
+    ap.add_argument("--resume", default="",
+                    help="从已有 run_id 续跑（跳过已完成的采集）")
     a = ap.parse_args()
     p = Path(a.project).resolve()
-    run_id = new_run_id(a.project_id)
+    run_id = a.resume or new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    from upi.core.resilience import Checkpoint
+    cp = Checkpoint(run_dir)
     chain: list[dict] = []
     t_start = time.time()
     baseline_meta: dict = {"ran": False, "count": 0, "hits": 0,
@@ -161,7 +175,7 @@ def main() -> int:
     for bi in range(n_base):
         okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
                                  f"baseline#{bi + 1}", two_pass=True,
-                                 retries=1)
+                                 retries=1, checkpoint=cp)
         if not okcap:
             mark(f"baseline#{bi + 1}", "failed",
                  (r.stdout or r.stderr)[-160:])
@@ -177,6 +191,7 @@ def main() -> int:
                           "reason": f"已跑 {len(baseline_runs)} 次同协议基线"})
     (run_dir / "baselines.json").write_text(json.dumps(
         baseline_runs, ensure_ascii=False, indent=2), encoding="utf-8")
+    cp.save(step="baselines", status="done", data={"baseline_runs": baseline_runs})
 
     # 2) detect → diagnose（live LLM）
     from upi.core.project_store import knowledge_db as _knowledge_db
@@ -191,6 +206,7 @@ def main() -> int:
     if d.get("route") != "proceed":
         save_chain()
         return 1
+    cp.save(step="detect", status="done", data={"issue": d["issue"]})
     g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
     mark("diagnose", g.get("route", ""),
          f"tokens={g.get('tokens_used')} hyps={len(g.get('hypotheses') or [])}")
@@ -200,6 +216,8 @@ def main() -> int:
         print("diagnose error:", g.get("error"))
         save_chain()
         return 1
+    cp.save(step="diagnose", status="done",
+            data={"hypotheses": [h for h in (g.get("hypotheses") or [])]})
     hs = g.get("hypotheses") or []
     print("top1:", hs[0].get("root_cause"), "conf", hs[0].get("confidence"))
     archive = {}
@@ -239,6 +257,9 @@ def main() -> int:
         print("no LLM plan")
         save_chain()
         return 1
+    cp.save(step="plan", status="done",
+            data={"plan": plan.model_dump(),
+                  "plan_hyp": (plan_hyp or {})})
     target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
     baseline_hits = sum(1 for b in baseline_runs
                         if target_key0 in set(b["roots"]))
@@ -294,6 +315,8 @@ def main() -> int:
     mark("execute#1", "ok" if out.items[0].status in
          ("applied_unverified",) else "failed",
          f"{out.items[0].status} {out.items[0].error[:80]}")
+    cp.save(step="execute#1", status="done",
+            data={"item_status": out.items[0].status})
     print("execute:", out.status)
     for it in out.items:
         print(" item:", it.status, it.error[:100])
@@ -324,6 +347,8 @@ def main() -> int:
         ladder_status = ladder.status
         print("ladder:", ladder.status, ladder.reason)
         mark("verify#1", ladder.status, ladder.reason[:160])
+        cp.save(step="verify#1", status="done",
+                data={"ladder": ladder.status})
         (run_dir / "verify_ladder.json").write_text(
             ladder.model_dump_json(indent=2), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
@@ -504,6 +529,7 @@ def main() -> int:
     mark("score", "ok",
          f"tp={score['dimensions']['discovery'].get('tp')} "
          f"fn={score['dimensions']['discovery'].get('fn')}")
+    cp.save(step="score", status="done")
     save_chain()
     print(json.dumps(score, ensure_ascii=False, indent=1))
     # 9) 归纳总结：只提议入库，等用户在 UI 批/驳

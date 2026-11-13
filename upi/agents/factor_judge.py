@@ -26,6 +26,7 @@ from upi.config.settings import LlmConfig
 from upi.core.attribution import (FactorJudgment, build_hypothesis, rank,
                                   route as route_decision)
 from upi.core.models import Evidence, Hypothesis, Issue
+from upi.core.resilience import call_with_retry
 
 FACTOR_KEYS = ("proximity", "explains_share", "competitiveness",
                "prior_hit", "counterfactual", "mechanism")
@@ -155,7 +156,13 @@ def judge_factors(cfg: LlmConfig, issue: Issue, root_cause: str,
     parse_exc = None
     # 模型偶发返回被截断/少逗号的 JSON：重试一次即可，不改变任何判定口径。
     for _attempt in range(2):
-        resp = cli.chat.completions.create(**kwargs)
+        _okcall, _resp, _kind, _tries = call_with_retry(
+            lambda: cli.chat.completions.create(**kwargs),
+            stage="factor_judge")
+        if not _okcall:
+            raise JudgeError(
+                f"LLM 调用失败（{_kind}，{_tries} 次）：{str(_resp)[:160]}")
+        resp = _resp
         raw_text = (resp.choices[0].message.content or "").strip()
         try:
             data = json.loads(raw_text)
