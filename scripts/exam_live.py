@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -111,6 +112,17 @@ def _capture_once(project: Path, project_id: str, replay: str,
             return True, None
     last = None
     for attempt in range(retries + 1):
+        if os.environ.get("UPI_SIMULATE_CAPTURE_FAIL") == label:
+            err = {"label": label, "attempt": attempt + 1,
+                   "returncode": -99, "stdout": "", "stderr": "simulated failure"}
+            try:
+                with (run_dir / "tool_errors.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(err, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+            if attempt < retries:
+                time.sleep(0.5)
+            continue
         cmd = [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
                "--project", str(project), "--project-id", project_id,
                "--replay", replay, "--no-save"]
