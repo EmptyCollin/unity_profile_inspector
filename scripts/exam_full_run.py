@@ -106,6 +106,25 @@ def get_json(path: str, timeout: int = 60) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def archive_runs() -> None:
+    """清库前归档考试 run，防止数据被覆盖。"""
+    runs = ROOT / "runs"
+    if not runs.exists():
+        return
+    targets = [d for d in runs.iterdir()
+               if d.is_dir() and d.name.startswith("test_project_")]
+    if not targets:
+        return
+    dest = ROOT / "archive" / time.strftime("%Y%m%d_%H%M%S")
+    dest.mkdir(parents=True, exist_ok=True)
+    for d in targets:
+        try:
+            shutil.copytree(d, dest / d.name)
+        except OSError:
+            pass
+    log(f"已归档 {len(targets)} 个 run → {dest}")
+
+
 def clean_learned() -> None:
     for name in ("runs", "projects", "baselines", "calibration"):
         d = ROOT / name
@@ -158,6 +177,7 @@ def main() -> int:
 
     # 2) 清空习得数据 + 删工程
     log("步骤 2/8：清空习得数据与白纸工程")
+    archive_runs()
     clean_learned()
     if PROJECT.exists():
         for _ in range(3):
