@@ -37,6 +37,8 @@ _PROMPT = """性能问题与候选根因：
 ## 根因假设
 root_cause: {root_cause}
 code_anchors: {anchors}
+候选证据卡:
+{candidate_card}
 
 ## 相关源码（当前工程，未修改）
 {source}
@@ -148,7 +150,8 @@ def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict
 
 def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                project_root: Path | str, *, client=None,
-               max_rounds: int = 3, history: str = "") -> tuple[Optional[EditPlan], dict]:
+               max_rounds: int = 3, history: str = "",
+               candidate_card: str = "") -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -160,7 +163,8 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
     prompt = _PROMPT.format(
         history=(history or "（本项目暂无历史；仅凭本次证据）"),
         evidence=evidence, root_cause=rc,
-        anchors=", ".join(anchors) or "（无）", source=source)
+        anchors=", ".join(anchors) or "（无）",
+        candidate_card=(candidate_card or "（无额外候选统计）"), source=source)
     meta = {"rounds": 0, "tokens_in": 0, "tokens_out": 0}
     last_err = ""
     for rnd in range(1, max_rounds + 1):

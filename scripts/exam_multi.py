@@ -27,6 +27,42 @@ from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
 
+EDITOR = Path(r"D:\unity_editor\6000.6.7f1\Editor\Unity.exe")
+
+
+def _unity(*args, timeout=120):
+    import subprocess
+    p = subprocess.run(["unity", "command", *args, "--project-path",
+                        "test_project", "--format", "json"],
+                       cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=timeout)
+    try:
+        return json.loads(p.stdout)
+    except Exception:
+        return {"success": False, "raw": p.stdout[-300:]}
+
+
+def ensure_ready(project: Path) -> None:
+    """编辑器就绪是硬步骤：不能假设 unity open 返回就等于可用。"""
+    import subprocess
+    if not _unity("editor status", timeout=30).get("success"):
+        print("editor not ready; starting direct")
+        subprocess.Popen([str(EDITOR), "-projectPath", str(project),
+                          "-acceptSoftwareTermsForThisRunOnly"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(150):
+            time.sleep(4)
+            if _unity("editor status", timeout=30).get("success"):
+                break
+        else:
+            raise SystemExit("Unity 启动超时")
+    _unity("scene open", "--path", "Assets/Scenes/00_Bootstrap.unity")
+    from upi.tooling import probe_control as PC
+    PC.install(project)
+    _unity("editor.playmode start")
+    time.sleep(4)
+    print("editor ready / play")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -41,6 +77,7 @@ def main() -> int:
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
+    ensure_ready(p)
 
     # 基线
     from upi.core.evidence_diagnosis import candidates_from_latest
