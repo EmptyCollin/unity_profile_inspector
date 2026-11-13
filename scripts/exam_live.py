@@ -654,10 +654,19 @@ def main() -> int:
                                  for d in (plan.diffs if plan else [])])
         (run_dir / "site_audit.json").write_text(
             json.dumps(sa, ensure_ascii=False, indent=2), encoding="utf-8")
-        if sa and ladder_status == "verified":
-            ladder_status = "needs_recheck"
-            mark("site-audit", "failed",
-                 "补丁删除的机制仍有站点残留：" + ", ".join(sa))
+        from upi.core.verification_v2 import evaluate_v2
+        v2 = evaluate_v2(
+            target_gone=bool(target_gone),
+            new_clusters=list(new_roots or []),
+            guards_ok=True,
+            sites_remaining=sa,
+            baselines_ok=(ladder_status == "verified"))
+        (run_dir / "verification_v2.json").write_text(
+            json.dumps(v2.__dict__, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        if v2.status != ladder_status:
+            ladder_status = v2.status
+            mark("verify-v2", v2.status, v2.reason)
         else:
             mark("site-audit", "ok", f"剩余站点={sum(len(v) for v in sa.values())}")
     except Exception as e:  # noqa: BLE001
