@@ -23,6 +23,7 @@ class CaseState:
     snapshot_ref: str = ""
     patch_id: str = ""
     ticket_id: str = ""
+    remaining_sites: list[str] = field(default_factory=list)
 
     def can_attempt(self) -> bool:
         return self.status not in ("verified", "failed", "skipped") \

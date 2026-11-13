@@ -148,7 +148,8 @@ def main() -> int:
         if h is None:
             return False
         pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
-                              candidate_card=cards.get(case.case_id, ""))
+                              candidate_card=cards.get(case.case_id, ""),
+                              remaining_sites=case.remaining_sites)
         print("plan", case.case_id, bool(pl), meta.get("error", ""))
         plan_errors[case.case_id] = meta
         if pl is None:
@@ -205,6 +206,8 @@ def main() -> int:
         from upi.core.verification_v2 import evaluate_v2
         v = evaluate_v2(target_gone=gone, new_clusters=new, guards_ok=True,
                         sites_remaining=sa)
+        case.remaining_sites = [f"{pat}: {', '.join(files)}"
+                                for pat, files in sa.items()]
         print("verify", case.case_id, v.status, v.reason)
         return v.status
 
