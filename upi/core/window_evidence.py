@@ -55,8 +55,11 @@ def static_hints(index, functions) -> dict:
 
 def coverage(bundle) -> dict:
     """按证据源报告覆盖；没有就是缺口，不静默。"""
-    has_alloc = bool(bundle.allocations) or bool(bundle.callstacks)
-    has_render = bool(bundle.render_objects)
+    counters = getattr(bundle, "counters", {}) or {}
+    has_alloc = (bool(bundle.allocations) or bool(bundle.callstacks)
+                 or "GC Allocated In Frame" in counters)
+    has_render = (bool(bundle.render_objects)
+                  or "Draw Calls Count" in counters)
     has_func = bool(bundle.functions)
     cov = {
         "function": has_func,

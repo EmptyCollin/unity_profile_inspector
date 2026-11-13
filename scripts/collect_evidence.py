@@ -73,6 +73,13 @@ def main() -> int:
     bundle.coverage = coverage(bundle)
 
     out = Path(a.out) if a.out else (ROOT / "runs" / run_id / "evidence" / "evidence_v2.json")
+    cpath = out.parent / "counters.json"
+    if cpath.exists():
+        try:
+            bundle.counters = json.loads(cpath.read_text(encoding="utf-8")).get(
+                "counters", {})
+        except Exception:  # noqa: BLE001
+            pass
     bundle.write(out)
     print(json.dumps({
         "ok": True, "out": str(out), "events": len(events), "bad_events": bad,

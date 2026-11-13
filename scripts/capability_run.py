@@ -131,6 +131,35 @@ DEEP_ON = ("UnityEngine.Profiling.Profiler.enabled=true;"
            "UnityEditorInternal.ProfilerDriver.ClearAllFrames();return \"deep\";")
 
 
+def collect_counters(project: Path, run_id: str) -> dict:
+    """通用 ProfilerRecorder 计数；失败返回空，不阻断。"""
+    src = ROOT / "runs" / "_probe" / "counters_v1.json"
+    try:
+        src.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        d = unity("script eval", "--file",
+                  str(ROOT / "probe" / "upi_counters_v1.cs"),
+                  "--project-path", str(project), "--timeout", "120")
+        if not d.get("success"):
+            return {}
+        deadline = time.time() + 30
+        while time.time() < deadline and not src.exists():
+            time.sleep(0.3)
+        if not src.exists():
+            return {}
+        data = json.loads(src.read_text(encoding="utf-8"))
+        out = ROOT / "runs" / run_id / "counters.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        return data.get("counters", {})
+    except Exception as e:  # noqa: BLE001
+        print("counters skipped:", type(e).__name__, e)
+        return {}
+
+
 def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
     """一次 bounded 深档采集（8 帧/8 线程），补分配点与调用栈候选。"""
     CFG.write_text(json.dumps({"evidence_threads": 8, "evidence_frames": 8,
@@ -246,6 +275,7 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
                             time.sleep(0.3)
                         if not EV_DEEP.exists():
                             continue
+                        collect_counters(project, tag)
                         subprocess.run(
                             [sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                              "--project", str(project), "--evidence", str(EV_DEEP),

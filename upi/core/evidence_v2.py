@@ -143,6 +143,7 @@ class EvidenceBundleV2(BaseModel):
     render_objects: list[RenderObjectStat] = Field(default_factory=list)
     allocations: list[AllocationSite] = Field(default_factory=list)
     anomalies: list[dict] = Field(default_factory=list)
+    counters: dict = Field(default_factory=dict)
     coverage: dict = Field(default_factory=dict)
     blindspots: list[BlindSpot] = Field(default_factory=list)
     raw_refs: list[str] = Field(default_factory=list)

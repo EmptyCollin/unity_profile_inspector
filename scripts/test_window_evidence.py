@@ -53,6 +53,12 @@ cov2 = coverage(empty)
 ok("空包缺口全列", "allocation" in cov2["blind_spots"]
    and "render_material" in cov2["blind_spots"], cov2)
 
+empty.counters = {"GC Allocated In Frame": {"series": [1]},
+                  "Draw Calls Count": {"series": [2]}}
+cov3 = coverage(empty)
+ok("通用计数补齐分配/渲染", cov3["allocation"] and cov3["render_material"],
+   cov3)
+
 print(f"\n==== 窗口证据测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))
