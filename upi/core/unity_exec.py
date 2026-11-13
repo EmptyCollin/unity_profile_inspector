@@ -40,15 +40,7 @@ def default_scene() -> Optional[Path]:
     env = os.environ.get("UPI_SCENE", "").strip()
     if env:
         return Path(env)
-    if os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() != "1":
-        return None
-    p = _profile()
-    if not p.fix_subject:
-        return None
-    try:
-        return p.scene_of(p.fix_subject)
-    except Exception:  # noqa: BLE001
-        return None
+    return None
 
 
 def default_snapshot(attempt_id: str, project: Path, scene: Path, fp: str) -> Snapshot:

@@ -42,18 +42,6 @@ def _default_project() -> Optional[Path]:
         return None
 
 
-def _default_scene() -> Optional[Path]:
-    """缺省回滚场景：仅在 legacy 夹具模式下由 fix_subject 派生；否则 None。"""
-    import os
-    if os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() != "1":
-        return None
-    try:
-        prof = active_profile()
-        return prof.scene_of(prof.fix_subject) if prof.fix_subject else None
-    except Exception:  # noqa: BLE001
-        return None
-
-
 class FixError(RuntimeError):
     pass
 
@@ -155,7 +143,6 @@ def execute(plan: EditPlan, snap: Optional[Snapshot], *,
     # 缺省场景由 profile 派生（阶段 7）：仅在调用方没传 scene_path 时兜底，
     # 用途是编译失败后的场景复位（rollback）。显式传参不受影响，
     # 单测继续用临时目录跑。
-    scene_path = scene_path or _default_scene()
     rep = {"playbook_id": plan.playbook_id, "tier": plan.permission_tier,
            "status": "unknown"}
 

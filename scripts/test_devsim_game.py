@@ -49,6 +49,11 @@ def unity(*args: str, timeout: int = 120) -> dict:
 
 
 def main() -> int:
+    # 集成测试：需要 sim/project 在 Unity 中打开；不可达就显式 SKIP。
+    st = unity("command", "editor status")
+    if not (((st.get("data") or {}).get("result")) or {}):
+        print(f"SKIP: 需要先把 {PROJECT} 在 Unity 中打开（pipeline 不可达）")
+        return 0
     tmp = Path(tempfile.gettempdir()) / "devsim_case.json"
     tmp.write_text(json.dumps(CASE, ensure_ascii=False), encoding="utf-8")
     try:

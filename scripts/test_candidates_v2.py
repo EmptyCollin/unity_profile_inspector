@@ -89,11 +89,10 @@ foo_fns = [c for c in dup_cs if c.kind == "function" and "Foo.Update" in c.root_
 ok("符号归一不重复", len(foo_fns) == 1, [(c.kind, c.root_cause) for c in foo_fns])
 
 fp = FingerprintStore(tmp / "fp.db")
-fp.seed_builtin()
 with_fp = generate_candidates(bundle, g, project_root=proj, fingerprint_store=fp)
 alloc = next((c for c in with_fp if c.kind == "allocation"), None)
-ok("指纹只做 prior", alloc is not None and alloc.prior > 0
-   and alloc.source_kind == "evidence+fingerprint", alloc)
+ok("空指纹库不产生 prior", alloc is not None and alloc.prior == 0
+   and alloc.source_kind == "evidence", alloc)
 novel = generate_candidates(bundle, g, project_root=proj)
 ok("无指纹仍是候选", any(c.prior == 0 for c in novel))
 

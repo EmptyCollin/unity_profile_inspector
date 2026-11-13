@@ -91,12 +91,44 @@ ok("有证据 ⇒ 候选非空", len(cands) >= 1, str(len(cands)))
 ok("候选来自证据包", b2 is not None and p2 is not None)
 
 nd2 = make_nodes(TMP / "run2", live_llm=False, knowledge_db=TMP / "k2.db")
-r2 = nd2["diagnose"]({"issue": {"detector": "DET-CPU-GC-FRAMEALLOC",
-                                "issue_model": issue.model_dump()}})
-ok("有证据 ⇒ 诊断 proceed", r2.get("route") == "proceed", str(r2)[:200])
-ok("诊断来源标记 evidence", r2.get("diagnose_source") == "evidence",
-   r2.get("diagnose_source"))
-hs2 = r2.get("hypotheses") or []
+r2 = nd2["diagnose"]({"issue": {"issue_model": issue.model_dump(),
+                                "source": "evidence"},
+                      "project": str(PROJECT)})
+ok("有证据但离线 ⇒ 拒下结论", r2.get("route") == "needs_human"
+   and "未测推理" in str(r2.get("error", "")), str(r2)[:160])
+
+# ── 真 LLM 诊断（打桩，不联网）──────────────────────────────
+from upi.agents import factor_judge as FJ  # noqa: E402
+from upi.agents import llm_planner as LP  # noqa: E402
+from upi.core.attribution import FactorJudgment, build_hypothesis, rank  # noqa: E402
+from upi.core.models import EditPlan  # noqa: E402
+
+real_build = FJ.build_hypotheses_for_issue
+
+
+def fake_build(cfg, issue, tuples, **kw):
+    hs = []
+    for rc, anchors in tuples:
+        js = [FactorJudgment(factor=f, value=v, evidence_ref="e0")
+              for f, v in (("proximity", 0.7), ("explains_share", 0.6),
+                           ("mechanism", 0.8), ("competitiveness", 0.5),
+                           ("prior_hit", 0.0), ("counterfactual", 0.5))]
+        hs.append(build_hypothesis(rc, anchors, js, issue_evidence=issue.evidence))
+    return rank(hs), {}
+
+
+FJ.build_hypotheses_for_issue = fake_build
+try:
+    nd_live = make_nodes(TMP / "run2l", live_llm=True, knowledge_db=TMP / "k2l.db")
+    r2l = nd_live["diagnose"]({"issue": {"issue_model": issue.model_dump(),
+                                         "source": "evidence"},
+                               "project": str(PROJECT)})
+finally:
+    FJ.build_hypotheses_for_issue = real_build
+ok("LLM 诊断 ⇒ proceed", r2l.get("route") == "proceed", str(r2l)[:200])
+ok("诊断来源标记 evidence_llm",
+   r2l.get("diagnose_source") == "evidence_llm", r2l.get("diagnose_source"))
+hs2 = r2l.get("hypotheses") or []
 ok("假设锚点落在 ChromaGame", bool(hs2) and any(
     "ChromaGame.cs" in a for h in hs2 for a in h.get("code_anchors", [])))
 
@@ -115,14 +147,43 @@ try:
        bool((d.get("issue") or {}).get("issue_model", {}).get("evidence"))
        and bool((d.get("issue") or {}).get("anchor")))
     g3 = nd3["diagnose"]({"issue": d["issue"]})
-    ok("证据 Issue → 诊断 proceed", g3.get("route") == "proceed", str(g3)[:160])
-    ok("诊断仍标记 evidence", g3.get("diagnose_source") == "evidence")
+    ok("离线诊断被拒（必须 LLM）", g3.get("route") == "needs_human"
+       and "未测推理" in str(g3.get("error", "")), str(g3)[:120])
     p3 = nd3["plan"]({"issue": d["issue"],
                       "hypotheses": g3.get("hypotheses") or [],
                       "records": []})
-    ok("证据假设 → 源码 plan", p3.get("route") == "proceed"
-       and (p3.get("edit_plan") or {}).get("playbook_id") == "PB-OP-HUD-TEXT-CACHE",
-       str(p3)[:180])
+    ok("离线规划必须被拒（必须 LLM）", p3.get("route") == "needs_human"
+       and "LLM" in str(p3.get("error", "")), str(p3)[:160])
+
+    # 同一 Issue 走 LLM 诊断 + LLM 规划（两者都打桩，不联网）
+    d4 = nd_live["detect"]({"project": str(PROJECT)})
+    ok("detect 证据 Issue（live 节点）", d4.get("route") == "proceed",
+       str(d4)[:120])
+    FJ.build_hypotheses_for_issue = fake_build
+    try:
+        g4 = nd_live["diagnose"]({"issue": d4["issue"],
+                                  "project": str(PROJECT)})
+    finally:
+        FJ.build_hypotheses_for_issue = real_build
+    ok("LLM 诊断证据 Issue ⇒ proceed", g4.get("route") == "proceed",
+       str(g4)[:120])
+    real_plan = LP.plan_issue
+    LP.plan_issue = lambda cfg, issue, hyp, root, **k: (
+        EditPlan(playbook_id="PB-LLM",
+                 diffs=[{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
+                         "find": "x", "replace": "y", "expect_count": 1}],
+                 side_effect="unknown", permission_tier="semi",
+                 touched_assets=["Assets/DevSim/Runtime/ChromaGame.cs"]),
+        {"rounds": 1})
+    try:
+        p4 = nd_live["plan"]({"issue": d4["issue"],
+                              "hypotheses": g4.get("hypotheses") or [],
+                              "records": [], "project": str(PROJECT)})
+    finally:
+        LP.plan_issue = real_plan
+    ok("LLM 规划 ⇒ PB-LLM", p4.get("route") == "proceed"
+       and (p4.get("edit_plan") or {}).get("playbook_id") == "PB-LLM",
+       str(p4)[:160])
 finally:
     unregister_profile("p-evid")
 

@@ -1,0 +1,192 @@
+"""LLM 修复规划器（I10d）。
+
+- 输入：Issue 证据（已筛查）+ 假设根因 + 当前源码片段；
+- 输出：结构化补丁 `{why, edits:[{file, find, replace}]}`，或明确失败原因；
+- 执行器只做精确命中校验/应用/编译，不做模板替换；
+- 容错：超时/限流/坏 JSON 有界重试；find 不命中把实际源码回喂，最多 2 轮；
+- 提示词泄漏筛查：复用 factor_judge 的 fail-closed 规则，代码片段只来自工程内。
+"""
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Optional
+
+from upi.agents.factor_judge import (_evidence_block, _safe_ref, _screen_prompt)
+from upi.config.connectivity import make_client
+from upi.config.settings import LlmConfig
+from upi.core.models import EditPlan, Evidence, Issue
+
+_SYSTEM = (
+    "你是 Unity 性能修复规划器。给你一条性能问题、候选根因与相关源码，"
+    "请给出**最小、语义保持**的补丁。只输出 JSON，不要解释性前后缀。"
+    "约束：① 只改给出的文件；② 不得改变玩法语义、数值、时序；"
+    "③ find 必须是当前源码中的精确片段且只出现一次；④ 证据不足就返回 "
+    '{"why":"insufficient_evidence","edits":[]}。'
+)
+
+_PROMPT = """性能问题与候选根因：
+
+## 证据
+{evidence}
+
+## 根因假设
+root_cause: {root_cause}
+code_anchors: {anchors}
+
+## 相关源码（当前工程，未修改）
+{source}
+
+## 输出 JSON
+{{"why":"一句话说明为什么这样改", "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
+"""
+
+
+def _read_snippets(project_root: Path, anchors: list[str], *,
+                   before: int = 25, after: int = 45) -> tuple[str, dict[str, str]]:
+    """按锚点抽源码片段；只读工程内文件。返回 (拼接文本, 文件→原文)。"""
+    chunks, texts = [], {}
+    for a in anchors:
+        f, _, rest = a.partition("::")
+        method = rest.strip()
+        fp = (Path(project_root) / f).resolve()
+        try:
+            fp.relative_to(Path(project_root).resolve())
+        except ValueError:
+            continue
+        if not fp.is_file() or f in texts:
+            continue
+        text = fp.read_text(encoding="utf-8", errors="replace")
+        texts[f] = text
+        lines = text.splitlines()
+        start = 0
+        if method:
+            m = method.split(".")[-1]
+            for i, ln in enumerate(lines):
+                if ("void " + m) in ln or (" " + m + "(") in ln or (m + "(") in ln:
+                    start = i
+                    break
+        lo, hi = max(0, start - before), min(len(lines), start + after)
+        chunks.append(f"### {f}（行 {lo+1}-{hi}）\n" + "\n".join(lines[lo:hi]))
+    return "\n\n".join(chunks), texts
+
+
+def _call(cfg: LlmConfig, prompt: str, *, agent: str = "fix",
+          client=None) -> tuple[str, dict]:
+    eff = cfg.effective_for(agent)
+    cli = client or make_client(cfg.providers[eff["provider"]])
+    kwargs = dict(model=eff["model"],
+                  messages=[{"role": "system", "content": _SYSTEM},
+                            {"role": "user", "content": prompt}],
+                  temperature=float(eff.get("temperature", 0.2)),
+                  max_tokens=int(eff.get("max_output_tokens", 4096)))
+    if eff.get("json_mode"):
+        kwargs["response_format"] = {"type": "json_object"}
+    t0 = time.time()
+    resp = cli.chat.completions.create(**kwargs)
+    text = resp.choices[0].message.content or ""
+    meta = {"token_in": getattr(resp.usage, "prompt_tokens", 0) or 0,
+            "token_out": getattr(resp.usage, "completion_tokens", 0) or 0,
+            "elapsed_ms": int((time.time() - t0) * 1000)}
+    return text, meta
+
+
+def _parse(text: str) -> Optional[dict]:
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.split("```", 2)[1] if s.count("```") >= 2 else s
+        s = s.split("\n", 1)[1] if "\n" in s else s
+    try:
+        d = json.loads(s)
+    except Exception:  # noqa: BLE001
+        i, j = s.find("{"), s.rfind("}")
+        if i < 0 or j <= i:
+            return None
+        try:
+            d = json.loads(s[i:j + 1])
+        except Exception:  # noqa: BLE001
+            return None
+    return d if isinstance(d, dict) else None
+
+
+def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict]], str]:
+    out = []
+    for e in edits:
+        f = str(e.get("file", "")).strip()
+        find = str(e.get("find", ""))
+        repl = str(e.get("replace", ""))
+        if not f or not find:
+            return None, "edit 缺 file/find"
+        fp = (Path(project_root) / f).resolve()
+        try:
+            fp.relative_to(Path(project_root).resolve())
+        except ValueError:
+            return None, f"文件越界：{f}"
+        if not fp.is_file():
+            return None, f"文件不存在：{f}"
+        text = fp.read_text(encoding="utf-8", errors="replace")
+        n = text.count(find)
+        if n != 1:
+            return None, f"{f} 中 find 命中 {n} 次（必须恰好 1 次）"
+        if repl == find:
+            return None, f"{f} 的 replace 与 find 相同（原地空写）"
+        out.append({"file": f, "find": find, "replace": repl,
+                    "expect_count": 1, "_why": str(e.get("why", ""))[:200]})
+    return out, ""
+
+
+def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
+               project_root: Path | str, *, client=None,
+               max_rounds: int = 3) -> tuple[Optional[EditPlan], dict]:
+    """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
+    root = Path(project_root).resolve()
+    rc = str(hypothesis.get("root_cause", ""))
+    anchors = list(hypothesis.get("code_anchors") or [])
+    source, _texts = _read_snippets(root, anchors)
+    if not source:
+        return None, {"error": "no_source_snippet", "why": "锚点无法定位到工程内源码"}
+    evidence, _alias = _evidence_block(issue)
+    prompt = _PROMPT.format(evidence=evidence, root_cause=rc,
+                            anchors=", ".join(anchors) or "（无）", source=source)
+    meta = {"rounds": 0, "tokens_in": 0, "tokens_out": 0}
+    last_err = ""
+    for rnd in range(1, max_rounds + 1):
+        meta["rounds"] = rnd
+        try:
+            _screen_prompt(prompt)
+            text, m = _call(cfg, prompt, client=client)
+        except Exception as e:  # noqa: BLE001 — 网络/鉴权/超时：有界失败
+            last_err = f"{type(e).__name__}: {str(e)[:160]}"
+            if rnd < max_rounds:
+                time.sleep(min(2 ** rnd, 8))
+                continue
+            break
+        meta["tokens_in"] += m.get("token_in", 0)
+        meta["tokens_out"] += m.get("token_out", 0)
+        doc = _parse(text)
+        if doc is None:
+            last_err = "输出不是合法 JSON"
+            prompt += f"\n\n上次输出不是合法 JSON。只输出 JSON。原始输出：{text[:400]}"
+            continue
+        if str(doc.get("why", "")).strip() == "insufficient_evidence":
+            return None, {"error": "insufficient_evidence",
+                          "why": "LLM 判断证据不足", **meta}
+        edits = doc.get("edits") or []
+        if not edits:
+            last_err = "edits 为空"
+            prompt += "\n\n上次 edits 为空；要么给出补丁，要么返回 insufficient_evidence。"
+            continue
+        diffs, err = _validate(root, edits)
+        if diffs is None:
+            last_err = err
+            # 回喂实际源码片段，最多再试
+            prompt += (f"\n\n上次补丁被拒：{err}\n以下是当前源码，请据此重写：\n{source}")
+            continue
+        return EditPlan(playbook_id="PB-LLM",
+                        diffs=diffs,
+                        invariants_assert=["LLM 声称语义保持，需人工复核",
+                                           "find 精确命中一次"],
+                        side_effect="unknown", permission_tier="semi",
+                        touched_assets=sorted({d["file"] for d in diffs})), meta
+    return None, {"error": last_err or "planner_failed", **meta}

@@ -8,7 +8,7 @@
   ],
   "replay": "c06",
   "oracle": "c06",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "pattern_id": "per_clear_particle_instantiate",
   "notes": "instantiate/destroy particle per clear",
   "expects": {

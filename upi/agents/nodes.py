@@ -27,7 +27,6 @@ from upi.agents.verify import (gc_floor_measure, resample, verdict_from_bundles)
 from upi.config.project_profile import active_profile
 from upi.config.settings import load_config
 from upi.core.approval import ApprovalStore, build_request
-from upi.core.candidate_retrieval import retrieve_candidates
 from upi.core.detector import DEFAULT_REGISTRY
 from upi.core import events as E
 from upi.core.models import EditPlan, Hypothesis, Issue
@@ -88,164 +87,6 @@ def _why_not_auto(plan: EditPlan) -> str:
                 "§3 维度一硬规则：无论置信度多高一律 semi")
     return ("不在语义保持白名单内（§3 维度二），auto 档必要条件不满足")
 
-# anchor 机制 → 该机制对应的语义保持修复（PB-* 取自 DET-CPU-GC-FRAMEALLOC.playbooks，
-# 均 whitelisted / side_effect=none）。diff 模板与彩排同源，逐条对应证据。
-# ⚠️ find 段取自**钉定的缺陷态参照**，不是工作区夹具：第三轮真跑走保留通路后
-# 工作区已是修复态，若从现场切片，find 会与文件现存内容逐字相同——apply 报
-# "成功"但实为原地空写（静默假成功，比报错更危险）。参照由 git 历史版本固化。
-class TemplateUnavailable(RuntimeError):
-    """修复模板构造不出来（参照缺失/内容不合格/档案未声明修复能力）。
-
-    为什么惰性 + 显式异常（阶段 7 的关键解耦）：这段原来是**模块导入期**
-    读盘 + `assert`——一枚参照文件缺失或内容不对，`upi.agents.nodes` 直接
-    ImportError，连带 patrol / daemon / CLI / 检测链全部起不来，而那几条链
-    压根不用模板。装载期零读盘之后，读盘失败只拦"出修复方案"这一条链，
-    plan 节点据此走 needs_human 并如实带出成因（不冒充"假设已穷尽"）。
-    """
-
-
-def _playbook_map() -> dict[str, tuple]:
-    """按需构造 anchor → (playbook_id, diffs, invariants)，每次现读参照。
-
-    不缓存：一个 run 里最多调几次（按候选假设循环），读一枚百来行的参照
-    文件成本可忽略；而缓存会跨 profile 切换留下脏值——测试里 use_profile()
-    之后拿到的还是上一个工程的模板，那是更难查的错。
-    """
-    prof = _prof()
-    csfile = prof.subject_file
-    if not prof.fix_subject:
-        raise TemplateUnavailable(
-            f"档案 {prof.profile_id} 未声明 fix_subject：本工程当前只报不改"
-            "（shadow_only），无修复模板")
-    if not csfile:
-        raise TemplateUnavailable(
-            f"档案 {prof.profile_id} 未声明 subject_file：无修复目标文件")
-    try:
-        ref = prof.defect_ref(prof.fix_subject)
-    except ValueError as e:
-        raise TemplateUnavailable(str(e)) from None
-    try:
-        text = ref.read_text(encoding="utf-8")
-    except OSError as e:
-        raise TemplateUnavailable(
-            f"缺陷态参照读不出来：{ref}（{type(e).__name__}: {str(e)[:100]}）") from None
-    sig = prof.defect_signature
-    if sig and sig not in text:
-        # 宁可不改，不可空写：参照里没有缺陷特征 ⇒ 它多半已是修复态，
-        # 用它切出来的 find 段会与文件现状逐字相同，apply 报"成功"而实际
-        # 什么都没改。这种静默假成功比直接报错危险得多。
-        raise TemplateUnavailable(
-            f"缺陷态参照 {ref.name} 缺少缺陷特征串（{sig[:40]}…）："
-            "diff 会退化成原地空写，已拒绝出方案")
-    t = text.split("\n")
-    ln = lambda a, b: "\n".join(t[a - 1:b])          # 1-based 闭区间
-    d1 = {"file": csfile, "find": ln(*_TPL_D1), "replace": _NEW_AWAKE,
-          "expect_count": 1, "_why": _WHY_D1}
-    d2 = {"file": csfile, "find": ln(*_TPL_D2), "replace": _NEW_UPDATE,
-          "expect_count": 1, "_why": _WHY_D2}
-    # 四个 CPU 机制锚点共享同一套 full-reuse 模板（夹具就是这四类叠加）
-    return {a: (PB, [d1, d2], _INVS) for a in _ANCHORS}
-
-
-def _plan_for(anchor: str) -> Optional[EditPlan]:
-    """把选定根因机制映射到 EditPlan（找不到模板 = 不硬编，交上层 needs_human）。
-
-    ⚠️ TemplateUnavailable **原样上抛**，不在这里吞成 None：
-      None 的含义是"这个机制没有对应模板"（正常的 needs_human 路径，
-      plan 节点会说"候选假设已穷尽"）；而"参照文件坏了/缺了"是完全不同的
-      成因——被吞掉之后，运维看到"假设已穷尽"会去改归因，实际要修的是参照文件。
-      成因不可区分 = 排查方向整个错位（本轮已多次撞同类）。
-    """
-    tpl = _playbook_map().get(anchor)
-    if tpl is None:
-        return None
-    pid, diffs, invs = tpl
-    return EditPlan(playbook_id=pid, diffs=diffs, invariants_assert=invs,
-                    # touched_assets 从 diffs 自身派生（与模板同源）：
-                    # 原来另取一份模块常量，profile 切换时两处可能不同步
-                    # ——"改的是 A 文件、申报影响的是 B 文件"会让权限判定
-                    # 与工单第 2 件套都对不上。
-                    side_effect="none", touched_assets=[d["file"] for d in diffs],
-                    permission_tier="blocked")   # 夹具脚本恒 blocked（§3 维度一）
-
-
-# 复用彩排的三段 diff（Awake 预生成 + Update 分配清零），按主锚点归一个 playbook
-PB = "PB-FULL-REUSE"
-# diff 的"为什么改这一处"说明。⚠️ 它是**判据数据**不只是文案：_anchor_of 用
-# _WHY_D1 做第二个匹配判据（root_cause 命中这句 ⇒ 归到该模板），所以文本
-# 一改，归因映射就跟着变。抽成常量让两处共用一份，不在两处各写一遍。
-_WHY_D1 = "缓冲/组件/键 预生成（Awake 扩展）"
-_WHY_D2 = "Update 热路径分配清零"
-_NEW_AWAKE = '''        private readonly List<SkillRuntime> _skills = new List<SkillRuntime>();
-
-        // 修复（PB-FULL-REUSE）：缓存 + 预生成。语义等价前提——state/level
-        // 在 Awake 后不再被改写（Update 全文无赋值点，已核对），故 ready 筛选、
-        // 排序结果、key 字符串均为常量，可一次预生成。
-        private Rigidbody _body;
-        private CapsuleCollider _col;
-        private List<SkillRuntime> _readyRanked;
-        private string[] _keyByIndex;
-        private readonly Dictionary<int, float> _reusedCooldown = new Dictionary<int, float>();
-
-        private void Awake()
-        {
-            for (int i = 0; i < skillCount; i++)
-                _skills.Add(new SkillRuntime { index = i, level = 1 + (i % 3), state = (SkillState)(i % 4) });
-
-            _body = GetComponent<Rigidbody>();
-            _col = GetComponent<CapsuleCollider>();
-            _readyRanked = _skills.Where(x => x.state == SkillState.Ready)
-                                   .Where(x => x.level > 1)
-                                   .OrderByDescending(x => x.level).ThenBy(x => x.index).ToList();
-            _keyByIndex = new string[skillCount];
-            foreach (var s in _skills)
-                _keyByIndex[s.index] = s.index + ":" + s.state + ":"
-                    + (_body != null ? 1 : 0) + (_col != null ? 1 : 0);
-        }'''
-
-_NEW_UPDATE = '''            // 每帧分配清零：
-            foreach (var s in _readyRanked)
-            {
-                var key = _keyByIndex[s.index];
-                s.lastKey = key;
-                s.score = s.level;
-            }
-
-            _reusedCooldown.Clear();
-            for (int i = 0; i < _skills.Count; i++)
-                _reusedCooldown[i] = Time.time + 0.1f * i;
-            _cooldownMap = _reusedCooldown;'''
-
-# 模板的行段与锚点归属。刻意**不**在导入期切 find 段（见 _playbook_map 说明）。
-_TPL_D1 = (21, 27)     # 字段区 + Awake（预生成缓冲/组件/键）
-_TPL_D2 = (31, 57)     # Update 热路径分配段
-_INVS = ["state/level 仅 Awake 赋值（静态核对）",
-         "map[key]=level;score=map[key] ⇒ score=level 恒等",
-         "_cooldownMap 声明保留（对外语义不破坏），改指向复用缓冲",
-         "P2 语义断言基建 pending（M7）——本条如实标注"]
-# 四个 CPU 机制锚点共享同一套 full-reuse 模板（夹具就是这四类叠加）
-_ANCHORS = ("per_frame_heap_alloc_in_hot_path",
-            "linq_enumerator_closure_per_frame",
-            "repeated_getcomponent_in_update",
-            "enum_tostring_concat_per_frame")
-
-
-def _run_detect():
-    """跑 m1_detect 并定位本轮 detection.json（模块级=测试可替换的边界）。
-
-    stdout 末行 "trace: <abs>/trace.jsonl" 是唯一稳定指针——m1_detect 不落
-    "最新"软链，也不该为它加副作用。返回 None = 没跑成/没产出，detect 节点
-    按 needs_human 处理。"""
-    import subprocess, sys
-    p = subprocess.run([sys.executable, str(ROOT / "scripts" / "m1_detect.py")],
-                       capture_output=True, text=True, timeout=180,
-                       encoding="utf-8", errors="replace")
-    for ln in p.stdout.splitlines():
-        if ln.startswith("trace:"):
-            return Path(ln.split(":", 1)[1].strip()).parent / "detection.json"
-    return None
-
-
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None) -> dict:
@@ -255,7 +96,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
     def detect(st: dict) -> dict:
         # 产品默认：从运行证据包构造 Issue（不再跑夹具束的 m1_detect）。
-        if not _legacy_fixture_diag_enabled():
+        if True:  # I10: 只走运行证据
             try:
                 from upi.core.candidates_v2 import generate_candidates
                 from upi.core.evidence_diagnosis import load_latest_bundle
@@ -314,36 +155,6 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     "error": ("insufficient_evidence：没有运行证据包"
                               "（先跑一轮证据采集；夹具束仅 legacy 开关可用）")}
 
-        # 复用 m1_detect 的判据链，但只取"当前夹具"这一条 Issue 进循环
-        det_fp = _run_detect()
-        findings = []
-        issue = None
-        if det_fp and det_fp.exists():
-            dj = json.loads(det_fp.read_text(encoding="utf-8"))
-            for fid, r in dj.get("results", {}).items():
-                if r.get("verdict") == "detected":
-                    sig = r.get("issue_signature", {})
-                    findings.append({
-                        "kind": "issue", "fixture": fid, "metric": r.get("metric"),
-                        "magnitude": r.get("magnitude"),
-                        "detector": r.get("detector"),
-                        "signature": sig})
-                    if fid == st["fixture"] and issue is None:
-                        issue = {"id": f"ISS-{fid}", "fixture": fid,
-                                 "detector": r.get("detector"),
-                                 "metric": r.get("metric"),
-                                 "magnitude": r.get("magnitude"),
-                                 "evidence": r, "state": "confirmed",
-                                 "anchor": sig.get("mechanism")}
-        if issue is None:
-            return {"route": "needs_human",
-                    "error": "detect 未在当前夹具检出 Issue"
-                             f"（detection.json={'缺失' if det_fp is None else det_fp.name}）"}
-        return {"findings": findings, "issue": issue, "route": "proceed",
-                # detection.json 在独立的 m1detect_* 目录（不在 run_dir 下），
-                # 把真实指针带进 state，供失败总结取"本轮下限画像"——不靠猜路径。
-                "detection_ref": str(det_fp) if det_fp else None}
-
     def diagnose(st: dict) -> dict:
         issue_d = st["issue"]
         det = next((d for d in DEFAULT_REGISTRY if d.id == issue_d.get("detector")),
@@ -358,56 +169,40 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 产品默认：诊断来自运行证据候选（不读夹具目录、不匹配代码文本）。
         ev_cands = []
         ev_path = None
-        if not _legacy_fixture_diag_enabled():
+        if True:  # I10: 只走运行证据
             try:
                 from upi.core.evidence_diagnosis import (candidates_from_latest,
                                                          hypotheses_from_candidates)
-                root = _prof().abs_project
+                root = st.get("project")
+                if not root:
+                    root = _prof().abs_project
                 ev_cands, _bundle, ev_path = candidates_from_latest(root, limit=12)
             except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理
                 E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
                                     f"证据候选读取失败：{type(e).__name__}: {e}\n")
-        if _legacy_fixture_diag_enabled():
-            cands = retrieve_candidates(issue, det)
-            if not cands:
-                return {"route": "needs_human",
-                        "error": "候选检索为空（证据不足，I2）"}
-            if live_llm:
-                from upi.agents.factor_judge import build_hypotheses_for_issue
-                cfg = load_config(ROOT / "llm_config.yaml")
-                hs, archive = build_hypotheses_for_issue(cfg, issue, cands)
-                tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
-                             + (a.get("_meta", {}).get("token_out", 0) or 0)
-                             for a in archive.values())
-                E.write_json(run_dir / "diagnose_archive.json", archive,
-                             what="diagnose_archive", strict=False)
-            else:
-                hs = _offline_hypotheses(cands, issue)
-                tokens = 0
-            diag_source = "fixture_legacy"
-        elif ev_cands:
-            if live_llm:
-                # 真 LLM 诊断：证据候选 → 六因子判定（提示词已做泄漏筛查）
-                from upi.agents.factor_judge import build_hypotheses_for_issue
-                from upi.core.evidence_diagnosis import anchors_of
-                cfg = load_config(ROOT / "llm_config.yaml")
-                tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:4]]
-                hs, archive = build_hypotheses_for_issue(cfg, issue, tuples)
-                tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
-                             + (a.get("_meta", {}).get("token_out", 0) or 0)
-                             for a in archive.values())
-                E.write_json(run_dir / "diagnose_archive.json", archive,
-                             what="diagnose_archive", strict=False)
-                diag_source = "evidence_llm"
-            else:
-                hs = hypotheses_from_candidates(ev_cands, ev_path)
-                tokens = 0
-                diag_source = "evidence"
-        else:
+        if not ev_cands:
             return {"route": "needs_human",
                     "error": ("insufficient_evidence：没有运行证据候选"
                               "（不读夹具目录/代码正则；先跑一轮证据采集）"),
                     "tokens_used": 0}
+        if not live_llm:
+            # I10：诊断主体是 LLM；离线只做测量，不给“结论”
+            return {"route": "needs_human",
+                    "error": "未测推理：诊断必须由 LLM 给出（live_llm=False）",
+                    "tokens_used": 0,
+                    "diagnose_source": "offline_not_measured"}
+        # 真 LLM 诊断：证据候选 → 六因子判定（提示词已做泄漏筛查）
+        from upi.agents.factor_judge import build_hypotheses_for_issue
+        from upi.core.evidence_diagnosis import anchors_of
+        cfg = load_config(ROOT / "llm_config.yaml")
+        tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:4]]
+        hs, archive = build_hypotheses_for_issue(cfg, issue, tuples)
+        tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
+                     + (a.get("_meta", {}).get("token_out", 0) or 0)
+                     for a in archive.values())
+        E.write_json(run_dir / "diagnose_archive.json", archive,
+                     what="diagnose_archive", strict=False)
+        diag_source = "evidence_llm"
         # 预期效应回填（实测工单暴露：expected_effect 空 → 工单第 3 件套
         # 只能写"请拒批并要求补证"）。数值不是新估计——min_delta 直接搬运
         # 标定绝对阈（I1：来自标定工具，且 G1 判定本就以它为零改善线，
@@ -446,33 +241,38 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 而不是对着同一条路再撞一次（§1.6 reason 回传给 Fix 的最小落实）
         tried = {r.get("root_cause") for r in st.get("records", [])
                  if r.get("kind") == "fix"}
-        root = None
+        if not live_llm:
+            return {"route": "needs_human",
+                    "error": "规划必须由 LLM 给出（live_llm=False ⇒ 未测推理）"}
+        issue_d = st.get("issue") or {}
+        det = next((d for d in DEFAULT_REGISTRY if d.id == issue_d.get("detector")),
+                   None)
+        if "issue_model" in issue_d:
+            issue = Issue(**issue_d["issue_model"])
+        elif det is not None:
+            issue = _rebuild_issue(det, issue_d)
+        else:
+            return {"route": "needs_human", "error": "缺少 Issue 模型，无法规划"}
         try:
             root = _prof().abs_project
-        except Exception:  # noqa: BLE001 — 档案缺失时仍可走夹具模板分支
-            root = None
+        except Exception:  # noqa: BLE001
+            root = st.get("project")
+        if not root:
+            return {"route": "needs_human", "error": "未选择工程，无法规划"}
+        from upi.agents.llm_planner import plan_issue
+        cfg = load_config(ROOT / "llm_config.yaml")
         for top in st["hypotheses"]:
             if top["root_cause"] in tried:
                 continue
-            ep = None
-            # 1) 源码驱动：用假设的代码锚点在当前工程里生成 diff（产品默认）
-            anchors = top.get("code_anchors") or []
-            if anchors and root is not None:
-                try:
-                    from upi.core.source_plan import plan_for_anchor_list
-                    ep = plan_for_anchor_list(root, anchors)
-                except Exception:  # noqa: BLE001
-                    ep = None
-            # 2) 夹具模板：只在显式 legacy 开关下回退（I9b：产品路径不读答案参照）
-            if ep is None and _legacy_fixture_diag_enabled():
-                try:
-                    ep = _plan_for(_anchor_of(top["root_cause"]))
-                except TemplateUnavailable:
-                    ep = None
+            ep, meta = plan_issue(cfg, issue, top, root)
+            E.write_json(run_dir / "plan_llm.json",
+                         {"root_cause": top["root_cause"], "meta": meta},
+                         what="plan_llm", strict=False)
             if ep is not None:
-                return {"edit_plan": ep.model_dump(), "route": "proceed"}
+                return {"edit_plan": ep.model_dump(), "route": "proceed",
+                        "llm_plan": meta}
         return {"route": "needs_human",
-                "error": f"候选假设已穷尽（{len(tried)} 条试过），转人工"}
+                "error": f"LLM 未给出可执行方案（试过 {len(tried)} 条），转人工"}
 
     def fix(st: dict) -> dict:
         ep = EditPlan(**st["edit_plan"])
@@ -876,12 +676,6 @@ def _rebuild_issue(det, issue_d: dict) -> Issue:
                  low_confidence=False)
 
 
-def _legacy_fixture_diag_enabled() -> bool:
-    """夹具正则诊断只作为**显式测试/实验开关**，不是产品默认（I9a）。"""
-    import os
-    return os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() == "1"
-
-
 def _offline_hypotheses(cands, issue) -> list:
     """离线替身：不调用 LLM，用候选检索的结构化命中直接构造 FactorJudgment
     （每个 anchor 命中即该因子 likely）——用于在没有真推理的情况下把状态机
@@ -899,24 +693,6 @@ def _offline_hypotheses(cands, issue) -> list:
         hs.append(build_hypothesis(root_cause, anchors, js, issue))
     from upi.core.attribution import rank
     return rank(hs)
-
-
-def _anchor_of(root_cause: str) -> str:
-    """root_cause 文本 → 模板锚点名。
-
-    ⚠️ 刻意保持**零读盘**：它只是词法映射，不该把"参照文件坏了"这件事
-      伪装成归因问题。_why 文本是模块常量（与 _playbook_map 里用的同源），
-      原来从 PLAYBOOK_DIFFS[a][1][0]["_why"] 取，本质仍是这几个固定串。
-    """
-    for a in _ANCHORS:
-        # 两个判据缺一不可（与原实现等价）：
-        #   a in root_cause        —— 假设文本里直接带锚点名
-        #   root_cause in _WHY_D1  —— 假设文本是模板说明里的那句话
-        # 第二项与 a 无关，所以命中时必然返回首个锚点；漏掉它会让这类
-        # 假设白跑一趟，落进兜底分支（结果看似一样，但"为什么命中"变了）。
-        if a in root_cause or root_cause in _WHY_D1:
-            return a
-    return _ANCHORS[0]      # CPU 四类共享模板，兜底取首个
 
 
 def _pattern_id(issue_d: dict, top: dict) -> str:

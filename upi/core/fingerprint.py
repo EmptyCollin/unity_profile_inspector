@@ -234,40 +234,8 @@ class FingerprintStore:
             c.commit()
 
     def ensure_seed(self) -> int:
-        with self._conn() as c:
-            n = c.execute("SELECT COUNT(*) FROM fingerprints").fetchone()[0]
-        if n:
-            return 0
-        return self.seed_builtin()
-
-    def seed_builtin(self) -> int:
-        seeds = [
-            ("gc_alloc_per_frame", "step", "sample", "A2",
-             "per_frame_heap_alloc_in_hot_path", "PB-REUSE-BUFFER"),
-            ("drawCalls", "step", "sample", "A2",
-             "per_renderer_material_instantiation", "PB-SHARED-MAT-MPB"),
-            ("setPassCalls", "step", "sample", "A2",
-             "per_renderer_material_instantiation", "PB-SHARED-MAT-MPB"),
-            ("animator_process_animations_ns", "step", "sample", "A2",
-             "cross_layer_state_query_per_frame", "PB-PARAM-EQUAL-GUARD"),
-            ("totalAllocatedBytes", "spike", "sample", "A",
-             "sync_resources_load_in_start", "PB-ASYNC-STAGGER"),
-            ("frame_time_ms", "spike", "breach", "A4",
-             "frame_time_spike_fact_only", ""),
-        ]
-        n = 0
-        for metric, shape, kind, tier, root, pb in seeds:
-            f = FingerprintFeatures(metric=metric, shape=shape, kind=kind,
-                                    data_tier=tier, rel_bucket=-1)
-            rec = FingerprintRecord(
-                fingerprint_id=f.fingerprint_id(), features=f.model_dump(),
-                pattern_id=f"builtin:{metric}:{shape}", root_cause=root,
-                playbook_id=pb, confidence=0.7, source="builtin",
-                last_seen="",
-            )
-            self.upsert(rec)
-            n += 1
-        return n
+        # I10：不再预置任何指纹；指纹只能从本项目历史学习得到（0 = 空库）。
+        return 0
 
     def stats(self) -> dict:
         recs = self.all()

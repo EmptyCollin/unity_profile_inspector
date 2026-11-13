@@ -9,7 +9,7 @@
   ],
   "replay": "c02",
   "oracle": "c02",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "notes": "HUD static text rebuilt every update (minimal patch)",
   "expects": {
     "windows": [

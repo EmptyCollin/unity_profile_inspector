@@ -105,8 +105,9 @@ try:
        and len(data.get("clusters") or []) == 1)
     ok("cluster 摘要含机制级字段",
        {"metric", "shape", "count", "data_tier"} <= set((data.get("clusters") or [{}])[0]))
-    ok("状态含指纹库", data.get("fingerprints", {}).get("total") == 6
-       and len(data.get("fingerprint_records") or []) == 6)
+    ok("状态含指纹库（空库，I10 不预置）",
+       data.get("fingerprints", {}).get("total") == 0
+       and len(data.get("fingerprint_records") or []) == 0)
     ok("状态含巡检调度", "resident_scheduler" in data)
     ok("状态含设置", isinstance(data.get("settings"), dict)
        and "probe_file" in data["settings"]

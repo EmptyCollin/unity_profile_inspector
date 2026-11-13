@@ -254,40 +254,14 @@ def build_ticket(clusters: list[IssueCluster], *, fp_store: Optional[Fingerprint
                        approve_token=_token(tid, items))
 
 
-def build_opportunity_ticket(findings, project_root, *, project_id: str = "") -> BatchTicket:
-    """I7d：OpportunityFinding → BatchTicket（source-aware plan 或 needs_human）。"""
-    from upi.core.opportunity_planner import plan_for
-
-    tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-" + secrets.token_hex(3)
-    items: list[TicketItem] = []
-    for f in findings:
-        plan = plan_for(f, project_root)
-        tier = plan.permission_tier if plan is not None else "blocked"
-        status: ItemStatus = ("pending" if plan is not None and tier == "auto"
-                              else "needs_human")
-        iid = "it-" + secrets.token_hex(4)
-        items.append(TicketItem(
-            item_id=iid, cluster_id=f.id, metric=f.metric, shape="opportunity",
-            kind="opportunity", count=1, pattern_id=f.pattern_id,
-            playbook_id=(plan.playbook_id if plan is not None else ""),
-            permission_tier=tier, plan=(plan.model_dump() if plan is not None else None),
-            status=status,
-            error=("" if plan is not None else "no source-aware plan; needs human"),
-            item_approve_token=_item_token(tid, iid),
-        ))
-    return BatchTicket(ticket_id=tid, project_id=project_id, mode="resident",
-                       created_at=E.now(), status="awaiting_approval", items=items,
-                       approve_token=_token(tid, items))
-
-
-def build_candidate_ticket(candidates, project_root, *, project_id: str = "") -> BatchTicket:
-    """I8d：证据候选 + source-aware recipe → BatchTicket（可审计、可回滚）。"""
-    from upi.core.repair_recipe import plan_for_candidate
-
+def build_candidate_ticket(candidates, project_root, *, project_id: str = "",
+                           planner=None) -> BatchTicket:
+    """证据候选 → BatchTicket。方案只能由注入的 planner（LLM）给出；
+    没有 planner/没有方案就诚实 needs_human，不再查预制配方（I10）。"""
     tid = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-" + secrets.token_hex(3)
     items: list[TicketItem] = []
     for c in candidates:
-        plan = plan_for_candidate(c, project_root)
+        plan = planner(c) if planner is not None else None
         tier = plan.permission_tier if plan is not None else "blocked"
         status: ItemStatus = ("pending" if plan is not None and tier == "auto"
                               else "needs_human")
@@ -300,7 +274,7 @@ def build_candidate_ticket(candidates, project_root, *, project_id: str = "") ->
             permission_tier=tier,
             plan=(plan.model_dump() if plan is not None else None),
             status=status,
-            error=("" if plan is not None else "no source-aware recipe; needs human"),
+            error=("" if plan is not None else "no LLM plan; needs human"),
             item_approve_token=_item_token(tid, iid),
         ))
     return BatchTicket(ticket_id=tid, project_id=project_id, mode="resident",

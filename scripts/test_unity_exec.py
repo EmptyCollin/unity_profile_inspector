@@ -8,14 +8,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from types import SimpleNamespace  # noqa: E402
+
 from upi.core import events as E                          # noqa: E402
 from upi.core.cluster import cluster_events                # noqa: E402
-from upi.core.fingerprint import FingerprintStore          # noqa: E402
 from upi.core.models import EditPlan                       # noqa: E402
 from upi.core.probe_events import ProbeEvent               # noqa: E402
 from upi.core.ticket import (TicketStore, approve, approve_item,  # noqa: E402
                              build_ticket)
 from upi.core.unity_exec import UnityTicketExecutor        # noqa: E402
+
+
+class FakeFp:
+    def route(self, features):
+        return SimpleNamespace(hit=True, llm_required=False,
+                               record=SimpleNamespace(
+                                   fingerprint_id="fp-test",
+                                   pattern_id="learned:test",
+                                   playbook_id="PB-REUSE-BUFFER",
+                                   root_cause="learned"))
+
+    def record_outcome(self, *a, **k):
+        return None
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_unity_exec_"))
@@ -37,8 +51,7 @@ def plan():
                     side_effect="none", permission_tier="auto")
 
 
-fp = FingerprintStore(TMP / "fp.db")
-fp.seed_builtin()
+fp = FakeFp()
 store = TicketStore(TMP / "tickets")
 cs = cluster_events([sample(10), sample(100)], merge_gap=30)
 t = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: plan(), limit=8)

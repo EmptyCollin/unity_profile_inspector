@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.findings import (Anchor, AttributionInfo, RepairRecord,  # noqa: E402
+from upi.core.findings import (Anchor, AttributionInfo,  # noqa: E402
                                RunFindings, ToolFinding, new_run_id,
                                normalize_file, normalize_method, save_run)
 from upi.core.protocol import build as fp_build, digest as fp_digest, file_hash  # noqa: E402
@@ -234,47 +234,12 @@ def _smoke(project: Path) -> dict:
     return {"ok": ok, "state": st}
 
 
-def repair_one(project: Path, findings: list[ToolFinding]) -> list[RepairRecord]:
-    """找第一个能出源码配方的 finding：应用 → 编译 → 可运行冒烟。
-
-    玩法自测不计入考试；结论只到 `unverified`（没有同 replay 的前后指标复验）。
-    """
-    from upi.agents.fixer import apply_diffs
-    from upi.core.source_plan import plan_for_anchor_list
-    for f in findings:
-        anchors = [f"{a.file}::{a.method}" for a in f.anchors if a.method]
-        if not anchors:
-            continue
-        plan = plan_for_anchor_list(project, anchors)
-        if plan is None:
-            continue
-        try:
-            apply_diffs(plan, root=project)
-        except Exception as e:  # noqa: BLE001
-            return [RepairRecord(finding_id=f.finding_id, plan_id=plan.playbook_id,
-                                 files=plan.touched_assets, compile_ok=False,
-                                 verdict=f"apply_failed:{type(e).__name__}")]
-        st = _compile(project)
-        compiled = (not st.get("failed")
-                    and st.get("status") in {"completed", "up_to_date"})
-        sm = _smoke(project) if compiled else {"ok": False}
-        return [RepairRecord(
-            finding_id=f.finding_id, plan_id=plan.playbook_id,
-            files=plan.touched_assets, compile_ok=compiled,
-            runnable=bool(sm.get("ok")), gameplay_ok=None,
-            verdict="unverified" if compiled and sm.get("ok") else "",
-        )]
-    return []
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", default=str(ROOT / "test_project"))
     ap.add_argument("--project-id", default="")
     ap.add_argument("--replay", default=str(ROOT / "runs" / "i8_lab" / "paper_replay.json"))
     ap.add_argument("--limit", type=int, default=12)
-    ap.add_argument("--repair", action="store_true",
-                    help="对第一个能出源码配方的 finding 执行 应用→编译→玩法自测")
     a = ap.parse_args()
     project = Path(a.project).resolve()
     project_id = a.project_id or project.name
@@ -300,16 +265,13 @@ def main() -> int:
             state="candidate",
         ))
     findings.extend(asset_findings(project))
-    repairs: list[RepairRecord] = []
-    if a.repair:
-        repairs = repair_one(project, findings)
     run = RunFindings(
         run_id=run_id, project_id=project_id, mode="resident",
         protocol_fingerprint=fp_digest(fp_build(
             replay_script_hash=file_hash(replay_path), data_tier="A2",
             editor_mode="gui")),
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        findings=findings, repairs=repairs,
+        findings=findings, repairs=[],
     )
     p = save_run(run)
     print(json.dumps({"ok": True, "run_id": run_id, "project_id": project_id,

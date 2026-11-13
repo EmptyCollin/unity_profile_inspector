@@ -17,6 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import os  # noqa: E402
+os.environ.setdefault("UPI_PROFILE", "upi-fixture")  # default_path 需要档案
+
 from pydantic import ValidationError          # noqa: E402
 from upi.core.knowledge import KnowledgeStore, wilson_lower_bound  # noqa: E402
 from upi.core.models import PatternPromotionProposal              # noqa: E402

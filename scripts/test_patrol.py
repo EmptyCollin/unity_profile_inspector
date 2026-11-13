@@ -26,9 +26,14 @@ sys.path.insert(0, str(ROOT))
 # 本测试的判据依赖内置夹具档案（含 CLEAN 基准与 fixture_spec）。
 # 本地激活指针可能指向别的工程（例如 chroma-rogue 指向的 DevSim base），
 # 那会让 CLEAN_ID 变空、标定直接拒标——测试必须自带档案，不读本地状态。
-from upi.config.project_profile import use_profile as _use_profile  # noqa: E402
+from upi.config.project_profile import (load_profile,  # noqa: E402
+                                        register_profile, use_profile)
 
-_use_profile("upi-fixture")
+_base = load_profile("upi-fixture")
+_pt = _base.model_copy(update={
+    "baselines_dir_rel": "fixtures/upi-fixture/baselines"})
+register_profile(_pt, activate=True)   # 同 id：协议指纹里的 profile 不变
+use_profile("upi-fixture")
 
 import upi.agents.patrol as P      # noqa: E402
 

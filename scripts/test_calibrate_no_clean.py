@@ -9,6 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import os  # noqa: E402
+os.environ.setdefault("UPI_PROFILE", "upi-fixture")  # m1_multiwin 导入期需要档案
+
 from upi.agents import patrol as P                      # noqa: E402
 from upi.config.project_profile import (ProjectProfile,  # noqa: E402
                                         register_profile, unregister_profile,

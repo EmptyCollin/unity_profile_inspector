@@ -84,33 +84,6 @@ def _projects_payload() -> dict:
                 "error": f"{type(e).__name__}: {e}"}
 
 
-def _build_opportunity_ticket():
-    """从当前工程静态机会建工单；有 devsim 运行期 feature 文件时只报活路径。"""
-    from upi.config.project_profile import active_profile
-    from upi.core.opportunity import scan
-    from upi.core.ticket import TicketStore, build_opportunity_ticket
-
-    prof = active_profile()
-    flags = None
-    feat = Path(tempfile.gettempdir()) / "devsim_active_features.json"
-    if feat.exists():
-        try:
-            d = json.loads(feat.read_text(encoding="utf-8"))
-            fp = Path(str(d.get("project_path") or "")).resolve()
-            if fp == prof.abs_project.resolve():
-                flags = {k for k, v in d.items() if v is True}
-        except Exception:  # noqa: BLE001
-            flags = None
-    findings = scan(prof.abs_project, project_id=prof.profile_id, active_flags=flags)
-    if not findings:
-        raise ValueError("当前工程没有可用机会（先运行 replay/扫描，或检查 active_features）")
-    t = build_opportunity_ticket(findings, prof.abs_project,
-                                 project_id=prof.profile_id)
-    store = TicketStore(os.environ.get("UPI_TICKET_DIR") or None)
-    store.save(t)
-    return t
-
-
 def _build_candidate_ticket_latest():
     """从最近一次 I8 证据候选建工单；不读 case/oracle。"""
     from upi.config.project_profile import active_profile

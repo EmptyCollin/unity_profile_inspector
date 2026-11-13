@@ -9,7 +9,7 @@
   ],
   "replay": "c03",
   "oracle": "c03",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "notes": "item labels rebuilt every update; same file as c02, different hunk",
   "expects": {
     "windows": [

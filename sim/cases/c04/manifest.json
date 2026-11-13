@@ -6,7 +6,7 @@
   "patches": [],
   "replay": "c04",
   "oracle": "c04",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "notes": "oversized shop payload; asset-only case",
   "expects": {
     "windows": [

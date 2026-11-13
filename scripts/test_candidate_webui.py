@@ -63,9 +63,9 @@ try:
         data = json.loads(r.read().decode("utf-8"))
     ok("候选工单 API", r.status == 200 and data.get("ok") is True, data)
     it = (data.get("ticket") or {}).get("items", [{}])[0]
-    ok("选中 HUD recipe", it.get("playbook_id") == "PB-OP-HUD-TEXT-CACHE", it)
-    ok("auto pending", it.get("permission_tier") == "auto"
-       and it.get("status") == "pending", it)
+    ok("无 planner ⇒ 无预制配方", it.get("playbook_id") in ("", None), it)
+    ok("无 planner ⇒ needs_human", it.get("plan") is None
+       and it.get("status") == "needs_human", it)
 finally:
     ui.stop()
 

@@ -8,7 +8,7 @@
   ],
   "replay": "c07",
   "oracle": "c07",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "pattern_id": "canvas_layout_churn",
   "notes": "force canvas rebuild every frame",
   "expects": {

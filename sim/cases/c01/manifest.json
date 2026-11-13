@@ -5,7 +5,7 @@
   ],
   "replay": "c01",
   "oracle": "c01",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "notes": "match allocation: per-call bool[N,N] and int[Colors]",
   "expects": {
     "windows": [

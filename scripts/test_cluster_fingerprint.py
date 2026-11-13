@@ -68,24 +68,30 @@ m4 = match_across_runs([r1, r2], rel_tol=0)
 ok("容差 0 时 ±1 不匹配", len(m4) == 4 and all(x.reproduction_rate == 0.5 for x in m4),
    str([(x.cluster.first_rel, x.reproduction_rate) for x in m4]))
 
-# ── 指纹库 ──
+# ── 指纹库（I10：不预置，只能从学习写入）──
 TMP = Path(tempfile.mkdtemp(prefix="upi_fp_"))
 db = TMP / "fingerprints.db"
 store = FingerprintStore(db)
-n = store.seed_builtin()
-ok("内置 pattern 入库", n == 6 and len(store.all()) == 6)
-ok("ensure_seed 幂等", store.ensure_seed() == 0)
+ok("空库不预置指纹", store.ensure_seed() == 0 and len(store.all()) == 0)
 
 draw = cluster_events([sample(10)], merge_gap=40)[0]
 f = fp_features(draw)
+miss = store.route(f)
+ok("空库 ⇒ 未命中且要求 LLM", (not miss.hit) and miss.llm_required)
+
+from upi.core.fingerprint import FingerprintRecord  # noqa: E402
+store.upsert(FingerprintRecord(
+    fingerprint_id=f.fingerprint_id(), features=f.model_dump(),
+    pattern_id="learned:test", root_cause="learned-root",
+    playbook_id="", confidence=0.6, source="learned", last_seen=""))
 hit = store.route(f)
-ok("drawCalls/step 命中内置", hit.hit and hit.record.pattern_id.endswith(":drawCalls:step"))
+ok("学习写入后可命中", hit.hit and hit.record.pattern_id == "learned:test")
 ok("命中跳过 LLM", hit.llm_required is False)
 ok("命中计数 +1", store.get(hit.record.fingerprint_id).n_hits == 1)
 
 unknown = FingerprintFeatures(metric="new_metric", shape="spike", data_tier="A2")
-miss = store.route(unknown)
-ok("未知指纹不命中且要求 LLM", (not miss.hit) and miss.llm_required)
+miss2 = store.route(unknown)
+ok("未知指纹不命中且要求 LLM", (not miss2.hit) and miss2.llm_required)
 ok("miss 计数进库", store.stats()["misses"] >= 1)
 
 store.record_outcome(hit.record.fingerprint_id, True)
@@ -93,7 +99,7 @@ ok("成功计数", store.stats()["success"] == 1)
 
 # 持久化：重开同一路径仍能读到
 store2 = FingerprintStore(db)
-ok("指纹库持久化", len(store2.all()) == 6)
+ok("指纹库持久化", len(store2.all()) == 1)
 ok("stats 有命中/未命中", store2.stats()["hits"] >= 1
    and store2.stats()["misses"] >= 1)
 

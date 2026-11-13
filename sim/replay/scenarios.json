@@ -622,5 +622,6 @@
     "preview_seconds": 2.5,
     "shop_every": 3,
     "shop_refresh_cost": 40
-  }
+  },
+  "base_hash": "0ac96c86c70e2a2f"
 }

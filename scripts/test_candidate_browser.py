@@ -70,8 +70,8 @@ def main() -> int:
         page.wait_for_timeout(900)
         html = page.content()
         ok("候选建单按钮存在", 'id="candTicketBtn"' in html)
-        ok("页面出现 HUD recipe", "PB-OP-HUD-TEXT-CACHE" in html, html[-500:])
-        ok("页面出现 auto/pending", "auto" in html and "pending" in html)
+        ok("页面不再出现预制配方", "PB-OP-HUD-TEXT-CACHE" not in html, html[-500:])
+        ok("页面出现 needs_human 工单", "needs_human" in html)
         b.close()
     print(f"\n==== 候选工单浏览器验收: {len(PASS)} 通过, {len(FAIL)} 失败")
     return 1 if FAIL else 0

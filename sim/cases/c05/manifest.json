@@ -8,7 +8,7 @@
   ],
   "replay": "c05",
   "oracle": "c05",
-  "base_hash": "e616c40678022314",
+  "base_hash": "0ac96c86c70e2a2f",
   "pattern_id": "per_instance_material",
   "notes": "per-tile material instance (drawCalls)",
   "expects": {

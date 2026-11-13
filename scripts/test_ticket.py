@@ -8,14 +8,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from types import SimpleNamespace  # noqa: E402
+
 from upi.core import events as E                       # noqa: E402
 from upi.core.cluster import cluster_events            # noqa: E402
-from upi.core.fingerprint import FingerprintStore      # noqa: E402
 from upi.core.models import EditPlan                   # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
 from upi.core.resident import ResidentEngine           # noqa: E402
 from upi.core.ticket import (TicketExecutor, TicketStore, approve,  # noqa: E402
                              approve_item, build_ticket, reject)
+
+
+class FakeFp:
+    """不预置指纹（I10）：测试直接给“已学习命中”。"""
+    def route(self, features):
+        pb = ("PB-SHARED-MAT-MPB" if getattr(features, "metric", "")
+              == "drawCalls" else "PB-REUSE-BUFFER")
+        return SimpleNamespace(hit=True, llm_required=False,
+                               record=SimpleNamespace(
+                                   fingerprint_id="fp-test",
+                                   pattern_id="learned:test",
+                                   playbook_id=pb,
+                                   root_cause="learned"))
+
+    def record_outcome(self, *a, **k):
+        return None
 
 PASS, FAIL = [], []
 TMP = Path(tempfile.mkdtemp(prefix="upi_ticket_"))
@@ -37,8 +54,7 @@ def plan():
                     side_effect="none", permission_tier="auto")
 
 
-fp = FingerprintStore(TMP / "fp.db")
-fp.seed_builtin()
+fp = FakeFp()
 store = TicketStore(TMP / "tickets")
 
 cs = cluster_events([sample(10), sample(100)], merge_gap=30)

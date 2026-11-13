@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import os  # noqa: E402
+os.environ.setdefault("UPI_PROFILE", "upi-fixture")  # m1_multiwin 导入期需要档案
+
 import check_fixture_split as G          # noqa: E402
 from upi.tooling import checklist as CL   # noqa: E402
 
