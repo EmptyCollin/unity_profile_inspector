@@ -28,6 +28,32 @@ class BatchResult:
     capture_ok: bool = True
 
 
+def _isolate_compile(patches: dict[str, PatchRef], apply: ApplyFn,
+                     compile_fn: CompileFn, rollback: RollbackFn) -> list[str]:
+    """二分定位可编译子集；返回可保留的 unit。假定补丁间无强依赖。"""
+    items = list(patches.items())
+    for _, p in items:
+        rollback(p)
+    good: list[str] = []
+    candidates = items
+    while candidates:
+        half = candidates[:max(1, len(candidates) // 2)]
+        for uid, p in half:
+            apply(p)
+        if compile_fn():
+            good.extend(uid for uid, _ in half)
+            candidates = candidates[len(half):]
+        else:
+            for uid, p in half:
+                rollback(p)
+            candidates = half
+            if len(half) == 1:
+                break
+    for uid in good:
+        apply(patches[uid])
+    return good
+
+
 def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
               compile_fn: CompileFn, capture: CaptureFn,
               verify: VerifyFn, rollback: RollbackFn,
@@ -52,11 +78,16 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
         return res
     res.compile_ok = bool(compile_fn())
     if not res.compile_ok:
-        for uid in list(res.applied):
-            if rollback(patches[uid]):
-                res.rolled_back.append(uid)
-        res.failed["__compile__"] = "compile_failed"
-        return res
+        good = _isolate_compile(patches, apply, compile_fn, rollback)
+        bad = [uid for uid in patches if uid not in good]
+        for uid in bad:
+            res.failed[uid] = "compile_failed"
+            res.rolled_back.append(uid)
+        if not good:
+            return res
+        res.compile_ok = True
+        res.applied = list(good)
+        units = [u for u in units if getattr(u, "unit_id", "") in good]
     try:
         obs = capture()
     except Exception as e:  # noqa: BLE001

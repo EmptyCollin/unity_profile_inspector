@@ -36,6 +36,7 @@ def main() -> int:
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--project-id", default="test_project")
     ap.add_argument("--baselines", type=int, default=3)
+    ap.add_argument("--rounds", type=int, default=2)
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -79,6 +80,7 @@ def main() -> int:
     cfg = N.load_config(ROOT / "llm_config.yaml")
     store = TicketStore()
     plans, bases = {}, {}
+    round_no = 1
 
     def plan(unit):
         h = next((x for x in hs
@@ -86,7 +88,8 @@ def main() -> int:
                   or str(x.get("root_cause")) == unit.mechanism), None)
         if h is None:
             return None
-        pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p)
+        pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
+                              strategy=f"round{round_no}")
         print("plan", unit.unit_id, unit.mechanism, bool(pl), meta.get("error", ""))
         if pl is None:
             return None
@@ -159,20 +162,32 @@ def main() -> int:
     def rollback(patch):
         return X._git_reset(p, bases.get(patch.unit_id, ""))
 
-    res = run_batch(units, plan=plan, apply=apply, compile_fn=compile_fn,
-                    capture=capture_fn, verify=verify, rollback=rollback)
-    print("batch", res)
-    for u in units:
-        pl = plans.get(u.unit_id)
-        run.repairs.append(RepairRecord(
-            finding_id=(u.finding_ids[0] if u.finding_ids else ""),
-            plan_id=(pl.playbook_id if pl else ""),
-            files=(pl.touched_assets if pl else []),
-            compile_ok=res.compile_ok and bool(pl),
-            verdict=("verified" if u.unit_id in res.verified
-                     else res.failed.get(u.unit_id, "not_run")),
-            attempt_no=1, stop_reason=res.failed.get(u.unit_id, "")))
-    run.stop_reason = f"batch:verified={len(res.verified)}"
+    active = list(units)
+    all_verified: set[str] = set()
+    for r in range(1, max(1, a.rounds) + 1):
+        round_no = r
+        if not active:
+            break
+        res = run_batch(active, plan=plan, apply=apply, compile_fn=compile_fn,
+                        capture=capture_fn, verify=verify, rollback=rollback,
+                        round_no=r)
+        print("batch", r, res)
+        all_verified.update(res.verified)
+        for u in active:
+            pl = plans.get(u.unit_id)
+            run.repairs.append(RepairRecord(
+                finding_id=(u.finding_ids[0] if u.finding_ids else ""),
+                plan_id=(pl.playbook_id if pl else ""),
+                files=(pl.touched_assets if pl else []),
+                compile_ok=res.compile_ok and bool(pl),
+                verdict=("verified" if u.unit_id in res.verified
+                         else res.failed.get(u.unit_id, "not_run")),
+                attempt_no=r, stop_reason=res.failed.get(u.unit_id, "")))
+        failed = set(res.failed) - {"__compile__", "__capture__"}
+        active = [u for u in units if u.unit_id in failed]
+        if not active:
+            break
+    run.stop_reason = f"batch:verified={len(all_verified)}"
     save_run(run)
     paper = json.loads((ROOT / "runs" / "i8_lab" / "paper.json")
                        .read_text(encoding="utf-8"))
