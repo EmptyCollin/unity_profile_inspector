@@ -485,6 +485,8 @@ def main() -> int:
     tried = {str((plan_hyp or {}).get("root_cause") or "")}
     seen_hashes = {_diff_hash(plan)}
     retry_round = 0
+    relation = "or"
+    site_count = 0
     max_steps = max_attempts("regression")
     if (ladder_status == "needs_recheck" and target is not None
             and not resume_verify_only):
@@ -497,10 +499,17 @@ def main() -> int:
                         "reason": f"ladder:{last.get('ladder')}"}
             if retry_round >= max_steps:
                 return {"stop": True, "reason": "budget"}
+            from upi.core.repair_protocol import ProtocolState, decide_next
+            action = decide_next(ProtocolState(
+                relation, retry_round, max_steps,
+                sites_remaining=site_count))
+            if action in ("stop", "rollback_and_stop"):
+                return {"stop": True, "reason": f"protocol:{action}"}
             return {"tool": "plan_patch"}
 
         def _act(_decision):
             nonlocal ladder_status, target_gone, new_roots, retry_round
+            nonlocal relation, site_count
             retry_round += 1
             # I15：互斥假设，重试前先回滚上一次未验证补丁（OR 协议）
             if base_head:
@@ -591,6 +600,19 @@ def main() -> int:
                 baselines=lambda: (retry_hits >= 2
                                    and len(baseline_runs) >= 3))
             ladder_status, target_gone, new_roots = l2.status, gone, new
+            try:
+                from upi.core.site_audit import sites_remaining as _sr
+                _sa = _sr(p, [{"find": d.get("find", ""),
+                               "replace": d.get("replace", "")}
+                              for d in np.diffs])
+                site_count = sum(len(v) for v in _sa.values())
+                if site_count:
+                    relation = "one"
+                (run_dir / f"site_audit_attempt{attempt_no}.json").write_text(
+                    json.dumps(_sa, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                site_count = 0
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
             (run_dir / f"verify_ladder_attempt{attempt_no}.json").write_text(
                 l2.model_dump_json(indent=2), encoding="utf-8")
@@ -608,7 +630,8 @@ def main() -> int:
                 "hypothesis": str((hsel or {}).get("root_cause") or ""),
                 "plan_id": np.playbook_id, "diff_hash": _diff_hash(np),
                 "ticket_id": tid2, "item_status": o2.items[0].status,
-                "ladder": l2.status, "stop_reason": l2.status})
+                "ladder": l2.status, "stop_reason": l2.status,
+                "relation": relation, "sites_remaining": site_count})
             retry_obs["ladder"] = l2.status
             save_run(run)
             return {"ladder": l2.status, "status": o2.items[0].status}
