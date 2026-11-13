@@ -399,14 +399,19 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 改前后同属一次进程、同一个档案，那种对比由 verify.assert_comparable
         # 查仪器状态；跨工程的真正硬闸在标定侧（m1_detect 的 G7 比较含
         # profile_id），标定只能来自它自己标出来的工程。
-        fp = ("warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,"
-              f"replay=none-v0,profile={_prof().profile_id}")
         stamp = time.strftime("%H%M%S")
         proj, scene = _ctx(st)
+        try:
+            _p = _prof()
+            _pid, _groot = _p.profile_id, _p.git_root
+        except Exception:  # noqa: BLE001 — 未选择工程时用工程自身作快照基准
+            _pid, _groot = "unknown", Path(proj).resolve()
+        fp = ("warmup=8,window=20,poll=1.0,resident=breachprobe+replaydriver+a2,"
+              f"replay=none-v0,profile={_pid}")
         # root 一律取 profile.git_root：diff 的 file、快照脏区、apply 落盘
         # 三者共用同一个基准，才不会出现"改的是 A、申报的是 B"。
         snap = snapmod.snapshot(f"m4-{stamp}", proj, scene, fp,
-                                root=_prof().git_root)
+                                root=_groot)
 
         # ── 先报后批（M4 / I3：修改权限只来自权限矩阵，不来自模型自评）──
         # 顺序讲究：快照先建（秒级、无副作用，且工单第 4 件套要写真实 tag），

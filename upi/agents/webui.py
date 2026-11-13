@@ -239,21 +239,22 @@ def build_status() -> dict:
     rstore = RegressionStore(os.environ.get("UPI_REGRESSION_DIR") or None)
     regression_suites = [rstore.summary(s.suite_id)
                          for s in rstore.list_suites()[:10]]
+    from upi.tooling import probe_control as PC
+    settings = {
+        "probe_file": str(PC.PROBE_FILE),
+        "fingerprint_db": str(fp.path),
+        "ticket_dir": str(tstore.root),
+        "regression_dir": str(rstore.root),
+    }
     try:
         from upi.config.project_profile import active_profile
-        from upi.tooling import probe_control as PC
         prof = active_profile()
-        settings = {
-            "profile_id": prof.profile_id,
-            "project": str(prof.abs_project),
-            "fix_subject": prof.fix_subject or "",
-            "probe_file": str(PC.PROBE_FILE),
-            "fingerprint_db": str(fp.path),
-            "ticket_dir": str(tstore.root),
-            "regression_dir": str(rstore.root),
-        }
-    except Exception as e:  # noqa: BLE001
-        settings = {"error": f"{type(e).__name__}: {e}"}
+        settings.update({"profile_id": prof.profile_id,
+                         "project": str(prof.abs_project),
+                         "fix_subject": prof.fix_subject or ""})
+    except Exception as e:  # noqa: BLE001 — 未选择工程时状态页仍可用
+        settings.update({"profile_id": None, "project": "",
+                         "project_error": f"{type(e).__name__}: {str(e)[:160]}"})
     from upi.core.scheduler import get_scheduler
     try:
         from upi.core import capture_config as CC

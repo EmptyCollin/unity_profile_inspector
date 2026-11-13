@@ -442,7 +442,13 @@ def load_profile(pid: Optional[str] = None) -> ProjectProfile:
       指针指向的档案被删掉也走同一条路——宁停不猜。
     """
     pid = (pid or os.environ.get(PROFILE_ENV)
-           or get_active_profile_id() or DEFAULT_PROFILE_ID)
+           or get_active_profile_id())
+    if not pid:
+        # I9c：产品不再默认落到夹具工程。没有选择就让调用方明确失败；
+        # 需要内置夹具的测试/彩排必须显式 load_profile("upi-fixture")。
+        raise ProfileError(
+            "未选择工程：请先在 UI「工程」页选择/激活一个工程，"
+            "或设置 UPI_PROFILE / 显式传入 profile_id（内置夹具需显式指定 upi-fixture）")
     # I7b：registry 是 UI 新增工程的唯一事实源；旧 projects/*.json 只给既有
     # 测试/夹具链路用，不参与 UI 的工程选择。
     try:

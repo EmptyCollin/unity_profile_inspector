@@ -8,6 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from upi.config.project_profile import use_profile  # noqa: E402
+
+# 夹具模板测试：显式指定内置档案（I9c 不再默认回退夹具）
+use_profile("upi-fixture")
+
 from upi.core import events as E                       # noqa: E402
 from upi.core.cluster import cluster_events            # noqa: E402
 from upi.core.fingerprint import FingerprintStore      # noqa: E402

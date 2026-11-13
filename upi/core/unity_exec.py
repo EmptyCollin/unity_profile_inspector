@@ -31,6 +31,17 @@ def _profile():
 
 
 def default_scene() -> Optional[Path]:
+    """执行场景：显式 UPI_SCENE > legacy 夹具场景 > None（拒绝，不猜）。
+
+    I9c：产品路径不再用 `fix_subject` 推断场景；真实工程应由 replay 套件/
+    调用方显式给场景。夹具场景只在 legacy 开关下可用。
+    """
+    import os
+    env = os.environ.get("UPI_SCENE", "").strip()
+    if env:
+        return Path(env)
+    if os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() != "1":
+        return None
     p = _profile()
     if not p.fix_subject:
         return None
@@ -102,7 +113,9 @@ class UnityTicketExecutor:
             self.store.save(ticket)
             return ticket
         if self.scene is None:
-            ticket.results.append({"error": "无 fix_subject/scene，拒绝执行"})
+            ticket.results.append({
+                "error": "未指定执行场景：用 replay 套件/UPI_SCENE 给场景，"
+                         "不再从 fixture 的 fix_subject 推断"})
             ticket.status = "done"
             self.store.save(ticket)
             return ticket
@@ -128,7 +141,11 @@ class UnityTicketExecutor:
                 item.error = f"tier={item.permission_tier} requires individual approval"
                 continue
             attempt = f"{ticket.ticket_id}-{item.item_id}"[-80:]
-            fp = f"resident:{getattr(_profile(), 'profile_id', 'unknown')}:{item.cluster_id}"
+            try:
+                _pid = _profile().profile_id
+            except Exception:  # noqa: BLE001 — 无激活工程时指纹标 unknown，不阻断执行
+                _pid = "unknown"
+            fp = f"resident:{_pid}:{item.cluster_id}"
             try:
                 snap = self.snapshot_fn(attempt, self.project, self.scene, fp)
                 rep = self.execute_fn(

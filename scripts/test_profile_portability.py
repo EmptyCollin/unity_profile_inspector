@@ -416,6 +416,8 @@ def main() -> int:
         PP.reset_profile()
 
     # ── ⑤ 还原内置后行为与切换前一致（不残留脏值）──
+    # I9c：产品不再默认回退夹具档案，测试要显式指定内置档案。
+    PP.use_profile("upi-fixture")
     back = PP.active_profile()
     ok("还原内置档案（无跨用例脏值）",
        back.profile_id == PP.DEFAULT_PROFILE_ID

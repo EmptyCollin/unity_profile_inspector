@@ -114,8 +114,9 @@ approved(t4)
 ex4 = UnityTicketExecutor(store, project=TMP, scene=TMP / "s.tscene")
 ex4.scene = None
 out4 = ex4.execute(t4)
-ok("无 scene 拒绝", out4.status == "done" and any("scene" in str(r.get("error", ""))
-                                                for r in out4.results))
+ok("无 scene 拒绝", out4.status == "done" and any(
+    ("scene" in str(r.get("error", ""))) or ("场景" in str(r.get("error", "")))
+    for r in out4.results))
 
 # 未批准
 t5 = build_ticket(cs, fp_store=fp, plan_provider=lambda c, pb: plan(), limit=8)

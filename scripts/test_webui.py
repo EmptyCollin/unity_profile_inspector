@@ -109,7 +109,8 @@ try:
        and len(data.get("fingerprint_records") or []) == 6)
     ok("状态含巡检调度", "resident_scheduler" in data)
     ok("状态含设置", isinstance(data.get("settings"), dict)
-       and data["settings"].get("profile_id"))
+       and "probe_file" in data["settings"]
+       and (data["settings"].get("profile_id") or data["settings"].get("project_error")))
     ok("状态含取证配置（与 I8 Lab 共用）",
        isinstance(data.get("capture_config"), dict)
        and data["capture_config"].get("evidence_threads") == 8)

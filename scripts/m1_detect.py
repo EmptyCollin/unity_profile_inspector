@@ -30,8 +30,16 @@ from upi.tooling.trace import Tracer, environment_fingerprint     # noqa: E402
 #   · 阈值目录：夹具专属的 S2 隔离闸（check_fixture_split）扫 baselines/ 下
 #     全部 thresholds_*.json 并要求可回溯至夹具 CLEAN——新工程的阈值混进来
 #     会被报成"手工回调过"（真工程实测 13 条误报）。分目录后各扫各的。
-BASELINES = ROOT / active_profile().baselines_dir_rel
-CALDIR = ROOT / active_profile().cal_dir_rel
+def _profile_dirs() -> tuple[Path, Path]:
+    """未选择工程时给仓库默认目录，避免导入期因档案缺失而崩（I9c）。"""
+    try:
+        p = active_profile()
+        return ROOT / p.baselines_dir_rel, ROOT / p.cal_dir_rel
+    except Exception:  # noqa: BLE001
+        return ROOT / "baselines", ROOT / "calibration"
+
+
+BASELINES, CALDIR = _profile_dirs()
 RUNS = ROOT / "runs"
 
 # G7 可比性判据的字段清单（阈值源指纹 × 数据源指纹，逐字段相等才允许拿

@@ -19,12 +19,16 @@
    C3 批准内容为空 ⇒ 视同未批，闸不放行（fixer 侧同规则双保险）
 """
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# I9c：产品不再默认回退夹具档案；本测试验 fix 节点与人工回路，显式指定内置档案。
+os.environ.setdefault("UPI_PROFILE", "upi-fixture")
 
 from pydantic import ValidationError                      # noqa: E402
 from upi.core import events as E                          # noqa: E402

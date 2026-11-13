@@ -20,6 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# I9c：产品不再默认回退夹具档案；本测试验守护机制，显式指定内置夹具档案。
+os.environ.setdefault("UPI_PROFILE", "upi-fixture")
+
 from upi.core import events as E       # noqa: E402
 from upi.agents import daemon as D      # noqa: E402
 
