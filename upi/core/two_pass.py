@@ -16,17 +16,19 @@ class DeepWindow:
     end_frame: int
     score: float = 0.0
     kind: str = ""
+    coverage_gap: tuple[str, ...] = ()
 
     def with_margin(self, margin: int) -> "DeepWindow":
         return DeepWindow(metric=self.metric,
                           start_frame=max(0, self.start_frame - margin),
                           end_frame=self.end_frame + margin,
-                          score=self.score, kind=self.kind)
+                          score=self.score, kind=self.kind,
+                          coverage_gap=self.coverage_gap)
 
     def model_dump(self) -> dict:
         return {"metric": self.metric, "start_frame": self.start_frame,
                 "end_frame": self.end_frame, "score": self.score,
-                "kind": self.kind,
+                "kind": self.kind, "coverage_gap": list(self.coverage_gap),
                 "frame_range": [self.start_frame, self.end_frame]}
 
 
@@ -41,10 +43,12 @@ def select_windows(windows: list[dict], *, max_n: int = 3,
                 start_frame=int(w["start_frame"]),
                 end_frame=int(w["end_frame"]),
                 score=float(w.get("score") or 0.0),
-                kind=str(w.get("kind") or "")))
+                kind=str(w.get("kind") or ""),
+                coverage_gap=tuple(str(x) for x in (w.get("coverage_gap") or []))))
         except (KeyError, TypeError, ValueError):
             continue
-    parsed.sort(key=lambda w: w.score, reverse=True)
+    # 覆盖缺口优先：分数 + 缺口加权
+    parsed.sort(key=lambda w: (w.score + 5.0 * len(w.coverage_gap)), reverse=True)
     picked: list[DeepWindow] = []
     for w in parsed:
         if len(picked) >= max_n:
@@ -56,6 +60,8 @@ def select_windows(windows: list[dict], *, max_n: int = 3,
             # 同 metric 邻近：保留分数更高者，扩展范围
             dup.start_frame = min(dup.start_frame, w.start_frame)
             dup.end_frame = max(dup.end_frame, w.end_frame)
+            dup.coverage_gap = tuple(dict.fromkeys(
+                list(dup.coverage_gap) + list(w.coverage_gap)))
             continue
         picked.append(w)
     picked.sort(key=lambda w: w.start_frame)

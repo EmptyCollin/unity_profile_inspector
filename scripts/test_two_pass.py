@@ -33,6 +33,13 @@ ok("同 metric 邻近合并", len(sel2) == 2, [(w.start_frame, w.end_frame) for 
 ok("合并取更广范围", sel2[0].start_frame == 100 and sel2[0].end_frame == 130,
    sel2[0].model_dump())
 
+gap = [{"metric": "m0", "start_frame": 10, "end_frame": 20, "score": 5},
+       {"metric": "m1", "start_frame": 100, "end_frame": 110, "score": 1,
+        "coverage_gap": ["allocation", "loading"]}]
+selg = select_windows(gap, max_n=1)
+ok("覆盖缺口加权优先", selg[0].metric == "m1"
+   and len(selg[0].coverage_gap) == 2, [w.metric for w in selg])
+
 plan = plan_deep_windows([{"metric": "m", "start_frame": 50, "end_frame": 60,
                            "score": 1}], margin=10)
 ok("窗口带余量", plan[0].start_frame == 40 and plan[0].end_frame == 70,

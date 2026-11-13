@@ -69,6 +69,8 @@ def main() -> int:
     if events:
         from upi.core.anomaly_candidates import windows_from_events
         bundle.anomalies = windows_from_events(events)
+    from upi.core.window_evidence import coverage
+    bundle.coverage = coverage(bundle)
 
     out = Path(a.out) if a.out else (ROOT / "runs" / run_id / "evidence" / "evidence_v2.json")
     bundle.write(out)
