@@ -250,8 +250,7 @@ def build_status() -> dict:
         from upi.config.project_profile import active_profile
         prof = active_profile()
         settings.update({"profile_id": prof.profile_id,
-                         "project": str(prof.abs_project),
-                         "fix_subject": prof.fix_subject or ""})
+                         "project": str(prof.abs_project)})
     except Exception as e:  # noqa: BLE001 — 未选择工程时状态页仍可用
         settings.update({"profile_id": None, "project": "",
                          "project_error": f"{type(e).__name__}: {str(e)[:160]}"})
@@ -715,7 +714,7 @@ function renderSettings(s){
   const st = s.settings || {};
   const rows = [
     ["profile", st.profile_id], ["project", st.project],
-    ["fix_subject", st.fix_subject || "—"], ["probe_file", st.probe_file],
+    ["probe_file", st.probe_file],
     ["fingerprint_db", st.fingerprint_db], ["ticket_dir", st.ticket_dir],
     ["regression_dir", st.regression_dir], ["error", st.error],
   ].filter(([, v]) => v != null && v !== "");

@@ -542,6 +542,18 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             except Exception as e:  # noqa: BLE001 — 缺侧即盲区，fail-open 到未评估
                 fb_err = str(e)[:160]
 
+        before_obs, before_err = None, None
+        if evidence_mode and st.get("replay"):
+            try:
+                from upi.agents import replay_observe
+                anchors = [a for h in (st.get("hypotheses") or [])[:1]
+                           for a in h.get("code_anchors", [])]
+                cands = replay_observe.capture(proj, st["replay"],
+                                               f"{run_dir.name}_pre", 8)
+                before_obs = replay_observe.observe(cands, anchors)
+            except Exception as e:  # noqa: BLE001 — 观测失败不阻断修复，只留盲区
+                before_err = f"{type(e).__name__}: {str(e)[:140]}"
+
         rep = fixer.execute(ep, snap, project_path=proj, scene_path=scene,
                             root=_groot, human_approved=bool(note.strip()),
                             approval_note=note)
@@ -555,7 +567,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         pre = {"stamp": stamp,
                "before_path": (before or {}).get("_path", ""),
                "floor_before": floor_before, "floor_before_err": fb_err,
-               "evidence": evidence_mode}
+               "evidence": evidence_mode,
+               "before_obs": before_obs, "before_obs_err": before_err}
         # attempts 不在这里 +1（真机实测撞出的语义错）：配额计的是
         # "评估过一次的完整尝试"。verify 崩溃（仪器漂移/编辑器消失）会
         # 回滚且不出 verdict——那是一次作废，不该吃掉 G11 的唯一配额，
@@ -567,8 +580,38 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
     def verify(st: dict) -> dict:
         pre = st["pre_attempt"]                  # fix 节点写入前锁定的基线
         if pre.get("evidence"):
-            # 证据模式：没有夹具 before/after，也没有 replay 套件可复验。
-            # 已应用但只能记 unverified，不冒充 resolved（G21）。
+            if st.get("replay"):
+                # 单次 before/after 只能给 observed；verified 需 3 基线（G21）
+                from upi.agents import replay_observe
+                from upi.core.regression import RegressionVerdict
+                proj = _ctx(st)[0]
+                anchors = [a for h in (st.get("hypotheses") or [])[:1]
+                           for a in h.get("code_anchors", [])]
+                before = pre.get("before_obs")
+                try:
+                    cands = replay_observe.capture(proj, st["replay"],
+                                                   f"{run_dir.name}_after", 8)
+                    after = replay_observe.observe(cands, anchors)
+                    observed, why = replay_observe.judge(before, after)
+                except Exception as e:  # noqa: BLE001
+                    observed = "unknown"
+                    after = None
+                    why = f"复验失败：{type(e).__name__}: {str(e)[:140]}"
+                v = RegressionVerdict(
+                    status="insufficient", verification_status="unverified",
+                    target_cluster_id="", target_present=(after is not None),
+                    new_clusters=[], guard_regressions=[], unassessed_guards=[],
+                    reason=(f"observed={observed}：{why}"
+                            "（单次前后，未达 3 基线；不记 verified）"),
+                    protocol_fingerprint="")
+                return {"verdict": v.model_dump(),
+                        "attempts": st.get("attempts", 0) + 1,
+                        "records": st.get("records", []) + [{
+                            "kind": "verify", "status": "insufficient",
+                            "verification_status": "unverified",
+                            "observed": observed, "why": why}],
+                        "route": "proceed"}
+            # 没有 replay：已应用但无法复验，明确交人
             return {"route": "needs_human",
                     "records": st.get("records", []) + [{
                         "kind": "verify", "status": "unverified",
