@@ -24,12 +24,12 @@ a.write_text("void Update(){ Canvas.ForceUpdateCanvases(); }\n", encoding="utf-8
 b = TMP / "Assets" / "B.cs"
 b.write_text("void Other(){ Canvas.ForceUpdateCanvases(); }\n", encoding="utf-8")
 
-ok("删除 token 提取", "ForceUpdateCanvases" in removed_tokens(
-    "Canvas.ForceUpdateCanvases();", ""))
+ok("删除 token 提取", any("ForceUpdateCanvases" in p for p in removed_tokens(
+    "Canvas.ForceUpdateCanvases();", "")))
 rem = sites_remaining(TMP, [{"find": "Canvas.ForceUpdateCanvases();",
                              "replace": ""}])
-ok("多站点剩余被检出", "ForceUpdateCanvases" in rem and len(rem["ForceUpdateCanvases"]) == 2,
-   rem)
+ok("多站点剩余被检出", any("ForceUpdateCanvases" in k for k in rem)
+   and len(next(iter(rem.values()))) == 2, rem)
 ok("token 未命中为空", audit_tokens(TMP, ["NoSuchCall"]) == {})
 
 print(f"\n==== 站点审计测试: {len(PASS)} 通过, {len(FAIL)} 失败")

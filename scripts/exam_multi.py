@@ -125,6 +125,7 @@ def main() -> int:
         spans = "; ".join(
             f"{s.file}:{s.start_line}-{s.end_line}({s.symbol})"
             for s in (c.sources or [])[:3])
+        spans = spans.replace(str(p), "").replace(Path(p).name, "project")
         cards[str(c.root_cause)] = (
             f"mechanism={c.mechanism}; kind={c.kind}; score={c.score:.2f} "
             f"(CI {c.score_interval_low:.2f}-{c.score_interval_high:.2f}); "

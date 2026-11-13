@@ -75,10 +75,15 @@ def _read_snippets(project_root: Path, anchors: list[str], *,
         end = None
         if method:
             m = method.split(".")[-1]
+            import re as _re
+            decl = _re.compile(r"\b(?:void|bool|int|float|string|IEnumerator)\s+"
+                               + _re.escape(m) + r"\s*\(")
             for i, ln in enumerate(lines):
-                if ("void " + m) in ln or (" " + m + "(") in ln or (m + "(") in ln:
+                if decl.search(ln):
                     start = i
                     break
+            else:
+                return "", texts
             # 只取方法体（大括号配对），避免把相邻方法带进补丁范围
             depth = 0
             started = False
@@ -214,6 +219,13 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                            "不要因缺少耗时占比拒绝。")
                 last_err = "insufficient_evidence"
                 continue
+            from upi.core.structural_playbooks import propose, to_plan
+            fb = propose(root, anchors)
+            if fb:
+                fd, ferr = _validate(root, fb)
+                if fd:
+                    meta["source"] = "structural_playbook"
+                    return to_plan(fd), meta
             return None, {"error": "insufficient_evidence",
                           "why": "LLM 判断证据不足", **meta}
         edits = doc.get("edits") or []

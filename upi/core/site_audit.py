@@ -20,37 +20,47 @@ def _iter_cs(project: Path):
         yield p
 
 
-def removed_tokens(find: str, replace: str) -> list[str]:
-    """find 里有、replace 里没有的标识符/调用 token。"""
-    ident = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-    a = set(ident.findall(find or ""))
-    b = set(ident.findall(replace or ""))
-    skip = {"using", "var", "new", "return", "if", "for", "int", "float",
-            "true", "false", "null", "this", "public", "private", "void"}
-    return sorted(t for t in a - b if len(t) > 3 and t not in skip)
+def removed_patterns(find: str, replace: str) -> list[str]:
+    """find 里被删掉的调用/构造模式，避免把泛型标识符当站点。"""
+    calls = set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", find or ""))
+    calls -= set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", replace or ""))
+    news = set(re.findall(r"new\s+([A-Za-z_]\w*)", find or ""))
+    news -= set(re.findall(r"new\s+([A-Za-z_]\w*)", replace or ""))
+    skip = {"if", "for", "while", "return", "new", "using", "switch", "catch"}
+    out = [rf"\b{re.escape(n)}\s*\(" for n in sorted(calls - skip)]
+    out += [rf"new\s+{re.escape(n)}\b" for n in sorted(news)]
+    return out
 
 
-def audit_tokens(project: Path, tokens: list[str]) -> dict[str, list[str]]:
-    """token → 仍命中文件列表（只扫 Assets 下 .cs）。"""
+def audit_patterns(project: Path, patterns: list[str]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     files = list(_iter_cs(project))
-    for t in tokens:
+    for pat in patterns:
         hits = []
         for p in files:
             try:
                 text = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if re.search(rf"\b{re.escape(t)}\b", text):
+            if re.search(pat, text):
                 hits.append(str(p.relative_to(project)).replace("\\", "/"))
         if hits:
-            out[t] = hits
+            out[pat] = hits
     return out
 
 
+def removed_tokens(find: str, replace: str) -> list[str]:
+    """兼容旧接口：返回模式列表。"""
+    return removed_patterns(find, replace)
+
+
+def audit_tokens(project: Path, tokens: list[str]) -> dict[str, list[str]]:
+    return audit_patterns(project, [rf"\b{re.escape(t)}\b" for t in tokens])
+
+
 def sites_remaining(project: Path, diffs: list[dict]) -> dict[str, list[str]]:
-    toks: set[str] = set()
+    pats: set[str] = set()
     for d in diffs:
-        toks.update(removed_tokens(str(d.get("find", "")),
-                                   str(d.get("replace", ""))))
-    return audit_tokens(project, sorted(toks))
+        pats.update(removed_patterns(str(d.get("find", "")),
+                                     str(d.get("replace", ""))))
+    return audit_patterns(project, sorted(pats))
