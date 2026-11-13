@@ -20,12 +20,15 @@ class MechanismUnit:
 
 
 def _mechanism(f: dict) -> str:
-    m = str(f.get("mechanism") or "")
-    if m:
-        return m
+    # findings 的 mechanism 常是宽泛类别（hot_function），不能当合并键；
+    # 优先用候选根因（具体函数/机制），没有才退回 mechanism。
     att = f.get("attribution") or {}
     fac = att.get("factors") if isinstance(att, dict) else {}
-    return str((fac or {}).get("root_cause") or "unknown")
+    root = str((fac or {}).get("root_cause") or "")
+    if root:
+        return root
+    m = str(f.get("mechanism") or "")
+    return m or "unknown"
 
 
 def _sites(f: dict) -> list[str]:

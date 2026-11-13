@@ -46,13 +46,34 @@ def main() -> int:
     M.ensure_ready(p)
 
     baseline_roots = set()
+
+    def capture_with_recovery(label: str, *, two_pass: bool):
+        ok, out = X._capture_once(p, a.project_id, a.replay, run_dir,
+                                  label, two_pass=two_pass, retries=1)
+        if ok:
+            return True, out
+        print("capture failed; restart editor and retry", label)
+        try:
+            M.ensure_ready(p)
+        except Exception as e:  # noqa: BLE001
+            print("editor restart failed", type(e).__name__, e)
+            return False, out
+        return X._capture_once(p, a.project_id, a.replay, run_dir,
+                               label + "-retry", two_pass=two_pass,
+                               retries=1)
+
     for i in range(max(1, a.baselines)):
-        ok, _ = X._capture_once(p, a.project_id, a.replay, run_dir,
-                                f"baseline#{i + 1}", two_pass=True, retries=1)
+        ok, _ = capture_with_recovery(f"baseline#{i + 1}", two_pass=True)
         if not ok:
             return 1
-        cands, _, _ = candidates_from_latest(p, limit=12)
-        baseline_roots |= {str(c.root_cause).split(":", 1)[-1] for c in cands}
+        mp = run_dir / "merged_candidates.json"
+        if mp.exists():
+            roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
+                     for x in json.loads(mp.read_text(encoding="utf-8"))}
+        else:
+            cands, _, _ = candidates_from_latest(p, limit=12)
+            roots = {str(c.root_cause).split(":", 1)[-1] for c in cands}
+        baseline_roots |= roots
         print("baseline", i + 1, "roots", len(baseline_roots))
 
     collector = X._make_collector(p, a.project_id, a.replay)
@@ -135,8 +156,7 @@ def main() -> int:
         return ok
 
     def capture_fn():
-        ok, _ = X._capture_once(p, a.project_id, a.replay, run_dir,
-                                "batch-after", two_pass=False, retries=1)
+        ok, _ = capture_with_recovery("batch-after", two_pass=False)
         if not ok:
             raise RuntimeError("batch capture failed")
         cands, _, _ = candidates_from_latest(p, limit=12)
