@@ -104,11 +104,12 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 from upi.core.evidence_diagnosis import load_latest_bundle
                 from upi.core.models import Evidence
                 bundle, ev_path = load_latest_bundle()
-                root = None
-                try:
-                    root = _prof().abs_project
-                except Exception:  # noqa: BLE001
-                    root = None
+                root = st.get("project")
+                if not root:
+                    try:
+                        root = _prof().abs_project
+                    except Exception:  # noqa: BLE001
+                        root = None
                 cands = (generate_candidates(bundle, project_root=root, limit=1)
                          if bundle is not None else [])
             except Exception as e:  # noqa: BLE001 — 证据链不可用按“无证据”处理
