@@ -57,6 +57,8 @@ def evaluate(mode: str, *,
                             target_gone=True,
                             reason=f"基线失败：{type(e).__name__}: {e}")
     if ok:
+        from upi.core.mode_caps import assert_verdict_allowed
+        assert_verdict_allowed(mode, "verified")
         return LadderResult(mode=mode, status="verified", replay_ok=True,
                             target_gone=True, reason="同 replay + 目标消失 + 无新问题 + 守护不劣化")
     return LadderResult(mode=mode, status="observed", replay_ok=True,

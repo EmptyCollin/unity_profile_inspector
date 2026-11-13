@@ -71,3 +71,9 @@ def assert_tool_allowed(mode: str, tool: str) -> None:
     if not c.allows(tool):
         raise PermissionError(
             f"mode={mode} 不允许工具 {tool!r}（可用：{sorted(c.tools)}）")
+
+
+def assert_verdict_allowed(mode: str, status: str) -> None:
+    """G21 的代码层兜底：常驻永远不许写 verified。"""
+    if status == "verified" and not caps(mode).allow_verified:
+        raise PermissionError(f"mode={mode} 不允许 verdict=verified")

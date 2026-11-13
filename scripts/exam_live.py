@@ -27,6 +27,7 @@ from upi.core.protocol import build as fp_build, digest as fp_digest, file_hash 
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
+from upi.core.verify_ladder import evaluate  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
 
 
@@ -230,7 +231,79 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print("ladder error:", type(e).__name__, e)
 
-    # 7) 最终可用性门禁：编译 + 启动冒烟
+    # 7) 受控 Agent loop：replay 一次不干净 → 换方案再试一次（regression 预算内）
+    target = findings[0] if findings else None
+    retry_obs: dict = {}
+    if ladder_status == "needs_recheck" and target is not None:
+        from upi.core.agent_loop import run_loop
+
+        def _decide(_state):
+            return ({"tool": "plan_patch"} if not retry_obs
+                    else {"stop": True, "reason": "retried"})
+
+        def _act(_decision):
+            nonlocal ladder_status, target_gone, new_roots
+            cfg = N.load_config(ROOT / "llm_config.yaml")
+            np, hsel = None, None
+            for h in hs:
+                np, _m = plan_issue(cfg, _issue(d["issue"]), h, p)
+                if np is not None:
+                    hsel = h
+                    break
+            if np is None:
+                return {"error": "no_plan"}
+            tid2 = "bt-" + time.strftime("%Y%m%d_%H%M%S") + "-retry"
+            iid2 = "it-retry"
+            it2 = TicketItem(item_id=iid2, cluster_id="llm-retry", metric="llm",
+                             shape="llm_plan", kind="llm", count=1,
+                             pattern_id="llm", playbook_id=np.playbook_id,
+                             permission_tier=np.permission_tier,
+                             plan=np.model_dump(), status="pending",
+                             item_approve_token=_item_token(tid2, iid2))
+            t2 = BatchTicket(ticket_id=tid2, project_id="paper",
+                             mode="regression", created_at=E.now(),
+                             status="awaiting_approval", items=[it2],
+                             approve_token=_token(tid2, [it2]))
+            store.save(t2)
+            approve(t2, approver="user", note="用户授权：全部批准",
+                    token=t2.approve_token)
+            if it2.permission_tier != "auto":
+                approve_item(t2, iid2, approver="user",
+                             note="用户授权：全部批准",
+                             token=it2.item_approve_token)
+            store.save(t2)
+            o2 = UnityTicketExecutor(store, snapshot_fn=snap_fn, project=p,
+                                     scene=p / "Assets/Scenes/00_Bootstrap.unity",
+                                     mode="regression", replan=_replan).execute(t2)
+            r3 = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
+                 "--project", str(p), "--project-id", a.project_id,
+                 "--replay", a.replay, "--no-save"],
+                cwd=str(ROOT), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=1800)
+            after_c, _, _ = candidates_from_latest(p, limit=12)
+            after_k = {str(c.root_cause).split(":", 1)[-1] for c in after_c}
+            tkey = str((hsel or {}).get("root_cause") or "").split(":", 1)[-1]
+            gone = tkey not in after_k
+            new = sorted(after_k - before_roots - {tkey})
+            l2 = evaluate("regression", replay_once=lambda: {
+                "protocol_ok": True, "target_gone": gone,
+                "new_clusters": new, "guards_ok": True})
+            ladder_status, target_gone, new_roots = l2.status, gone, new
+            print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
+            run.repairs.append(RepairRecord(
+                finding_id=target.finding_id, plan_id=np.playbook_id,
+                files=np.touched_assets,
+                compile_ok=(o2.items[0].status in ("applied", "applied_unverified")),
+                runnable=None, verdict=l2.status, metric_delta=None))
+            retry_obs["ladder"] = l2.status
+            save_run(run)
+            return {"ladder": l2.status, "status": o2.items[0].status}
+
+        res = run_loop("regression", _decide, _act, max_steps=1)
+        print("agent loop:", res.stop_reason, res.steps, retry_obs)
+
+    # 8) 最终可用性门禁：编译 + 启动冒烟
     ok_smoke = False
     compiled = False
     try:
@@ -244,13 +317,16 @@ def main() -> int:
     run.usability_ok = bool(compiled and ok_smoke)
     run.usability_note = ("最终可编译/可启动" if run.usability_ok
                           else "最终不可用：编译或启动失败")
-    target = findings[0] if findings else None
     if target is not None:
-        run.repairs = [RepairRecord(
-            finding_id=target.finding_id, plan_id=plan.playbook_id,
-            files=plan.touched_assets,
-            compile_ok=(out.items[0].status in ("applied", "applied_unverified")),
-            runnable=ok_smoke, verdict=ladder_status, metric_delta=None)]
+        if not run.repairs:
+            run.repairs = [RepairRecord(
+                finding_id=target.finding_id, plan_id=plan.playbook_id,
+                files=plan.touched_assets,
+                compile_ok=(out.items[0].status in ("applied",
+                                                   "applied_unverified")),
+                runnable=ok_smoke, verdict=ladder_status, metric_delta=None)]
+        else:
+            run.repairs[-1].runnable = ok_smoke
     save_run(run)
 
     # 7) 评分（与 Lab 同口径）
