@@ -40,6 +40,7 @@ def run_loop(mode: str, decide: Callable[[dict], dict],
              max_steps: Optional[int] = None,
              token_budget: Optional[int] = None,
              should_stop: Optional[Callable[[dict], bool]] = None,
+             on_error: Optional[Callable[[str, BaseException], None]] = None,
              ) -> LoopResult:
     c = caps(mode)
     budget = LoopBudget(max_steps=max_steps or c.max_loop_steps,
@@ -62,6 +63,11 @@ def run_loop(mode: str, decide: Callable[[dict], dict],
         try:
             obs = act(decision) or {}
         except Exception as e:  # noqa: BLE001
+            if on_error is not None:
+                try:
+                    on_error(tool, e)
+                except Exception:  # noqa: BLE001
+                    pass
             obs = {"error": f"{type(e).__name__}: {e}"}
         budget.spend(int(decision.get("tokens") or 0))
         trace.append({"tool": tool, "args": decision.get("args") or {},

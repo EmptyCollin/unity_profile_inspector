@@ -89,6 +89,17 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
     return out
 
 
+def _log_tool_error(run_dir: Path, stage: str, exc: BaseException) -> None:
+    import traceback
+    rec = {"label": stage, "error": f"{type(exc).__name__}: {exc}",
+           "traceback": traceback.format_exc()[-3000:]}
+    try:
+        with (run_dir / "tool_errors.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def _capture_once(project: Path, project_id: str, replay: str,
                   run_dir: Path, label: str, *,
                   two_pass: bool = False, retries: int = 1,
@@ -129,6 +140,10 @@ def _capture_once(project: Path, project_id: str, replay: str,
                 f.write(json.dumps(err, ensure_ascii=False) + "\n")
         except OSError:
             pass
+        from upi.core.resilience import classify_error
+        kind = classify_error((err.get("stderr") or "") + (err.get("stdout") or ""))
+        if kind == "deterministic":
+            break
         if attempt < retries:
             time.sleep(1.5)
     return False, last
@@ -168,24 +183,30 @@ def main() -> int:
              "baseline": baseline_meta},
             ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 1) 修复前基线：同协议 replay 跑 N 次（默认 3）
+    # 1) 修复前基线：同协议 replay 跑 N 次（默认 3）；resume 可跳过
     from upi.core.evidence_diagnosis import candidates_from_latest
     baseline_runs: list[dict] = []
-    n_base = max(1, int(a.baselines))
-    for bi in range(n_base):
-        okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
-                                 f"baseline#{bi + 1}", two_pass=True,
-                                 retries=1, checkpoint=cp)
-        if not okcap:
-            mark(f"baseline#{bi + 1}", "failed",
-                 (r.stdout or r.stderr)[-160:])
-            save_chain()
-            return 1
-        _cands, _, _ = candidates_from_latest(p, limit=12)
-        roots = sorted({str(c.root_cause).split(":", 1)[-1] for c in _cands})
-        baseline_runs.append({"index": bi, "roots": roots})
-        mark(f"baseline#{bi + 1}", "ok", f"roots={len(roots)}")
-        print(f"baseline #{bi + 1}: roots={len(roots)}")
+    resume_state = cp.load() if a.resume else {}
+    if resume_state.get("baseline_runs"):
+        baseline_runs = list(resume_state["baseline_runs"])
+        mark("resume", "ok",
+             f"跳过基线，复用 {len(baseline_runs)} 次")
+    else:
+        n_base = max(1, int(a.baselines))
+        for bi in range(n_base):
+            okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
+                                     f"baseline#{bi + 1}", two_pass=True,
+                                     retries=1, checkpoint=cp)
+            if not okcap:
+                mark(f"baseline#{bi + 1}", "failed",
+                     (r.stdout or r.stderr)[-160:] if r else "capture failed")
+                save_chain()
+                return 1
+            _cands, _, _ = candidates_from_latest(p, limit=12)
+            roots = sorted({str(c.root_cause).split(":", 1)[-1] for c in _cands})
+            baseline_runs.append({"index": bi, "roots": roots})
+            mark(f"baseline#{bi + 1}", "ok", f"roots={len(roots)}")
+            print(f"baseline #{bi + 1}: roots={len(roots)}")
     before_roots0 = set(baseline_runs[-1]["roots"])
     baseline_meta.update({"ran": True, "count": len(baseline_runs),
                           "reason": f"已跑 {len(baseline_runs)} 次同协议基线"})
@@ -495,8 +516,22 @@ def main() -> int:
             save_run(run)
             return {"ladder": l2.status, "status": o2.items[0].status}
 
-        res = run_loop("regression", _decide, _act, max_steps=max_steps)
+        res = run_loop("regression", _decide, _act, max_steps=max_steps,
+                       on_error=lambda s, e: _log_tool_error(run_dir, s, e))
         retry_stop = res.stop_reason
+        if retry_stop == "tool_error":
+            _n = len(run.attempts) + 1
+            run.repairs.append(RepairRecord(
+                finding_id=(target.finding_id if target else ""),
+                plan_id=plan.playbook_id, files=plan.touched_assets,
+                compile_ok=False, runnable=None, verdict="unverified",
+                attempt_no=_n, stop_reason="tool_error"))
+            run.attempts.append({
+                "attempt_no": _n, "hypothesis": "",
+                "plan_id": plan.playbook_id, "ticket_id": "",
+                "item_status": "unknown", "ladder": "unverified",
+                "stop_reason": "tool_error"})
+            save_run(run)
         print("agent loop:", res.stop_reason, res.steps, retry_obs)
 
     # 8) 最终可用性门禁：编译 + 启动冒烟
