@@ -39,7 +39,8 @@ ok("模板有真实 diffs", p is not None and len(p.diffs) >= 2)
 ok("模板权限是 blocked", p is not None and p.permission_tier == "blocked")
 ok("未知指标不硬编", fixture_cpu_plan(cluster("drawCalls"), "PB-REUSE-BUFFER") is None)
 ok("未知 playbook 不硬编", fixture_cpu_plan(c, "PB-SHARED-MAT-MPB") is None)
-ok("default provider 同源", default_plan_provider(c, "PB-REUSE-BUFFER") is not None)
+ok("default provider 不再回退夹具模板",
+   default_plan_provider(c, "PB-REUSE-BUFFER") is None)
 
 fp = FingerprintStore(TMP / "fp.db")
 fp.seed_builtin()

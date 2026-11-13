@@ -29,6 +29,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# 本测试验“夹具模板可移植”；产品默认已切到源码配方（I9b），显式开 legacy。
+os.environ["UPI_LEGACY_FIXTURE_DIAG"] = "1"
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -66,7 +69,7 @@ def build_alt_project(with_defect: bool = True) -> ProjectProfile:
     # "编号→目录/场景"映射，档案换个风格就测不到了。
     code_dir = ALT / "Runtime" / "F-CPU-01"
     code_dir.mkdir(parents=True, exist_ok=True)
-    defect = (ROOT / "upi" / "agents" / "_refs" / "F_CPU_01_defect.cs").read_text(
+    defect = (ROOT / "fixtures" / "upi-fixture" / "refs" / "F_CPU_01_defect.cs").read_text(
         encoding="utf-8")
     (code_dir / "SkillRunner.cs").write_text(defect if with_defect else "class X{}\n",
                                              encoding="utf-8")
@@ -83,6 +86,7 @@ def build_alt_project(with_defect: bool = True) -> ProjectProfile:
         # ——看着像模板坏了，其实是基准选错。
         subject_file="Runtime/F-CPU-01/SkillRunner.cs",
         fix_subject="F-CPU-01",
+        defect_refs_dir="fixtures/upi-fixture/refs",
         defect_signature="var ready = new List<SkillRuntime>();",
         quality_tier="built-in-medium")
 

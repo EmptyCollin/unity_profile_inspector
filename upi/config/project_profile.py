@@ -72,9 +72,9 @@ class ProjectProfile(BaseModel):
     # 内置档案：git_root=仓库根 ⇒ "fixtures/upi-fixture/Assets/..." 与旧字面量逐字一致。
     # 外部工程自己当 git 根 ⇒ 直接写工程内相对路径（如 "Runtime/F-CPU-99/A.cs"）。
     subject_file: str = ""
-    # 缺陷态参照目录：相对**本仓库根**（参照是管线自带资产，不在被优化的工程里）。
-    # 允许写绝对路径，给"参照放在仓库外"的部署留口子。
-    defect_refs_dir: str = "upi/agents/_refs"
+    # 缺陷态参照目录：**仅内置夹具/测试使用**，产品路径不读（I9b）。
+    # 相对本仓库根；留空表示该档案没有答案参照。消费者必须显式检查空值。
+    defect_refs_dir: str = ""
 
     # 夹具规格（tuning/holdout 切分的唯一依据，§8.1）。相对工程根。
     # 为什么进 profile 而不是留在 checklist.py 里写死：留出集定义是**工程
@@ -277,11 +277,10 @@ class ProjectProfile(BaseModel):
     def defect_ref(self, subject: str) -> Path:
         """机制编号 → 钉定的缺陷态参照文件（diff 模板 find 段的来源）。
 
-        命名约定与 upi/agents/_refs 现状一致：F-CPU-01 → F_CPU_01_defect.cs。
-        ⚠️ 本方法只拼路径、不读盘：档案装载期不碰工作区（阶段 7 计划要求），
-        读盘与内容校验由消费方（nodes 的模板构造）按需做，失败只影响
-        "出修复方案"这一条链，不拖垮 detect/patrol 等无关入口。
+        缺陷态参照目录：**仅内置夹具/测试使用**，产品路径不读（I9b）。
         """
+        if not self.defect_refs_dir:
+            raise ValueError(f"profile {self.profile_id}: 未配置缺陷态参照目录")
         base = Path(self.defect_refs_dir)
         if not base.is_absolute():
             base = ROOT / base
@@ -343,7 +342,7 @@ _BUILTIN: dict[str, ProjectProfile] = {
         subjects=["F-CPU-01", "F-GPU-01", "F-ANIM-01", "F-LOAD-01"],
         clean_subject="CLEAN",
         subject_file="fixtures/upi-fixture/Assets/UpiFixtures/F_CPU_01/CombatSkillManager.cs",
-        defect_refs_dir="upi/agents/_refs",
+        defect_refs_dir="fixtures/upi-fixture/refs",
         fix_subject="F-CPU-01",
         defect_signature="var ready = new List<SkillRuntime>();",
         quality_tier="urp-balanced",

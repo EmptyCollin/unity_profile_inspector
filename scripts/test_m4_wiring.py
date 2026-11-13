@@ -15,12 +15,17 @@ snapmod.* / fixer.execute / verdict_from_bundles），验证节点自身逻辑�
  ⑧ escalate：resolved 不回滚 / 未验证 applied 收尾回滚
 """
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# 本测试验的是“夹具模板通路”的节点接线；产品默认已切到证据诊断（I9a）。
+# 显式打开 legacy 开关，避免测试被全局 runs/ 里的证据包“顺带通过”。
+os.environ["UPI_LEGACY_FIXTURE_DIAG"] = "1"
 
 import upi.agents.nodes as N          # noqa: E402
 
@@ -58,7 +63,7 @@ def setup_mocks():
     fx = TMP / "fx" / "F_CPU_01"
     fx.mkdir(parents=True, exist_ok=True)
     (fx / "CombatSkillManager.cs").write_bytes(
-        (ROOT / "upi" / "agents" / "_refs" / "F_CPU_01_defect.cs").read_bytes())
+        (ROOT / "fixtures" / "upi-fixture" / "refs" / "F_CPU_01_defect.cs").read_bytes())
     # ⚠️ 阶段 7 换了注入方式。原来写 `CR.FIXTURE_ASSETS = TMP/"fx"`，
     #   profile 化之后那个模块常量已不存在——赋值只会"设一个没人读的属性"，
     #   静默无效，表现为候选检索返回空、端到端三条断言变红，
@@ -72,6 +77,7 @@ def setup_mocks():
         subjects=["F-CPU-01"], clean_subject="CLEAN",
         subject_file=("fixtures/upi-fixture/Assets/UpiFixtures"
                       "/F_CPU_01/CombatSkillManager.cs"),
+        defect_refs_dir="fixtures/upi-fixture/refs",
         fix_subject="F-CPU-01",
         defect_signature="var ready = new List<SkillRuntime>();"))
     # 原来这里还有 `CR.ROOT = TMP`：profile 化之后候选锚点的基准改成档案

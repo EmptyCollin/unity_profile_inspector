@@ -115,7 +115,10 @@ def _playbook_map() -> dict[str, tuple]:
     if not csfile:
         raise TemplateUnavailable(
             f"档案 {prof.profile_id} 未声明 subject_file：无修复目标文件")
-    ref = prof.defect_ref(prof.fix_subject)
+    try:
+        ref = prof.defect_ref(prof.fix_subject)
+    except ValueError as e:
+        raise TemplateUnavailable(str(e)) from None
     try:
         text = ref.read_text(encoding="utf-8")
     except OSError as e:
@@ -280,21 +283,45 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         issue_d = st["issue"]
         det = next(d for d in DEFAULT_REGISTRY if d.id == issue_d["detector"])
         issue = Issue(**issue_d["issue_model"]) if "issue_model" in issue_d else _rebuild_issue(det, issue_d)
-        cands = retrieve_candidates(issue, det)
-        if not cands:
-            return {"route": "needs_human", "error": "候选检索为空（证据不足，I2）"}
-        if live_llm:
-            from upi.agents.factor_judge import build_hypotheses_for_issue
-            cfg = load_config(ROOT / "llm_config.yaml")
-            hs, archive = build_hypotheses_for_issue(cfg, issue, cands)
-            tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
-                         + (a.get("_meta", {}).get("token_out", 0) or 0)
-                         for a in archive.values())
-            E.write_json(run_dir / "diagnose_archive.json", archive,
-                         what="diagnose_archive", strict=False)
-        else:
-            hs = _offline_hypotheses(cands, issue)
+        # 产品默认：诊断来自运行证据候选（不读夹具目录、不匹配代码文本）。
+        ev_cands = []
+        ev_path = None
+        if not _legacy_fixture_diag_enabled():
+            try:
+                from upi.core.evidence_diagnosis import (candidates_from_latest,
+                                                         hypotheses_from_candidates)
+                root = _prof().abs_project
+                ev_cands, _bundle, ev_path = candidates_from_latest(root, limit=12)
+            except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理
+                E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
+                                    f"证据候选读取失败：{type(e).__name__}: {e}\n")
+        if _legacy_fixture_diag_enabled():
+            cands = retrieve_candidates(issue, det)
+            if not cands:
+                return {"route": "needs_human",
+                        "error": "候选检索为空（证据不足，I2）"}
+            if live_llm:
+                from upi.agents.factor_judge import build_hypotheses_for_issue
+                cfg = load_config(ROOT / "llm_config.yaml")
+                hs, archive = build_hypotheses_for_issue(cfg, issue, cands)
+                tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
+                             + (a.get("_meta", {}).get("token_out", 0) or 0)
+                             for a in archive.values())
+                E.write_json(run_dir / "diagnose_archive.json", archive,
+                             what="diagnose_archive", strict=False)
+            else:
+                hs = _offline_hypotheses(cands, issue)
+                tokens = 0
+            diag_source = "fixture_legacy"
+        elif ev_cands:
+            hs = hypotheses_from_candidates(ev_cands, ev_path)
             tokens = 0
+            diag_source = "evidence"
+        else:
+            return {"route": "needs_human",
+                    "error": ("insufficient_evidence：没有运行证据候选"
+                              "（不读夹具目录/代码正则；先跑一轮证据采集）"),
+                    "tokens_used": 0}
         # 预期效应回填（实测工单暴露：expected_effect 空 → 工单第 3 件套
         # 只能写"请拒批并要求补证"）。数值不是新估计——min_delta 直接搬运
         # 标定绝对阈（I1：来自标定工具，且 G1 判定本就以它为零改善线，
@@ -323,9 +350,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         if decision == "needs_human":
             return {"hypotheses": [h.model_dump() for h in hs], "route": "needs_human",
                     "error": f"Top1 归因置信度低于门槛（attr_route={decision}）",
-                    "tokens_used": tokens}
+                    "tokens_used": tokens, "diagnose_source": diag_source}
         return {"hypotheses": [h.model_dump() for h in hs], "route": "proceed",
-                "tokens_used": tokens}
+                "tokens_used": tokens, "diagnose_source": diag_source}
 
     def plan(st: dict) -> dict:
         # continue_with_direction 回环时跳过已 attempt 过的根因——重选假设，
@@ -349,8 +376,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     ep = plan_for_anchor_list(root, anchors)
                 except Exception:  # noqa: BLE001
                     ep = None
-            # 2) 夹具模板：只在源码配方不适用时回退（历史测试通路）
-            if ep is None:
+            # 2) 夹具模板：只在显式 legacy 开关下回退（I9b：产品路径不读答案参照）
+            if ep is None and _legacy_fixture_diag_enabled():
                 try:
                     ep = _plan_for(_anchor_of(top["root_cause"]))
                 except TemplateUnavailable:
@@ -696,6 +723,12 @@ def _rebuild_issue(det, issue_d: dict) -> Issue:
                  deviation_ratio=float(r.get("deviation_ratio", 0) or 0),
                  explains_share_of_regression=1.0, state="confirmed",
                  low_confidence=False)
+
+
+def _legacy_fixture_diag_enabled() -> bool:
+    """夹具正则诊断只作为**显式测试/实验开关**，不是产品默认（I9a）。"""
+    import os
+    return os.environ.get("UPI_LEGACY_FIXTURE_DIAG", "").strip() == "1"
 
 
 def _offline_hypotheses(cands, issue) -> list:

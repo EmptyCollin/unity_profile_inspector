@@ -70,12 +70,18 @@ def c_attr(f: AttributionFactors) -> float:
 
 
 def build_hypothesis(root_cause: str, code_anchors: list[str],
-                     judgments: list[FactorJudgment], issue: Issue,
-                     expected_effect: Optional[dict] = None) -> Hypothesis:
+                     judgments: list[FactorJudgment],
+                     issue: Optional[Issue] = None,
+                     expected_effect: Optional[dict] = None,
+                     issue_evidence: Optional[list] = None) -> Hypothesis:
     """因子判定 → Hypothesis（置信度在构造前算好，含否决封顶）。
 
     取值以 factor 枚举为准白名单过滤（FactorJudgment.factor 已是 Literal，
-    但 dict 推导若遇重复因子取先到者，保证构造不因多余键崩）。"""
+    但 dict 推导若遇重复因子取先到者，保证构造不因多余键崩）。
+
+    `issue_evidence` 给证据驱动的诊断路径用：该路径没有夹具 Issue，
+    但**有真实的运行证据引用**；空列表仍触发“无证据”否决（不豁免）。
+    """
     fmap: dict[str, float] = {}
     for j in judgments:
         fmap.setdefault(j.factor, j.value)
@@ -83,7 +89,9 @@ def build_hypothesis(root_cause: str, code_anchors: list[str],
             "prior_hit", "counterfactual", "mechanism")
     f = AttributionFactors(**{k: fmap.get(k, 0.0) for k in keys})
     conf = c_attr(f)
-    vr = veto_reasons(f, judgments, issue.evidence)
+    evidence = (issue_evidence if issue_evidence is not None
+                else (issue.evidence if issue is not None else []))
+    vr = veto_reasons(f, judgments, evidence)
     if vr:
         conf = min(conf, VETO_CAP)
     ev = expected_effect or {}

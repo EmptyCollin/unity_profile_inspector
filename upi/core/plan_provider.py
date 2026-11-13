@@ -55,9 +55,7 @@ def source_plan_for_cluster(cluster: IssueCluster, *,
 def default_plan_provider(cluster: IssueCluster, playbook: str, *,
                           anchors: Optional[list[str]] = None,
                           project_root=None) -> Optional[EditPlan]:
-    """产品默认：优先源码驱动；夹具模板只作历史测试回退。"""
-    ep = source_plan_for_cluster(cluster, anchors=anchors,
-                                 project_root=project_root)
-    if ep is not None:
-        return ep
-    return fixture_cpu_plan(cluster, playbook)
+    """产品默认：只走源码驱动（I9b）。夹具模板不再作为回退，避免答案参照
+    进入产品路径；需要夹具模板的测试/彩排显式使用 `fixture_cpu_plan`。"""
+    return source_plan_for_cluster(cluster, anchors=anchors,
+                                   project_root=project_root)
