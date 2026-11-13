@@ -189,8 +189,20 @@ def main() -> int:
 
     def save_chain() -> None:
         executes = [s for s in chain if str(s.get("step", "")).startswith("execute#")]
+        # 合并连续 resume 标记，避免同一次复用显示三行
+        merged: list[dict] = []
+        for s in chain:
+            if s.get("step") == "resume" and merged and merged[-1].get("step") == "resume":
+                prev = merged[-1]
+                detail = str(prev.get("detail") or "")
+                add = str(s.get("detail") or "")
+                if add and add not in detail:
+                    prev["detail"] = (detail + " · " + add)[:200]
+                prev["status"] = s.get("status", prev.get("status"))
+                continue
+            merged.append(dict(s))
         (run_dir / "chain.json").write_text(json.dumps(
-            {"steps": chain,
+            {"steps": merged,
              "backtracks": max(0, len(executes) - 1),
              "baseline": baseline_meta},
             ensure_ascii=False, indent=2), encoding="utf-8")
