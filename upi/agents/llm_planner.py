@@ -84,7 +84,7 @@ def _read_snippets(project_root: Path, anchors: list[str], *,
             import re as _re
             decl = _re.compile(
                 r"\b(?:void|bool|int|float|string|IEnumerator|"
-                r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\])\s+"
+                r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\]|[A-Z]\w+)\s+"
                 + _re.escape(m) + r"\s*\(")
             for i, ln in enumerate(lines):
                 if decl.search(ln):

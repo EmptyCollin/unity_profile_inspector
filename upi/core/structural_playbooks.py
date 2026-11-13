@@ -20,7 +20,7 @@ def _method_text(project: Path, anchor: str) -> tuple[str, str]:
     lines = text.splitlines()
     decl = re.compile(
         r"\b(?:void|bool|int|float|string|IEnumerator|"
-        r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\])\s+"
+        r"bool\s*\[\s*,\s*\]|[\w<>]+\s*\[\s*\]|[A-Z]\w+)\s+"
         + re.escape(m) + r"\s*\(")
     for i, ln in enumerate(lines):
         if decl.search(ln):

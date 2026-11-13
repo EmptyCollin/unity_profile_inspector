@@ -29,6 +29,8 @@ class EvidenceRequest(BaseModel):
     file: str = ""
     method: str = ""
     expected: str = ""
+    factor: str = ""          # I18：缺哪个归因因子
+    producer: str = ""        # I18：希望谁产（detect/verify/knowledge）
 
 
 class EvidenceDelta(BaseModel):
