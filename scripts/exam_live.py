@@ -100,12 +100,12 @@ def main() -> int:
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) 证据采集（跑 replay + marker）
+    # 1) 证据采集（r 轻采 → 选窗 → r′ 窗口深采）
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "capability_run.py"),
                         "--project", str(p), "--project-id", a.project_id,
-                        "--replay", a.replay, "--no-save"],
+                        "--replay", a.replay, "--no-save", "--two-pass"],
                        cwd=str(ROOT), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=1800)
+                       encoding="utf-8", errors="replace", timeout=2400)
     print("capture:", (r.stdout or r.stderr)[-300:])
     if r.returncode != 0:
         return 1

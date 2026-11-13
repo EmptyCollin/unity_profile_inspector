@@ -174,9 +174,112 @@ def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
         _eval(project, PROFILER_OFF, timeout=30)
 
 
+def _frame(project: Path) -> int:
+    try:
+        r = _eval(project, "return UnityEngine.Time.frameCount;", timeout=20)
+        return int(r.get("result") or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _windows_since(project: Path, started: str) -> list[dict]:
+    from upi.core.anomaly_candidates import windows_from_events
+    from upi.core.probe_events import EventLog
+    events, _bad = EventLog().read_all()
+    recent = [e for e in events
+              if str(e.ts) >= started
+              and (not e.project_id or e.project_id == project.name)]
+    return windows_from_events(recent)
+
+
+def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
+                         windows: list[dict], timeline: list[dict],
+                         limit: int) -> list[dict]:
+    """r′：完整重放；只在窗口对应命令区间内开深档并采集。"""
+    CFG.write_text(json.dumps({"evidence_threads": 8, "evidence_frames": 8,
+                               "evidence_budget_ms": 6000}), encoding="utf-8")
+    parsed = []
+    for w in windows:
+        start, end = int(w["start_frame"]), int(w["end_frame"])
+        idxs = [t["cmd_index"] for t in timeline
+                if start <= int(t["frame"]) <= end]
+        if not idxs:
+            # 窗口落在命令之间：用最接近的后一条命令
+            later = [t["cmd_index"] for t in timeline
+                     if int(t["frame"]) >= start]
+            if not later:
+                continue
+            idxs = [later[0]]
+        parsed.append({"start_idx": min(idxs), "end_idx": max(idxs),
+                       "window": w})
+    if not parsed:
+        return []
+    starts = {p["start_idx"] for p in parsed}
+    ends: dict[int, list[dict]] = {}
+    for p in parsed:
+        ends.setdefault(p["end_idx"], []).append(p)
+    merged: dict[str, dict] = {}
+    spec = load_replay(replay_path)
+    ex = ReplayExecutor(project)
+    _eval(project, PROFILER_OFF, timeout=30)
+    deep = False
+    started = time.strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        for i, cmd in enumerate(spec.commands):
+            if i in starts and not deep:
+                _eval(project, DEEP_ON, timeout=30)
+                deep = True
+            ex._one(cmd)  # noqa: SLF001
+            if i in ends and deep:
+                for k, p in enumerate(ends[i]):
+                    tag = f"{run_id}_w{k}"
+                    try:
+                        EV_DEEP.unlink(missing_ok=True)
+                        d = unity("script eval", "--file",
+                                  str(ROOT / "probe" / "upi_evidence_v1.cs"),
+                                  "--project-path", str(project),
+                                  "--timeout", "120")
+                        if not d.get("success"):
+                            continue
+                        deadline = time.time() + 45
+                        while time.time() < deadline and not EV_DEEP.exists():
+                            time.sleep(0.3)
+                        if not EV_DEEP.exists():
+                            continue
+                        subprocess.run(
+                            [sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
+                             "--project", str(project), "--evidence", str(EV_DEEP),
+                             "--run-id", tag, "--scene",
+                             "Assets/Scenes/00_Bootstrap.unity",
+                             "--events-since", started],
+                            cwd=str(ROOT), capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=60)
+                        bundle = ROOT / "runs" / tag / "evidence" / "evidence_v2.json"
+                        out = ROOT / "runs" / tag / "evidence" / "candidates.json"
+                        subprocess.run(
+                            [sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
+                             "--project", str(project), "--evidence", str(bundle),
+                             "--out", str(out), "--limit", str(limit)],
+                            cwd=str(ROOT), capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=60)
+                        if out.exists():
+                            for c in json.loads(out.read_text(encoding="utf-8")).get(
+                                    "candidates", []):
+                                key = str(c.get("root_cause") or "")
+                                if key and key not in merged:
+                                    merged[key] = c
+                    except Exception as e:  # noqa: BLE001
+                        print("deep window failed:", type(e).__name__, e)
+                _eval(project, PROFILER_OFF, timeout=30)
+                deep = False
+        return list(merged.values())
+    finally:
+        _eval(project, PROFILER_OFF, timeout=30)
+
+
 def run_and_capture(project: Path, run_id: str, limit: int,
-                    replay_path: Path) -> list[dict]:
-    """滚动运行 replay：每个动作命令后采一窗，合并候选（覆盖 replay 全程）。"""
+                    replay_path: Path, *, enable_deep: bool = True) -> list[dict]:
+    """滚动运行 replay：每个动作命令后采一窗；记录帧时间线与异常窗口。"""
     off_first = _eval(project, PROFILER_OFF, timeout=30)
     on = _eval(project, SHALLOW_ON, timeout=30)
     if not on.get("success", True):
@@ -184,33 +287,36 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                            json.dumps(on, ensure_ascii=False)[:200])
     merged: dict[str, dict] = {}
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
+    timeline: list[dict] = []
     try:
         spec = load_replay(replay_path) if replay_path.exists() else None
         if spec is None:
             return []
         ex = ReplayExecutor(project)
         for i, cmd in enumerate(spec.commands):
-            ex._one(cmd)  # noqa: SLF001 - 复用同一执行器
+            f = _frame(project)
+            ex._one(cmd)
+            timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
             if cmd.type in ACTION_CMDS:
                 for c in capture_window(project, f"{run_id}_a{i}", limit):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
-        # 尾窗：捕获未归类动作（例如自动回落）后的状态
         for c in capture_window(project, f"{run_id}_end", limit):
             k = str(c.get("root_cause") or "")
             if k and k not in merged:
                 merged[k] = c
-        # 深档升级：仅在探测到异常（或候选过少）时执行，避免无条件烧成本
+        wins = _windows_since(project, started)
+        run_dir = ROOT / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "pass1_timeline.json").write_text(
+            json.dumps(timeline, ensure_ascii=False, indent=2), encoding="utf-8")
+        (run_dir / "pass1_windows.json").write_text(
+            json.dumps(wins, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not enable_deep:
+            return list(merged.values())
         try:
-            from upi.core.anomaly_candidates import windows_from_events
             from upi.core.capture_policy import plan_for
-            from upi.core.probe_events import EventLog
-            events, _bad = EventLog().read_all()
-            recent = [e for e in events
-                      if str(e.ts) >= started
-                      and (not e.project_id or e.project_id == project.name)]
-            wins = windows_from_events(recent)
             metric = str(wins[0].get("metric", "")) if wins else ""
             trigger = {"frame_time_ms": "frame_time",
                        "cpuMainThreadFrameTimeMs": "frame_time",
@@ -219,8 +325,7 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                        "total_used_memory": "memory"}.get(metric, "frame_time")
             plan = plan_for("regression", trigger,
                             severity=float(wins[0].get("score", 0)) if wins else 0.0)
-            plan_path = ROOT / "runs" / run_id / "capture_plan.json"
-            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path = run_dir / "capture_plan.json"
             plan_path.write_text(json.dumps(
                 {**plan.model_dump(), "anomaly_windows": wins[:5],
                  "fallback_low_coverage": len(merged) < 6},
@@ -232,11 +337,40 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                         merged[k] = c
             else:
                 print("deep capture skipped: no anomaly trigger")
-        except Exception as e:  # noqa: BLE001 — 深档失败不拖垮整个采集
+        except Exception as e:  # noqa: BLE001
             print("deep capture skipped:", type(e).__name__, e)
         return list(merged.values())
     finally:
         _eval(project, PROFILER_OFF, timeout=30)
+
+
+def run_two_pass_capture(project: Path, run_id: str, limit: int,
+                         replay_path: Path) -> list[dict]:
+    """r 轻采 → 选 ≤3 窗 → r′ 完整重放、窗口内深采。"""
+    from upi.core.two_pass import plan_deep_windows
+    light = run_and_capture(project, run_id, limit, replay_path,
+                            enable_deep=False)
+    run_dir = ROOT / "runs" / run_id
+    wins = json.loads((run_dir / "pass1_windows.json").read_text(encoding="utf-8"))
+    timeline = json.loads((run_dir / "pass1_timeline.json").read_text(encoding="utf-8"))
+    planned = plan_deep_windows(wins, max_n=3, margin=12)
+    if not planned:
+        (run_dir / "two_pass.json").write_text(json.dumps(
+            {"status": "no_window", "windows": [],
+             "reason": "r 未产生异常窗口"}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        return light
+    deep = deep_windows_capture(project, run_id, replay_path,
+                                [w.model_dump() for w in planned],
+                                timeline, limit)
+    merged = {str(c.get("root_cause") or ""): c for c in light}
+    for c in deep:
+        merged.setdefault(str(c.get("root_cause") or ""), c)
+    (run_dir / "two_pass.json").write_text(json.dumps(
+        {"status": "done", "windows": [w.model_dump() for w in planned],
+         "light": len(light), "deep": len(deep)},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    return list(merged.values())
 
 
 def _anchor_of(c: dict) -> list[Anchor]:
@@ -328,6 +462,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=12)
     ap.add_argument("--no-save", action="store_true",
                     help="只采集证据，不写 findings（考试时由诊断产物负责记账）")
+    ap.add_argument("--two-pass", action="store_true",
+                    help="r 轻采→选≤3窗→r′ 完整重放、窗口内深采")
     a = ap.parse_args()
     project = Path(a.project).resolve()
     project_id = a.project_id or project.name
@@ -335,7 +471,9 @@ def main() -> int:
 
     ensure_play(project)
     run_id = new_run_id(project_id)
-    cands = run_and_capture(project, run_id, a.limit, replay_path)
+    cands = ((run_two_pass_capture(project, run_id, a.limit, replay_path))
+             if a.two_pass else
+             run_and_capture(project, run_id, a.limit, replay_path))
 
     findings: list[ToolFinding] = []
     for i, c in enumerate(cands):
