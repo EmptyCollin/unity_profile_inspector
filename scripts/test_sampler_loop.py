@@ -52,7 +52,7 @@ def ev(code: str) -> str:
 
 def play_mode() -> str:
     d = cmd("editor status")
-    return (d.get("data", {}).get("result") or {}).get("playMode", "unknown")
+    return ((d.get("data") or {}).get("result") or {}).get("playMode", "unknown")
 
 
 def robust(series: list[float]) -> dict:
@@ -66,6 +66,17 @@ def robust(series: list[float]) -> dict:
 
 
 def main() -> int:
+    # 前置检查：这是集成测试，需要 fixtures/upi-fixture 工程在 Unity 中打开。
+    # 打不开就显式 SKIP（不是通过，也不是崩在 None 上）。
+    try:
+        st = cmd("editor status")
+        ready = bool(((st.get("data") or {}).get("result")) or {})
+    except Exception:  # noqa: BLE001
+        ready = False
+    if not ready:
+        print(f"SKIP: 需要先把 {PROJECT} 在 Unity 中打开（pipeline 不可达）")
+        return 0
+
     src = ROOT / "probe" / SAMPLER
     dst = PROJECT / SAMPLER
     PROBE.mkdir(parents=True, exist_ok=True)

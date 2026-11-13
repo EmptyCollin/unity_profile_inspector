@@ -10,6 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from _compose import compose  # noqa: E402
 
 from upi.agents.webui import WebUI  # noqa: E402
 from upi.config.project_profile import reset_profile  # noqa: E402
@@ -21,14 +24,10 @@ TMP = Path(tempfile.mkdtemp(prefix="upi_browser_"))
 E.isolate(TMP / "runs")
 reset_profile()
 reg = ProjectRegistry()
-entry = reg.add(project_path=ROOT / "sim" / "project", display_name="Chroma Rogue",
+PROJECT = compose([f"c{i:02d}" for i in range(1, 12)])
+entry = reg.add(project_path=PROJECT, display_name="Paper",
                 default_scene="Assets/Scenes/00_Bootstrap.unity")
 reg.activate(entry.project_id)
-(Path(tempfile.gettempdir()) / "devsim_active_features.json").write_text(
-    json.dumps({"project_path": str(ROOT / "sim" / "project"),
-                "legacy_ui": True, "legacy_material": True,
-                "legacy_match_alloc": True, "sync_shop_load": True}),
-    encoding="utf-8")
 
 ui = WebUI(port=0, token="t").start()
 threading.Thread(target=ui.serve_forever, daemon=True).start()
@@ -59,7 +58,7 @@ def main() -> int:
         ok("首页加载", "CHROMA" not in page.title() and "UPI" in page.content())
         page.click('a[data-page="projects"]')
         ok("工程页可见", page.locator("#page-projects").is_visible())
-        ok("工程列表含 Chroma Rogue", "Chroma Rogue" in page.content())
+        ok("工程列表含 Paper", "Paper" in page.content())
         page.click('a[data-page="tickets"]')
         ok("工单页可见", page.locator("#page-tickets").is_visible())
         page.click("#oppTicketBtn")

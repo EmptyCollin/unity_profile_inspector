@@ -56,6 +56,8 @@ def with_spec(mutate=None) -> Path:
     p = tmpdir() / "fixture_spec.json"
     p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     CL.FIXTURE_SPEC = p
+    # 负样本 id 也固定住：不依赖本地激活工程档案的 clean_subject（它可能为空）
+    CL.CLEAN_ID = "CLEAN"
     return p
 
 
