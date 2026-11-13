@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -110,8 +111,12 @@ def main() -> int:
     before_roots0 = {str(c.root_cause).split(":", 1)[-1] for c in _pre_cands}
 
     # 2) detect → diagnose（live LLM）
+    from upi.core.project_store import knowledge_db as _knowledge_db
+    collector = _make_collector(p, a.project_id, a.replay)
     nd = N.make_nodes(run_dir, live_llm=True,
-                      knowledge_db=run_dir / "knowledge" / "patterns.db")
+                      knowledge_db=_knowledge_db(a.project_id),
+                      mode="regression",
+                      evidence_collector=collector)
     d = nd["detect"]({"project": str(p)})
     print("detect:", d.get("route"), str(d.get("error", ""))[:120])
     if d.get("route") != "proceed":
@@ -233,7 +238,22 @@ def main() -> int:
 
     # 7) 受控 Agent loop：replay 一次不干净 → 换方案再试一次（regression 预算内）
     target = findings[0] if findings else None
+    if target is not None:
+        run.repairs.append(RepairRecord(
+            finding_id=target.finding_id, plan_id=plan.playbook_id,
+            files=plan.touched_assets,
+            compile_ok=(out.items[0].status in ("applied", "applied_unverified")),
+            runnable=None, verdict=ladder_status,
+            attempt_no=1, ticket_id=t.ticket_id,
+            diff_hash=_diff_hash(plan), stop_reason=ladder_status))
+        run.attempts.append({
+            "attempt_no": 1, "hypothesis": str((plan_hyp or {}).get("root_cause") or ""),
+            "plan_id": plan.playbook_id, "diff_hash": _diff_hash(plan),
+            "ticket_id": t.ticket_id, "item_status": out.items[0].status,
+            "ladder": ladder_status, "stop_reason": ladder_status})
+        save_run(run)
     retry_obs: dict = {}
+    retry_stop = ""
     if ladder_status == "needs_recheck" and target is not None:
         from upi.core.agent_loop import run_loop
 
@@ -295,12 +315,21 @@ def main() -> int:
                 finding_id=target.finding_id, plan_id=np.playbook_id,
                 files=np.touched_assets,
                 compile_ok=(o2.items[0].status in ("applied", "applied_unverified")),
-                runnable=None, verdict=l2.status, metric_delta=None))
+                runnable=None, verdict=l2.status, metric_delta=None,
+                attempt_no=2, ticket_id=tid2, diff_hash=_diff_hash(np),
+                stop_reason=l2.status))
+            run.attempts.append({
+                "attempt_no": 2,
+                "hypothesis": str((hsel or {}).get("root_cause") or ""),
+                "plan_id": np.playbook_id, "diff_hash": _diff_hash(np),
+                "ticket_id": tid2, "item_status": o2.items[0].status,
+                "ladder": l2.status, "stop_reason": l2.status})
             retry_obs["ladder"] = l2.status
             save_run(run)
             return {"ladder": l2.status, "status": o2.items[0].status}
 
         res = run_loop("regression", _decide, _act, max_steps=1)
+        retry_stop = res.stop_reason
         print("agent loop:", res.stop_reason, res.steps, retry_obs)
 
     # 8) 最终可用性门禁：编译 + 启动冒烟
@@ -317,16 +346,11 @@ def main() -> int:
     run.usability_ok = bool(compiled and ok_smoke)
     run.usability_note = ("最终可编译/可启动" if run.usability_ok
                           else "最终不可用：编译或启动失败")
-    if target is not None:
-        if not run.repairs:
-            run.repairs = [RepairRecord(
-                finding_id=target.finding_id, plan_id=plan.playbook_id,
-                files=plan.touched_assets,
-                compile_ok=(out.items[0].status in ("applied",
-                                                   "applied_unverified")),
-                runnable=ok_smoke, verdict=ladder_status, metric_delta=None)]
-        else:
-            run.repairs[-1].runnable = ok_smoke
+    for r in run.repairs:
+        if r.compile_ok:
+            r.runnable = ok_smoke
+    run.stop_reason = (f"ladder={ladder_status}"
+                       + (f";loop={retry_stop}" if retry_stop else ""))
     save_run(run)
 
     # 7) 评分（与 Lab 同口径）
@@ -334,7 +358,48 @@ def main() -> int:
                        .read_text(encoding="utf-8"))
     score = score_run(paper, run)
     print(json.dumps(score, ensure_ascii=False, indent=1))
+    # 9) 归纳总结：只提议入库，等用户在 UI 批/驳
+    try:
+        from upi.agents.summarizer import SummarizerProposer
+        print("label proposals:", SummarizerProposer(a.project_id).propose(run))
+    except Exception as e:  # noqa: BLE001
+        print("summarizer error:", type(e).__name__, e)
     return 0
+
+
+def _diff_hash(plan) -> str:
+    payload = json.dumps(plan.model_dump().get("diffs") or [],
+                         sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _make_collector(project: Path, project_id: str, replay: str):
+    """考试侧证据采集器：source 直接读；replay_window 当场重采一次。"""
+    from upi.core.evidence_request import fulfill
+
+    def collector(req):
+        if req.kind in ("source", "callstack"):
+            return fulfill(req, "regression", project).model_dump()
+        if req.kind == "replay_window":
+            tag = "evidence_req_" + time.strftime("%H%M%S")
+            subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
+                 "--project", str(project), "--project-id", project_id,
+                 "--replay", replay, "--no-save"],
+                cwd=str(ROOT), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=1800)
+            from upi.core.evidence_diagnosis import candidates_from_latest
+            cands, _b, _p = candidates_from_latest(project, limit=12)
+            text = "; ".join(
+                f"{c.root_cause} score={c.score}" for c in cands[:12])
+            return {"available": bool(cands), "kind": "replay_window",
+                    "text": text or "重采后无候选",
+                    "payload": {"tag": tag,
+                                "roots": [c.root_cause for c in cands]}}
+        return {"available": False, "kind": req.kind,
+                "reason": "考试采集器不支持该请求"}
+
+    return collector
 
 
 def _issue(issue_d: dict):

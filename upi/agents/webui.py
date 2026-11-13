@@ -399,6 +399,7 @@ _INDEX_HTML = r"""<!doctype html>
     <a href="#" data-page="tickets"><span class="k">▤</span>工单</a>
     <a href="#" data-page="regression"><span class="k">↻</span>回归</a>
     <a href="#" data-page="library"><span class="k">◈</span>指纹库</a>
+    <a href="#" data-page="labels"><span class="k">◎</span>标签</a>
     <a href="#" data-page="reports"><span class="k">▥</span>报告</a>
     <a href="#" data-page="projects"><span class="k">▦</span>工程</a>
     <a href="#" data-page="settings"><span class="k">⚙</span>设置</a>
@@ -468,6 +469,16 @@ _INDEX_HTML = r"""<!doctype html>
           <thead><tr><th>pattern</th><th>指标</th><th>波形</th><th>来源</th><th>命中</th><th>成功/失败</th><th>最后命中</th></tr></thead>
           <tbody id="fpBody"><tr><td colspan="7" class="empty">指纹库为空。</td></tr></tbody>
         </table>
+      </div>
+    </section>
+    <section id="page-labels" style="display:none">
+      <div class="card">
+        <h2>标签审核</h2>
+        <p class="muted">只有你批准，标签才生效；驳回后不会自动重提。待审项来自归纳总结 Agent 的提议。</p>
+        <button id="labelRefresh">刷新</button>
+        <h3>待审</h3><div id="labelPending" class="mono"></div>
+        <h3>已生效</h3><div id="labelActive" class="mono"></div>
+        <h3>已驳回</h3><div id="labelRejected" class="mono"></div>
       </div>
     </section>
     <section id="page-tickets" style="display:none">
@@ -608,6 +619,40 @@ async function post(path, body){
   return data;
 }
 const batchCache = {};
+async function getJSON(path){
+  const r = await fetch(q(path));
+  let data = {};
+  try{ data = await r.json(); }catch(_){}
+  if(!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function labelRows(items, actions){
+  if(!items || !items.length) return '<div class="muted">无</div>';
+  return items.map(l => `<div class="kv" style="padding:6px 0;border-bottom:1px solid var(--line)">
+    <b>${esc(l.mechanism)}</b> · ${esc(l.file)}::${esc(l.method)}
+    <span class="muted">conf ${esc(l.confidence)} · ${esc(l.status)} · ${esc(l.proposed_at)}</span>
+    <div class="muted">${esc(l.rationale || "")}</div>
+    ${actions ? `<button data-lid="${esc(l.label_id)}" data-dec="approve">批准</button>
+      <button data-lid="${esc(l.label_id)}" data-dec="reject">驳回</button>` : ""}
+  </div>`).join("");
+}
+async function loadLabels(){
+  try{
+    const d = await getJSON("/api/labels");
+    $("labelPending").innerHTML = labelRows(d.pending, true);
+    $("labelActive").innerHTML = labelRows(d.active, false);
+    $("labelRejected").innerHTML = labelRows(d.rejected, false);
+    document.querySelectorAll("#labelPending button").forEach(b => b.addEventListener("click", async () => {
+      const reason = prompt(b.dataset.dec === "approve" ? "批准理由（可空）" : "驳回理由");
+      if(b.dataset.dec === "reject" && reason === null) return;
+      try{
+        await post("/api/labels/decision", {label_id: b.dataset.lid,
+          decision: b.dataset.dec, reviewer: "user", reason: reason || ""});
+        loadLabels();
+      }catch(e){ alert("失败：" + e.message); }
+    }));
+  }catch(e){ $("labelPending").textContent = "加载失败：" + e.message; }
+}
 function renderTickets(s){
   const ts = s.batch_tickets || [];
   $("batchMeta").textContent = `${ts.length} 张`;
@@ -1060,13 +1105,14 @@ async function refresh(){
 function nav(page, label){
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === page));
   const home = $("page-home"), issues = $("page-issues"), library = $("page-library"),
+        labels = $("page-labels"),
         tickets = $("page-tickets"), regression = $("page-regression"),
         reports = $("page-reports"), projects = $("page-projects"),
         settings = $("page-settings"), other = $("page-other");
-  const pages = {home, issues, library, tickets, regression, reports, projects, settings};
+  const pages = {home, issues, library, labels, tickets, regression, reports, projects, settings};
   Object.values(pages).forEach(p => { if(p) p.style.display = "none"; });
   if(other) other.style.display = "none";
-  if(pages[page]){ pages[page].style.display = ""; return; }
+  if(pages[page]){ pages[page].style.display = ""; if(page === "labels") loadLabels(); return; }
   if(other) other.style.display = "";
   $("otherTitle").textContent = "此页待接入";
   $("otherHint").textContent = "I5 逐项接入中；当前已交付问题/指纹/工单/回归/报告/设置。";
@@ -1077,6 +1123,8 @@ document.querySelectorAll("#nav a").forEach(a => a.addEventListener("click", ev 
 }));
 const buildBtn = $("buildTicketBtn");
 if(buildBtn) buildBtn.addEventListener("click", buildTicket);
+const labelRefreshBtn = $("labelRefresh");
+if(labelRefreshBtn) labelRefreshBtn.addEventListener("click", loadLabels);
 const oppBtn = $("oppTicketBtn");
 if(oppBtn) oppBtn.addEventListener("click", buildOpportunityTicket);
 const candBtn = $("candTicketBtn");
@@ -1192,6 +1240,19 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/projects":
             self._send_json(200, {"ok": True, **_projects_payload()})
             return
+        if parsed.path == "/api/labels":
+            try:
+                from upi.config.project_profile import active_profile
+                from upi.core.labels import LabelStore
+                pid = active_profile().profile_id
+                store = LabelStore(pid)
+                self._send_json(200, {"ok": True, "project_id": pid,
+                                      "pending": store.pending(),
+                                      "active": store.active(),
+                                      "rejected": store.list("rejected")})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(400, {"ok": False, "error": str(e)})
+            return
         if parsed.path == "/api/capture/config":
             try:
                 from upi.core import capture_config as CC
@@ -1283,6 +1344,24 @@ class _Handler(BaseHTTPRequestHandler):
                                       **_projects_payload()})
             except Exception as e:  # noqa: BLE001
                 self._send_json(400, {"ok": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/labels/decision":
+            try:
+                from upi.config.project_profile import active_profile
+                from upi.core.labels import LabelStore
+                pid = active_profile().profile_id
+                store = LabelStore(pid)
+                okd, msg = store.decide(
+                    str(body.get("label_id") or ""),
+                    decision=str(body.get("decision") or ""),
+                    reviewer=str(body.get("reviewer") or "user"),
+                    reason=str(body.get("reason") or ""))
+                self._send_json(200 if okd else 400,
+                                {"ok": okd, "result": msg,
+                                 "label": store.get(str(body.get("label_id") or ""))})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False, "error": str(e)})
             return
 
         m = re.match(r"^/api/projects/([A-Za-z0-9_\-]+)/(activate|validate|archive|delete|update)$",

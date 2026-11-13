@@ -69,6 +69,10 @@ class RepairRecord(BaseModel):
     gameplay_ok: Optional[bool] = None  # 保留字段：玩法自测不计入考试
     verdict: str = ""            # resolved | not_significant | regressed | unverified
     metric_delta: Optional[float] = None
+    attempt_no: int = 0
+    ticket_id: str = ""
+    diff_hash: str = ""
+    stop_reason: str = ""
 
 
 class RunFindings(BaseModel):
@@ -80,6 +84,10 @@ class RunFindings(BaseModel):
     created_at: str
     findings: list[ToolFinding] = Field(default_factory=list)
     repairs: list[RepairRecord] = Field(default_factory=list)
+    attempts: list[dict] = Field(default_factory=list)
+    stop_reason: str = ""
+    evidence_rounds: int = 0
+    blind_spots: list[str] = Field(default_factory=list)
     usability_ok: Optional[bool] = None
     usability_note: str = ""
 
@@ -253,19 +261,28 @@ def score_run(paper: dict, run: RunFindings) -> dict:
            "anchors": [f"{a.file}::{a.method}" for a in f.anchors]}
           for f in findings if not _matches_any(f)]
 
-    repairs = {r.finding_id: r for r in run.repairs if r.finding_id}
     repair_rows = []
     for m in matched:
-        r = repairs.get(m["finding_id"])
-        repair_rows.append({
-            "finding_id": m["finding_id"],
-            "plan_id": (r.plan_id if r else ""),
-            "compile_ok": bool(r and r.compile_ok),
-            "runnable": (r.runnable if r else None),
-            "verdict": (r.verdict if r else ""),
-            "effective": bool(r and r.compile_ok and r.gameplay_ok is not False
-                              and r.verdict in ("resolved", "verified")),
-        })
+        rs = [r for r in run.repairs if r.finding_id == m["finding_id"]]
+        if not rs:
+            repair_rows.append({
+                "finding_id": m["finding_id"], "plan_id": "",
+                "compile_ok": False, "runnable": None,
+                "verdict": "", "effective": False, "attempt_no": 0,
+            })
+            continue
+        for r in rs:
+            repair_rows.append({
+                "finding_id": m["finding_id"],
+                "plan_id": r.plan_id,
+                "compile_ok": bool(r.compile_ok),
+                "runnable": r.runnable,
+                "verdict": r.verdict,
+                "attempt_no": r.attempt_no,
+                "stop_reason": r.stop_reason,
+                "effective": bool(r.compile_ok and r.gameplay_ok is not False
+                                  and r.verdict in ("resolved", "verified")),
+            })
 
     negative = not exp
     discovery = {
@@ -287,9 +304,10 @@ def score_run(paper: dict, run: RunFindings) -> dict:
                    "note": "ECE 需本项目历史结局；n<30 不报趋势"}
     repair = {
         "matched": len(matched),
-        "compiled": sum(1 for r in repair_rows if r["compile_ok"]),
-        "runnable": sum(1 for r in repair_rows if r["runnable"]),
-        "effective": sum(1 for r in repair_rows if r["effective"]),
+        "compiled": len({r["finding_id"] for r in repair_rows if r["compile_ok"]}),
+        "runnable": len({r["finding_id"] for r in repair_rows if r["runnable"]}),
+        "effective": len({r["finding_id"] for r in repair_rows if r["effective"]}),
+        "attempts": len(repair_rows),
         "rows": repair_rows,
     }
     # 可复现：同一协议指纹、且在本考卷生成之后的多次运行，findings 位置集合是否一致
