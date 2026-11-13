@@ -49,6 +49,45 @@ def windows_from_events(events: Iterable[ProbeEvent]) -> list[dict]:
     return [w.model_dump() for w in merge_windows(out)]
 
 
+def windows_from_bundle(bundle: EvidenceBundleV2, *,
+                        max_windows: int = 20) -> list[dict]:
+    """没有 breach 时，用证据本身的异常当触发：高分配帧/高热函数/高 drawCalls。"""
+    out: list[dict] = []
+    # 分配帧：按帧聚合字节数
+    by_frame: dict[int, int] = {}
+    for a in bundle.allocations:
+        by_frame[int(a.frame_idx)] = by_frame.get(int(a.frame_idx), 0) + int(a.bytes)
+    for i, (frame, total) in enumerate(sorted(by_frame.items(),
+                                              key=lambda kv: kv[1], reverse=True)):
+        if i >= 5:
+            break
+        out.append({"metric": "gc_alloc_per_frame", "start_frame": max(0, frame - 2),
+                    "end_frame": frame + 2, "kind": "evidence_alloc",
+                    "score": float(total) / 1024.0,
+                    "reason": f"帧 {frame} 分配 {total}B"})
+    # 函数：高热帧
+    hot = sorted(bundle.functions, key=lambda f: f.total_ms, reverse=True)[:5]
+    for f in hot:
+        if f.total_ms < 5.0:
+            continue
+        out.append({"metric": "frame_time_ms",
+                    "start_frame": max(0, int(f.frame_idx) - 2),
+                    "end_frame": int(f.frame_idx) + 2,
+                    "kind": "evidence_hot", "score": float(f.total_ms),
+                    "reason": f"{f.symbol} 帧内 {f.total_ms}ms"})
+    # 渲染：drawCalls 高的帧
+    for r in sorted(bundle.render_objects, key=lambda x: x.draw_calls,
+                    reverse=True)[:5]:
+        if r.draw_calls < 100:
+            continue
+        out.append({"metric": "drawCalls",
+                    "start_frame": max(0, int(r.frame_idx) - 2),
+                    "end_frame": int(r.frame_idx) + 2,
+                    "kind": "evidence_render", "score": float(r.draw_calls),
+                    "reason": f"帧 {r.frame_idx} drawCalls={r.draw_calls}"})
+    return out[:max_windows]
+
+
 def candidates_from_anomalies(bundle: EvidenceBundleV2,
                               project_root: Path | str,
                               limit: int = 12) -> list[CandidateV2]:

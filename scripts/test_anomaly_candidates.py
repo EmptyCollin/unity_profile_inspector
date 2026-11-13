@@ -8,9 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.anomaly_candidates import (candidates_from_anomalies,  # noqa: E402
+                                         windows_from_bundle,
                                          windows_from_events)
-from upi.core.evidence_v2 import (EvidenceBundleV2, FunctionStat,  # noqa: E402
-                                  SourceSpan)
+from upi.core.evidence_v2 import (AllocationSite, EvidenceBundleV2,  # noqa: E402
+                                  FunctionStat, RenderObjectStat, SourceSpan)
 from upi.core.probe_events import ProbeEvent  # noqa: E402
 
 PASS, FAIL = [], []
@@ -48,6 +49,21 @@ ok("候选不依赖 action", "action" not in (cands[0].root_cause if cands else 
 # 异常窗口没有函数时，不硬造候选
 b2 = EvidenceBundleV2(run_id="r2", project_id="p", frames=[40], anomalies=wins)
 ok("无函数不硬造", candidates_from_anomalies(b2, ROOT) == [])
+
+# 无 breach 时，用证据自身触发窗口
+b3 = EvidenceBundleV2(
+    run_id="r3", project_id="p", frames=[10],
+    functions=[FunctionStat(frame_idx=10, symbol="ChromaGame.Update",
+                            calls=1, total_ms=12.0,
+                            source=SourceSpan(file="Assets/A.cs", start_line=1,
+                                              end_line=2, symbol="ChromaGame.Update"))],
+    allocations=[AllocationSite(frame_idx=10, bytes=2 * 1024 * 1024, count=1)],
+    render_objects=[RenderObjectStat(frame_idx=10, renderer_path="Board",
+                                     draw_calls=200)])
+w3 = windows_from_bundle(b3)
+ok("证据触发窗口", {w["metric"] for w in w3} >= {"gc_alloc_per_frame",
+                                             "frame_time_ms", "drawCalls"}, w3)
+ok("窗口覆盖证据帧", all(w["start_frame"] <= 10 <= w["end_frame"] for w in w3))
 
 print(f"\n==== 异常候选测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

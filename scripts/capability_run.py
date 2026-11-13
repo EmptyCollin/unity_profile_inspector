@@ -307,6 +307,20 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             if k and k not in merged:
                 merged[k] = c
         wins = _windows_since(project, started)
+        try:
+            from upi.core.anomaly_candidates import windows_from_bundle
+            from upi.core.evidence_v2 import EvidenceBundleV2
+            evs = list((ROOT / "runs").glob(
+                f"{run_id}*/evidence/evidence_v2.json"))
+            for evp in evs:
+                try:
+                    b = EvidenceBundleV2(
+                        **json.loads(evp.read_text(encoding="utf-8")))
+                    wins = wins + windows_from_bundle(b)
+                except Exception:  # noqa: BLE001
+                    continue
+        except Exception:  # noqa: BLE001 — 证据触发失败不阻断
+            pass
         run_dir = ROOT / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "pass1_timeline.json").write_text(
