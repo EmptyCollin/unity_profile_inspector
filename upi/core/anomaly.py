@@ -98,7 +98,7 @@ def detect_series(metric: str, points: list[tuple[int, float]], *,
                     metric=metric, start_frame=frames[i],
                     end_frame=frames[min(i + window - 1, len(frames) - 1)],
                     kind="step", peak_value=max(b), baseline=ma,
-                    score=(mb - ma) / sd,
+                    score=min((mb - ma) / sd, 999.0),
                     reason=f"均值阶跃 {ma:.3f}→{mb:.3f}"))
                 break           # 一个序列只报一个阶跃
     return out

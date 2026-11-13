@@ -216,8 +216,9 @@ function renderChart(r){
   const maxR=Math.max(1,rp.matched||0);
   el.innerHTML=`
     <div class="small">run ${esc(r.run&&r.run.run_id||'')} · 精度 ${dv.precision??'-'} · 召回 ${dv.recall??'-'}</div>
-    <div class="grp"><b>发现</b>${bar('TP',dv.tp||0,maxD,'okbar')}${bar('FP',dv.fp||0,maxD,'badbar')}${bar('FN',dv.fn||0,maxD,'warnbar')}</div>
+    <div class="grp"><b>发现</b>${bar('TP',dv.tp||0,maxD,'okbar')}${bar('FP',dv.fp||0,maxD,'badbar')}${bar('FN',dv.fn||0,maxD,'warnbar')}${bar('extra',dv.extra_n||0,maxD,'warnbar')}</div>
     <div class="grp"><b>修复</b>${bar('编译',rp.compiled||0,maxR,'okbar')}${bar('可运行',rp.runnable||0,maxR,'okbar')}${bar('有效',rp.effective||0,maxR,'warnbar')}</div>
+    <div class="small">尝试 ${rp.attempts||0} · 停止 ${esc((r.run&&r.run.stop_reason)||'-')}</div>
     <div class="small">归因：Top1 ${(d.attribution&&d.attribution.top1_hit)?'命中':'未命中'} · 证据引用 ${d.attribution&&d.attribution.evidence_refs_ratio!=null?d.attribution.evidence_refs_ratio:'-'} · ECE ${d.attribution&&d.attribution.ece!=null?d.attribution.ece:'样本不足'}</div>
     <div class="small">可复现：${rs.consistent===null?'无法评估（1 次运行）':(rs.consistent?'一致':'不一致')} · 运行数 ${rs.runs||1}</div>`;
 }

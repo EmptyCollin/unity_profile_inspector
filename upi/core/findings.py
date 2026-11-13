@@ -257,9 +257,13 @@ def score_run(paper: dict, run: RunFindings) -> dict:
                 return True
         return False
 
-    fp = [{"finding_id": f.finding_id, "mechanism": f.mechanism,
-           "anchors": [f"{a.file}::{a.method}" for a in f.anchors]}
-          for f in findings if not _matches_any(f)]
+    extra_records = [{"finding_id": f.finding_id, "mechanism": f.mechanism,
+                      "anchors": [f"{a.file}::{a.method}" for a in f.anchors],
+                      "evidence_refs": list(f.evidence_refs)}
+                     for f in findings if not _matches_any(f)]
+    # 无证据支撑的“额外发现”才算虚假断言；有证据的属于 extra，不记 FP
+    fp = [x for x in extra_records if not x["evidence_refs"]]
+    extra_valid = [x for x in extra_records if x["evidence_refs"]]
 
     repair_rows = []
     for m in matched:
@@ -291,6 +295,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
         "precision": round(len(matched) / max(1, len(matched) + len(fp)), 4),
         "recall": round(len(matched) / max(1, len(exp)), 4) if exp else None,
         "matched": matched, "false_positive": fp, "missed": fn,
+        "extra": extra_valid, "extra_n": len(extra_valid),
     }
     # 归因质量（I10）：Top1 是否命中 + 证据引用覆盖率；ECE 需历史结局，n<30 不报
     top1 = findings[0] if findings else None
@@ -336,4 +341,5 @@ def score_run(paper: dict, run: RunFindings) -> dict:
             "negative_ok": (len(findings) == 0) if negative else None,
             "run": {"run_id": run.run_id, "mode": run.mode,
                     "protocol_fingerprint": run.protocol_fingerprint,
-                    "created_at": run.created_at}}
+                    "created_at": run.created_at,
+                    "stop_reason": run.stop_reason}}

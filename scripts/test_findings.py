@@ -23,10 +23,11 @@ F.RUNS = TMP
 
 
 def mkrun(run_id="r1", anchors=None, mechanism="hot_path", fp="fp-a",
-          findings_n=None, repairs=None):
+          findings_n=None, repairs=None, refs=None):
     anchors = anchors or [("Assets/A.cs", "UpdateHud")]
     fs = [F.ToolFinding(finding_id=f"f{i}", mechanism=mechanism,
-                        anchors=[F.Anchor(file=a, method=m) for a, m in anchors])
+                        anchors=[F.Anchor(file=a, method=m) for a, m in anchors],
+                        evidence_refs=list(refs or []))
           for i in range(findings_n if findings_n is not None else 1)]
     return F.RunFindings(run_id=run_id, project_id="test_project",
                          protocol_fingerprint=fp, created_at="2026-01-01T00:00:01",
@@ -104,6 +105,13 @@ diff = mkrun("r8", anchors=[("Assets/C.cs", "X")], fp="fp-a")
 F.save_run(diff)
 srep2 = F.score_run(paper, diff)["dimensions"]["reproducible"]
 ok("同协议不同位置 → 不可复现", srep2["consistent"] is False, str(srep2))
+
+# I12e：有证据但不在标签集 → extra，不算 FP
+ex = mkrun("r10", anchors=[("Assets/Other.cs", "Other")], refs=["w:1"])
+F.save_run(ex)
+dex = F.score_run(paper, ex)["dimensions"]["discovery"]
+ok("有证据的额外发现记 extra 不是 FP",
+   dex["fp"] == 0 and dex["extra_n"] == 1, dex)
 
 # I11f：最终不可用 → 整卷 0（硬门禁）
 bad = mkrun("r9", anchors=[("Assets/A.cs", "UpdateHud")], fp="fp-a")

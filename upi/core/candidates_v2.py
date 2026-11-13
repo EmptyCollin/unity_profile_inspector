@@ -188,6 +188,14 @@ def generate_candidates(bundle: EvidenceBundleV2,
                 c.prior = round(float(score), 4)
                 c.source_kind = "evidence+fingerprint"
 
+    if bundle.anomalies:
+        from upi.core.anomaly_candidates import candidates_from_anomalies
+        have = {c.root_cause for c in out}
+        for c in candidates_from_anomalies(bundle, project_root, limit=limit):
+            if c.root_cause not in have:
+                out.append(c)
+                have.add(c.root_cause)
+
     out.sort(key=lambda c: (c.score + c.score * c.prior, c.prior), reverse=True)
     # 资产证据（度量，不是代码模式）：Resources 下超大文件，放最后避免主导函数排序
     try:

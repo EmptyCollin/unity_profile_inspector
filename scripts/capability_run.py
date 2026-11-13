@@ -91,6 +91,7 @@ def capture_window(project: Path, run_id: str, limit: int) -> list[dict]:
         EV.unlink(missing_ok=True)
     except OSError:
         pass
+    since = time.strftime("%Y-%m-%dT%H:%M:%S")
     d = unity("script eval", "--file", str(PROBE), "--project-path", str(project),
               "--timeout", "120")
     if not d.get("success"):
@@ -104,7 +105,8 @@ def capture_window(project: Path, run_id: str, limit: int) -> list[dict]:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                     "--project", str(project), "--evidence", str(EV),
                     "--run-id", run_id, "--scene",
-                    "Assets/Scenes/00_Bootstrap.unity"],
+                    "Assets/Scenes/00_Bootstrap.unity",
+                    "--events-since", since],
                    cwd=str(ROOT), capture_output=True, text=True,
                    encoding="utf-8", errors="replace", timeout=60)
     bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
@@ -139,6 +141,7 @@ def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
         pass
     _eval(project, PROFILER_OFF, timeout=30)
     _eval(project, DEEP_ON, timeout=30)
+    since = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
         time.sleep(1.2)
         d = unity("script eval", "--file", str(ROOT / "probe" / "upi_evidence_v1.cs"),
@@ -153,7 +156,8 @@ def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
         subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                         "--project", str(project), "--evidence", str(EV_DEEP),
                         "--run-id", run_id, "--scene",
-                        "Assets/Scenes/00_Bootstrap.unity"],
+                        "Assets/Scenes/00_Bootstrap.unity",
+                        "--events-since", since],
                        cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=60)
         bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"

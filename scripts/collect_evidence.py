@@ -22,6 +22,7 @@ def main() -> int:
     ap.add_argument("--run-id", default="")
     ap.add_argument("--scene", default="")
     ap.add_argument("--protocol", default="")
+    ap.add_argument("--events-since", default="")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
 
@@ -39,9 +40,18 @@ def main() -> int:
         if a.protocol:
             bundle.protocol_fingerprint = a.protocol
         bundle.raw_refs.append(str(Path(a.evidence)))
-        events, bad = [], 0
     else:
-        events, bad = log.read_all(compat=events_path is None)
+        bundle = from_probe_events(
+            [], run_id=run_id, project_id=project.name, scene=a.scene,
+            protocol_fingerprint=a.protocol,
+            raw_refs=[str(log.path)] if log.path.exists() else [],
+        )
+    all_events, bad = log.read_all(compat=events_path is None)
+    since = (a.events_since or "").strip()
+    events = [e for e in all_events
+              if (not since or str(e.ts) >= since)
+              and (not e.project_id or e.project_id == project.name)]
+    if not a.evidence:
         bundle = from_probe_events(
             events, run_id=run_id, project_id=project.name, scene=a.scene,
             protocol_fingerprint=a.protocol,
@@ -56,6 +66,9 @@ def main() -> int:
     for site in bundle.allocations:
         if site.source is None and site.stack:
             site.source = idx.resolve(site.stack[0].symbol)
+    if events:
+        from upi.core.anomaly_candidates import windows_from_events
+        bundle.anomalies = windows_from_events(events)
 
     out = Path(a.out) if a.out else (ROOT / "runs" / run_id / "evidence" / "evidence_v2.json")
     bundle.write(out)
