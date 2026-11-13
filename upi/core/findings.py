@@ -80,6 +80,8 @@ class RunFindings(BaseModel):
     created_at: str
     findings: list[ToolFinding] = Field(default_factory=list)
     repairs: list[RepairRecord] = Field(default_factory=list)
+    usability_ok: Optional[bool] = None
+    usability_note: str = ""
 
     def path(self) -> Path:
         return RUNS / self.run_id / "findings.json"
@@ -195,7 +197,27 @@ def _anchor_matches(a: Anchor, file: str, method: str,
 
 
 def score_run(paper: dict, run: RunFindings) -> dict:
-    """按能力维度判分：发现（位置匹配）/ 误报 / 修复 / 可复现。"""
+    """按能力维度判分：发现（位置匹配）/ 误报 / 修复 / 可复现。
+
+    I11f：最终可用性硬门禁——交付物不可用，整卷 0。
+    """
+    if run.usability_ok is False:
+        zero = {"discovery": {"expected": 0, "found": 0, "tp": 0, "fp": 0,
+                              "fn": 0, "precision": None, "recall": None,
+                              "matched": [], "false_positive": [], "missed": []},
+                "attribution": {"top1_hit": None, "evidence_refs_ratio": None,
+                                "n": 0, "ece": None},
+                "no_false_positive": None,
+                "repair": {"matched": 0, "compiled": 0, "runnable": 0,
+                           "effective": 0, "rows": []},
+                "reproducible": {"runs": 1, "consistent": None}}
+        return {"evaluated": True, "usability_failed": True,
+                "usability_note": run.usability_note,
+                "dimensions": zero, "negative_control": False,
+                "negative_ok": None,
+                "run": {"run_id": run.run_id, "mode": run.mode,
+                        "protocol_fingerprint": run.protocol_fingerprint,
+                        "created_at": run.created_at}}
     expectations = paper.get("expectations") or []
     exp = [(e.get("mechanism", ""), *_split_anchor(str(e.get("anchor", ""))),
             e.get("metric", ""),

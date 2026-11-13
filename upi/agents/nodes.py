@@ -89,7 +89,9 @@ def _why_not_auto(plan: EditPlan) -> str:
 
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
-               knowledge_db: Path | None = None) -> dict:
+               knowledge_db: Path | None = None,
+               mode: str = "resident",
+               evidence_collector=None) -> dict:
     """构造七节点函数表。live_llm=False 时 diagnose 用离线替身（不烧积分）。
 
     knowledge_db 可注入（单测写临时库，不污染仓库 patterns.db 与成功率分母）。"""
@@ -193,6 +195,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # 真 LLM 诊断：证据候选 → 六因子判定（提示词已做泄漏筛查）
         from upi.agents.factor_judge import build_hypotheses_for_issue
         from upi.core.evidence_diagnosis import anchors_of
+        from upi.core.mode_caps import caps as _caps_of
+        mcaps = _caps_of(mode)
         cfg = load_config(ROOT / "llm_config.yaml")
         hist = ""
         try:
@@ -206,7 +210,42 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         except Exception:  # noqa: BLE001 — 历史只是参考，读不到就不附
             hist = ""
         tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:12]]
-        hs, archive = build_hypotheses_for_issue(cfg, issue, tuples, history=hist)
+        archive: dict = {}
+        ev_rounds = 0
+        while True:
+            hs, judged = build_hypotheses_for_issue(
+                cfg, issue, tuples, history=hist)
+            archive.update(judged)
+            from upi.core.attribution import route as _route
+            if (_route(hs) != "needs_human"
+                    or ev_rounds >= mcaps.max_evidence_rounds
+                    or evidence_collector is None):
+                break
+            # I11c：分析定不了因 → 向检查发结构化补采请求；≤ caps 轮
+            from upi.core.evidence_request import EvidenceRequest
+            top = hs[0] if hs else None
+            anchor = (top.code_anchors[0] if top and top.code_anchors else "")
+            fpart, _, mpart = anchor.partition("::")
+            req = EvidenceRequest(
+                kind=("replay_window" if mcaps.allow_replay else "live_window"),
+                reason="Top1 归因置信度不足，请补采同窗口证据",
+                metric=(det.metric if det is not None else ""),
+                window=32, file=fpart, method=mpart,
+                expected="目标指标在窗口内的逐帧/分配证据")
+            ev_rounds += 1
+            try:
+                delta = evidence_collector(req) or {}
+            except Exception as e:  # noqa: BLE001
+                delta = {"available": False,
+                         "reason": f"{type(e).__name__}: {e}"}
+            if not delta.get("available"):
+                hist += ("\n补采不可用：" + str(delta.get("reason", ""))[:200])
+                break
+            text = str(delta.get("text", ""))[:2000]
+            hist += f"\n补采证据（{req.kind}）：{text}"
+            E.write_json(run_dir / f"evidence_round_{ev_rounds}.json",
+                         {"request": req.model_dump(), "delta": delta},
+                         what="evidence_round", strict=False)
         tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
                      + (a.get("_meta", {}).get("token_out", 0) or 0)
                      for a in archive.values())

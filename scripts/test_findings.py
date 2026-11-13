@@ -105,6 +105,15 @@ F.save_run(diff)
 srep2 = F.score_run(paper, diff)["dimensions"]["reproducible"]
 ok("同协议不同位置 → 不可复现", srep2["consistent"] is False, str(srep2))
 
+# I11f：最终不可用 → 整卷 0（硬门禁）
+bad = mkrun("r9", anchors=[("Assets/A.cs", "UpdateHud")], fp="fp-a")
+bad.usability_ok = False
+bad.usability_note = "编译失败且回滚失败"
+gate = F.score_run(paper, bad)
+ok("最终不可用 → 整卷 0", gate.get("usability_failed") is True
+   and gate["dimensions"]["discovery"]["tp"] == 0
+   and gate["dimensions"]["repair"]["compiled"] == 0, str(gate)[:160])
+
 print(f"\n==== 能力产物/判分测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))
