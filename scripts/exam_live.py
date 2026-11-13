@@ -214,83 +214,99 @@ def main() -> int:
         baseline_runs, ensure_ascii=False, indent=2), encoding="utf-8")
     cp.save(step="baselines", status="done", data={"baseline_runs": baseline_runs})
 
-    # 2) detect → diagnose（live LLM）
-    from upi.core.project_store import knowledge_db as _knowledge_db
-    collector = _make_collector(p, a.project_id, a.replay)
-    nd = N.make_nodes(run_dir, live_llm=True,
-                      knowledge_db=_knowledge_db(a.project_id),
-                      mode="regression",
-                      evidence_collector=collector)
-    d = nd["detect"]({"project": str(p)})
-    mark("detect", d.get("route", ""), str(d.get("error", ""))[:120])
-    print("detect:", d.get("route"), str(d.get("error", ""))[:120])
-    if d.get("route") != "proceed":
-        save_chain()
-        return 1
-    cp.save(step="detect", status="done", data={"issue": d["issue"]})
-    g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
-    mark("diagnose", g.get("route", ""),
-         f"tokens={g.get('tokens_used')} hyps={len(g.get('hypotheses') or [])}")
-    print("diagnose:", g.get("route"), g.get("diagnose_source"),
-          "tokens", g.get("tokens_used"))
-    if g.get("route") != "proceed":
-        print("diagnose error:", g.get("error"))
-        save_chain()
-        return 1
-    cp.save(step="diagnose", status="done",
-            data={"hypotheses": [h for h in (g.get("hypotheses") or [])]})
-    hs = g.get("hypotheses") or []
-    print("top1:", hs[0].get("root_cause"), "conf", hs[0].get("confidence"))
-    archive = {}
-    apath = run_dir / "diagnose_archive.json"
-    if apath.exists():
-        try:
-            archive = json.loads(apath.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            archive = {}
+    resume_eval = bool(resume_state.get("plan")
+                       and (run_dir / "findings.json").exists())
+    if resume_eval:
+        from upi.core.findings import load_run
+        from upi.core.models import EditPlan
+        run = load_run(run_id)
+        findings = run.findings
+        hs = resume_state.get("hypotheses") or []
+        plan = EditPlan(**resume_state["plan"])
+        plan_hyp = resume_state.get("plan_hyp") or {}
+        mark("resume", "ok", "复用 diagnose/plan，跳过重复 LLM")
+    else:
+        # 2) detect → diagnose（live LLM）
+        from upi.core.project_store import knowledge_db as _knowledge_db
+        collector = _make_collector(p, a.project_id, a.replay)
+        nd = N.make_nodes(run_dir, live_llm=True,
+                          knowledge_db=_knowledge_db(a.project_id),
+                          mode="regression",
+                          evidence_collector=collector)
+        d = nd["detect"]({"project": str(p)})
+        mark("detect", d.get("route", ""), str(d.get("error", ""))[:120])
+        print("detect:", d.get("route"), str(d.get("error", ""))[:120])
+        if d.get("route") != "proceed":
+            save_chain()
+            return 1
+        cp.save(step="detect", status="done", data={"issue": d["issue"]})
+        g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
+        mark("diagnose", g.get("route", ""),
+             f"tokens={g.get('tokens_used')} hyps={len(g.get('hypotheses') or [])}")
+        print("diagnose:", g.get("route"), g.get("diagnose_source"),
+              "tokens", g.get("tokens_used"))
+        if g.get("route") != "proceed":
+            print("diagnose error:", g.get("error"))
+            save_chain()
+            return 1
+        cp.save(step="diagnose", status="done",
+                data={"hypotheses": [h for h in (g.get("hypotheses") or [])]})
+        hs = g.get("hypotheses") or []
+        print("top1:", hs[0].get("root_cause"), "conf", hs[0].get("confidence"))
+        archive = {}
+        apath = run_dir / "diagnose_archive.json"
+        if apath.exists():
+            try:
+                archive = json.loads(apath.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                archive = {}
 
-    # 3) 写 findings（LLM 诊断产物）
-    findings = findings_from_hypotheses(run_id, hs, archive)
-    run = RunFindings(
-        run_id=run_id, project_id=a.project_id, mode="regression",
-        protocol_fingerprint=fp_digest(fp_build(
-            replay_script_hash=file_hash(Path(a.replay)), data_tier="A2",
-            editor_mode="gui")),
-        created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        findings=findings, repairs=[])
-    save_run(run)
-    print("findings:", len(findings))
+        # 3) 写 findings（LLM 诊断产物）
+        findings = findings_from_hypotheses(run_id, hs, archive)
+        run = RunFindings(
+            run_id=run_id, project_id=a.project_id, mode="regression",
+            protocol_fingerprint=fp_digest(fp_build(
+                replay_script_hash=file_hash(Path(a.replay)), data_tier="A2",
+                editor_mode="gui")),
+            created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+            findings=findings, repairs=[])
+        save_run(run)
+        print("findings:", len(findings))
 
-    # 4) LLM 规划（第一个能出方案的假设）
-    plan = None
-    meta = {}
-    plan_hyp = None
-    for h in hs:
-        plan, meta = plan_issue(N.load_config(ROOT / "llm_config.yaml"),
-                                _issue(d["issue"]), h, p)
-        print("plan:", h.get("root_cause"), "->", bool(plan), meta.get("error", ""))
-        if plan is not None:
-            plan_hyp = h
-            break
-    mark("plan", "ok" if plan is not None else "failed",
-         f"{(plan_hyp or {}).get('root_cause','')} playbook={getattr(plan,'playbook_id','')}")
-    if plan is None:
-        print("no LLM plan")
+        # 4) LLM 规划（第一个能出方案的假设）
+        plan = None
+        meta = {}
+        plan_hyp = None
+        for h in hs:
+            plan, meta = plan_issue(N.load_config(ROOT / "llm_config.yaml"),
+                                    _issue(d["issue"]), h, p)
+            print("plan:", h.get("root_cause"), "->", bool(plan), meta.get("error", ""))
+            if plan is not None:
+                plan_hyp = h
+                break
+        mark("plan", "ok" if plan is not None else "failed",
+             f"{(plan_hyp or {}).get('root_cause','')} playbook={getattr(plan,'playbook_id','')}")
+        if plan is None:
+            print("no LLM plan")
+            save_chain()
+            return 1
+        cp.save(step="plan", status="done",
+                data={"plan": plan.model_dump(),
+                      "plan_hyp": (plan_hyp or {})})
+        target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
+    if resume_eval and cp.done("execute#1"):
+        print("resume: execute already done；为避免重复写入，拒绝从执行后续跑")
         save_chain()
         return 1
-    cp.save(step="plan", status="done",
-            data={"plan": plan.model_dump(),
-                  "plan_hyp": (plan_hyp or {})})
-    target_key0 = str((plan_hyp or {}).get("root_cause") or "").split(":", 1)[-1]
-    baseline_hits = sum(1 for b in baseline_runs
-                        if target_key0 in set(b["roots"]))
-    baseline_ok = baseline_hits >= 2 and len(baseline_runs) >= 3
-    baseline_meta.update({"hits": baseline_hits, "target": target_key0,
-                          "ok": baseline_ok})
-    (run_dir / "baselines.json").write_text(json.dumps(
-        {"runs": baseline_runs, "target": target_key0,
-         "hits": baseline_hits, "ok": baseline_ok},
-        ensure_ascii=False, indent=2), encoding="utf-8")
+        baseline_hits = sum(1 for b in baseline_runs
+                            if target_key0 in set(b["roots"]))
+        baseline_ok = baseline_hits >= 2 and len(baseline_runs) >= 3
+        baseline_meta.update({"hits": baseline_hits, "target": target_key0,
+                              "ok": baseline_ok})
+        (run_dir / "baselines.json").write_text(json.dumps(
+            {"runs": baseline_runs, "target": target_key0,
+             "hits": baseline_hits, "ok": baseline_ok},
+            ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 5) 工单（人=用户代理，全部批准）
     store = TicketStore()
