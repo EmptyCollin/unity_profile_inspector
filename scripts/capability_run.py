@@ -183,6 +183,7 @@ def run_and_capture(project: Path, run_id: str, limit: int,
         raise RuntimeError("无法开启浅档 profiler：" +
                            json.dumps(on, ensure_ascii=False)[:200])
     merged: dict[str, dict] = {}
+    started = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
         spec = load_replay(replay_path) if replay_path.exists() else None
         if spec is None:
@@ -200,12 +201,37 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             k = str(c.get("root_cause") or "")
             if k and k not in merged:
                 merged[k] = c
-        # 深档一窗：补分配点/调用栈（marker 看不到的 GC 证据）
+        # 深档升级：仅在探测到异常（或候选过少）时执行，避免无条件烧成本
         try:
-            for c in deep_capture(project, f"{run_id}_deep", limit):
-                k = str(c.get("root_cause") or "")
-                if k and k not in merged:
-                    merged[k] = c
+            from upi.core.anomaly_candidates import windows_from_events
+            from upi.core.capture_policy import plan_for
+            from upi.core.probe_events import EventLog
+            events, _bad = EventLog().read_all()
+            recent = [e for e in events
+                      if str(e.ts) >= started
+                      and (not e.project_id or e.project_id == project.name)]
+            wins = windows_from_events(recent)
+            metric = str(wins[0].get("metric", "")) if wins else ""
+            trigger = {"frame_time_ms": "frame_time",
+                       "cpuMainThreadFrameTimeMs": "frame_time",
+                       "gc_alloc_per_frame": "gc_alloc",
+                       "drawCalls": "draw_calls",
+                       "total_used_memory": "memory"}.get(metric, "frame_time")
+            plan = plan_for("regression", trigger,
+                            severity=float(wins[0].get("score", 0)) if wins else 0.0)
+            plan_path = ROOT / "runs" / run_id / "capture_plan.json"
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path.write_text(json.dumps(
+                {**plan.model_dump(), "anomaly_windows": wins[:5],
+                 "fallback_low_coverage": len(merged) < 6},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            if wins or len(merged) < 6:
+                for c in deep_capture(project, f"{run_id}_deep", limit):
+                    k = str(c.get("root_cause") or "")
+                    if k and k not in merged:
+                        merged[k] = c
+            else:
+                print("deep capture skipped: no anomaly trigger")
         except Exception as e:  # noqa: BLE001 — 深档失败不拖垮整个采集
             print("deep capture skipped:", type(e).__name__, e)
         return list(merged.values())
