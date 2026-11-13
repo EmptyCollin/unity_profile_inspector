@@ -233,7 +233,7 @@ function renderChain(r){
   const el=document.getElementById('score'); const c=r.chain||{};
   const steps=c.steps||[];
   if(!steps.length){el.innerHTML='<div class="small">链路：本次 run 没有 chain.json（旧 run）</div>';return;}
-  const rows=steps.map(s=>`<tr><td>${esc(s.step)}</td><td>${esc(s.status)}</td><td>${esc(s.at_s)}s</td><td>${esc(s.detail||'')}</td></tr>`).join('');
+  const rows=steps.map(s=>`<tr><td>${esc(s.step)}</td><td>${esc(s.status)}</td><td>${s.at_s==null?'—':esc(s.at_s)+'s'}</td><td>${esc(s.detail||'')}</td></tr>`).join('');
   el.innerHTML=`<table style="width:100%;border-collapse:collapse">
     <tr class="small"><th align="left">步骤</th><th align="left">状态</th><th align="left">累计耗时</th><th align="left">说明</th></tr>
     ${rows}</table>

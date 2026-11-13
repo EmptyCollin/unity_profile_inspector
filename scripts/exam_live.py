@@ -178,6 +178,14 @@ def main() -> int:
     from upi.core.resilience import Checkpoint
     cp = Checkpoint(run_dir)
     chain: list[dict] = []
+    prior_chain: list[dict] = []
+    try:
+        _cp = run_dir / "chain.json"
+        if _cp.exists():
+            prior_chain = list(json.loads(_cp.read_text(encoding="utf-8"))
+                               .get("steps", []))
+    except Exception:  # noqa: BLE001
+        prior_chain = []
     t_start = time.time()
     baseline_meta: dict = {"ran": False, "count": 0, "hits": 0,
                            "reason": "尚未运行基线"}
@@ -201,8 +209,22 @@ def main() -> int:
                 prev["status"] = s.get("status", prev.get("status"))
                 continue
             merged.append(dict(s))
+        # 续跑时保留历史步骤；重名步骤加“续跑”后缀，不覆盖旧记录
+        combined: list[dict] = []
+        seen_names = set()
+        for s in prior_chain:
+            item = dict(s)
+            item["step"] = str(item.get("step", "")) + "（历史）"
+            combined.append(item)
+            seen_names.add(str(s.get("step", "")))
+        for s in merged:
+            item = dict(s)
+            name = str(item.get("step", ""))
+            if name in seen_names:
+                item["step"] = name + "（续跑）"
+            combined.append(item)
         (run_dir / "chain.json").write_text(json.dumps(
-            {"steps": merged,
+            {"steps": combined,
              "backtracks": max(0, len(executes) - 1),
              "baseline": baseline_meta},
             ensure_ascii=False, indent=2), encoding="utf-8")
@@ -418,6 +440,8 @@ def main() -> int:
                 data={"ladder": ladder.status})
         (run_dir / "verify_ladder.json").write_text(
             ladder.model_dump_json(indent=2), encoding="utf-8")
+        (run_dir / "verify_ladder_attempt1.json").write_text(
+            ladder.model_dump_json(indent=2), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
         print("ladder error:", type(e).__name__, e)
 
@@ -545,6 +569,8 @@ def main() -> int:
                                    and len(baseline_runs) >= 3))
             ladder_status, target_gone, new_roots = l2.status, gone, new
             print("retry ladder:", l2.status, "capture:", (r3.stdout or "")[-120:])
+            (run_dir / f"verify_ladder_attempt{attempt_no}.json").write_text(
+                l2.model_dump_json(indent=2), encoding="utf-8")
             mark(f"verify#{attempt_no}", l2.status,
                  f"hyp={str((hsel or {}).get('root_cause',''))[:80]}")
             run.repairs.append(RepairRecord(
