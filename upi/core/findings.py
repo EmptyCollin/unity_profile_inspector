@@ -246,6 +246,16 @@ def score_run(paper: dict, run: RunFindings) -> dict:
         "recall": round(len(matched) / max(1, len(exp)), 4) if exp else None,
         "matched": matched, "false_positive": fp, "missed": fn,
     }
+    # 归因质量（I10）：Top1 是否命中 + 证据引用覆盖率；ECE 需历史结局，n<30 不报
+    top1 = findings[0] if findings else None
+    top1_hit = bool(top1 and any(m["finding_id"] == top1.finding_id
+                                 for m in matched))
+    refs_ratio = (round(sum(1 for f in findings if f.evidence_refs)
+                        / len(findings), 4) if findings else None)
+    attribution = {"top1_hit": top1_hit if top1 else None,
+                   "evidence_refs_ratio": refs_ratio,
+                   "n": len(findings), "ece": None,
+                   "note": "ECE 需本项目历史结局；n<30 不报趋势"}
     repair = {
         "matched": len(matched),
         "compiled": sum(1 for r in repair_rows if r["compile_ok"]),
@@ -271,6 +281,7 @@ def score_run(paper: dict, run: RunFindings) -> dict:
 
     return {"evaluated": True,
             "dimensions": {"discovery": discovery,
+                           "attribution": attribution,
                            "no_false_positive": (not fp) if negative else None,
                            "repair": repair,
                            "reproducible": repro},

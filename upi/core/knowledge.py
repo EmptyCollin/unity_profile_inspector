@@ -80,9 +80,10 @@ CREATE TABLE IF NOT EXISTS tier_changes(
 """
 
 
-def default_path() -> Path:
-    """特征库默认位置（与 nodes.py 的 `knowledge/patterns.db` 一致）。"""
-    return Path(__file__).resolve().parents[2] / "knowledge" / "patterns.db"
+def default_path(project_id: str | None = None) -> Path:
+    """特征库默认位置：按项目隔离（I10）。"""
+    from upi.core.project_store import knowledge_db
+    return knowledge_db(project_id)
 
 
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:

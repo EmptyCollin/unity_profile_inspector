@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from upi.core.cluster import IssueCluster
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PATH = ROOT / "knowledge" / "fingerprints.db"
+DEFAULT_PATH = None  # I10：不再有全局指纹库；默认走当前项目目录
 
 
 class FingerprintFeatures(BaseModel):
@@ -87,8 +87,13 @@ def _score(a: FingerprintFeatures, b: dict) -> float:
 
 class FingerprintStore:
     def __init__(self, path: Optional[Path | str] = None):
-        self.path = Path(path) if path else Path(
-            os.environ.get("UPI_FINGERPRINT_DB") or DEFAULT_PATH)
+        if path:
+            self.path = Path(path)
+        elif os.environ.get("UPI_FINGERPRINT_DB"):
+            self.path = Path(os.environ["UPI_FINGERPRINT_DB"])
+        else:
+            from upi.core.project_store import fingerprint_db
+            self.path = fingerprint_db()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 

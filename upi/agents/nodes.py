@@ -195,7 +195,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         from upi.agents.factor_judge import build_hypotheses_for_issue
         from upi.core.evidence_diagnosis import anchors_of
         cfg = load_config(ROOT / "llm_config.yaml")
-        tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:4]]
+        tuples = [(c.root_cause, anchors_of(c)) for c in ev_cands[:12]]
         hs, archive = build_hypotheses_for_issue(cfg, issue, tuples)
         tokens = sum((a.get("_meta", {}).get("token_in", 0) or 0)
                      + (a.get("_meta", {}).get("token_out", 0) or 0)

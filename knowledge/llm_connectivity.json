@@ -1,6 +1,6 @@
 {
-  "passed_at": "2026-11-07T05:39:46+00:00",
-  "channel": "dev",
+  "passed_at": "2026-11-13T04:59:43+00:00",
+  "channel": "user",
   "provider": "deepseek-official",
   "model": "deepseek-flash",
   "base_url": "https://api.deepseek.com",
@@ -9,7 +9,7 @@
     {
       "name": "list_models",
       "ok": true,
-      "duration_ms": 514,
+      "duration_ms": 616,
       "detail": {
         "model_count": 2,
         "target_in_list": true,
@@ -22,7 +22,7 @@
     {
       "name": "minimal_chat",
       "ok": true,
-      "duration_ms": 901,
+      "duration_ms": 754,
       "detail": {
         "reply_len": 0,
         "reply_sha256_8": "e3b0c442"
@@ -31,7 +31,7 @@
     {
       "name": "tool_call_smoke",
       "ok": true,
-      "duration_ms": 1021,
+      "duration_ms": 1030,
       "detail": {
         "tool_name": "echo"
       }
@@ -39,7 +39,7 @@
     {
       "name": "json_mode_smoke",
       "ok": true,
-      "duration_ms": 523,
+      "duration_ms": 651,
       "detail": {
         "json_parsed": true
       }

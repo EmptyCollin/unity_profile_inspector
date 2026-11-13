@@ -240,6 +240,8 @@ def main() -> int:
     ap.add_argument("--project-id", default="")
     ap.add_argument("--replay", default=str(ROOT / "runs" / "i8_lab" / "paper_replay.json"))
     ap.add_argument("--limit", type=int, default=12)
+    ap.add_argument("--no-save", action="store_true",
+                    help="只采集证据，不写 findings（考试时由诊断产物负责记账）")
     a = ap.parse_args()
     project = Path(a.project).resolve()
     project_id = a.project_id or project.name
@@ -273,9 +275,10 @@ def main() -> int:
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         findings=findings, repairs=[],
     )
-    p = save_run(run)
+    p = "" if a.no_save else str(save_run(run))
     print(json.dumps({"ok": True, "run_id": run_id, "project_id": project_id,
-                      "findings": len(findings), "path": str(p)},
+                      "findings": len(findings), "path": p,
+                      "saved": not a.no_save},
                      ensure_ascii=False))
     for f in findings[:8]:
         print(f"  {f.mechanism:14s} {f.anchors[0].file}::{f.anchors[0].method}")
