@@ -30,12 +30,13 @@ def run_queue(queue: RepairQueue, *, plan: PlanFn, apply: ApplyFn,
     """按队列逐病例执行；一个病例失败只回滚它自己。"""
     res = MultiRepairResult(queue)
     limit = max_cases or len(queue.cases)
-    done = 0
-    while done < limit:
+    attempts = 0
+    max_attempts = limit * 4
+    while attempts < max_attempts:
         case = queue.next_pending()
         if case is None:
             break
-        done += 1
+        attempts += 1
         case.attempts += 1
         if not plan(case):
             queue.mark(case.case_id, "failed", reason="no_plan")
@@ -52,6 +53,13 @@ def run_queue(queue: RepairQueue, *, plan: PlanFn, apply: ApplyFn,
             continue
         # 未通过：只回滚这个病例
         rollback(case)
+        if case.attempts < case.max_attempts:
+            queue.mark(case.case_id, "diagnosed",
+                       reason=f"{status};retry",
+                       verdict=status)
+            res.events.append({"case": case.case_id, "status": status,
+                               "retry": case.attempts + 1})
+            continue
         queue.mark(case.case_id,
                    "partial_fix" if status == "partial_fix" else "failed",
                    reason=status, verdict=status)

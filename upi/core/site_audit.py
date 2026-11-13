@@ -58,9 +58,53 @@ def audit_tokens(project: Path, tokens: list[str]) -> dict[str, list[str]]:
     return audit_patterns(project, [rf"\b{re.escape(t)}\b" for t in tokens])
 
 
+def _scope(text: str, needle: str) -> str:
+    """包含 needle 的方法体（大括号配对）；找不到就返回全文。"""
+    idx = text.find(needle)
+    if idx < 0:
+        return text
+    head = text[:idx]
+    starts = list(re.finditer(
+        r"\b(?:void|bool|int|float|string|IEnumerator)\s+\w+\s*\(", head))
+    if not starts:
+        return text
+    start = starts[-1].start()
+    brace = text.find("{", idx)
+    if brace < 0:
+        return text[idx:]
+    depth = 0
+    for j in range(brace, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:j + 1]
+    return text[start:]
+
+
 def sites_remaining(project: Path, diffs: list[dict]) -> dict[str, list[str]]:
-    pats: set[str] = set()
+    """只审计补丁所在方法体内的同类模式，避免把合法的构造当残留。"""
+    out: dict[str, list[str]] = {}
+    files = list(_iter_cs(project))
     for d in diffs:
-        pats.update(removed_patterns(str(d.get("find", "")),
-                                     str(d.get("replace", ""))))
-    return audit_patterns(project, sorted(pats))
+        target = str(d.get("file", "")).replace("\\", "/")
+        for pat in removed_patterns(str(d.get("find", "")),
+                                    str(d.get("replace", ""))):
+            for p in files:
+                rel = str(p.relative_to(project)).replace("\\", "/")
+                if target and rel != target:
+                    continue
+                try:
+                    text = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                needle = str(d.get("find", ""))
+                if not needle or needle not in text:
+                    continue
+                scope = _scope(text, needle)
+                if re.search(pat, scope):
+                    out.setdefault(pat, [])
+                    if rel not in out[pat]:
+                        out[pat].append(rel)
+    return out
