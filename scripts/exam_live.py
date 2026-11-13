@@ -112,8 +112,10 @@ def main() -> int:
                       "detail": detail[:200]})
 
     def save_chain() -> None:
+        executes = [s for s in chain if str(s.get("step", "")).startswith("execute#")]
         (run_dir / "chain.json").write_text(json.dumps(
-            {"steps": chain, "backtracks": max(0, len(run.attempts) - 1),
+            {"steps": chain,
+             "backtracks": max(0, len(executes) - 1),
              "baseline": baseline_meta},
             ensure_ascii=False, indent=2), encoding="utf-8")
 
