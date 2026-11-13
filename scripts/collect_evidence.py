@@ -73,7 +73,7 @@ def main() -> int:
     bundle.coverage = coverage(bundle)
 
     out = Path(a.out) if a.out else (ROOT / "runs" / run_id / "evidence" / "evidence_v2.json")
-    cpath = out.parent / "counters.json"
+    cpath = out.parent.parent / "counters.json"
     if cpath.exists():
         try:
             bundle.counters = json.loads(cpath.read_text(encoding="utf-8")).get(

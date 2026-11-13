@@ -47,6 +47,20 @@ def _project() -> Path:
     return _prof().abs_project
 
 
+def _merged_candidates(limit: int = 12):
+    """采集端两遍 replay 的合并候选（含 light+deep）。"""
+    try:
+        from upi.core.candidates_v2 import CandidateV2
+        files = sorted(E.RUNS.glob("*/merged_candidates.json"),
+                       key=lambda p: p.stat().st_mtime)
+        if not files:
+            return []
+        raw = json.loads(files[-1].read_text(encoding="utf-8"))
+        return [CandidateV2(**c) for c in raw][:limit]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _scene_for(subject: str) -> Optional[Path]:
     """按机制取场景路径（回滚/重采要的是**被改的那个机制**的场景）。
 
@@ -110,18 +124,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                         root = _prof().abs_project
                     except Exception:  # noqa: BLE001
                         root = None
-                cands = []
-                # 优先吃采集端合并候选（两遍 replay 的 light+deep 结果）
-                try:
-                    from upi.core.candidates_v2 import CandidateV2
-                    merged_files = sorted(
-                        E.RUNS.glob("*/merged_candidates.json"),
-                        key=lambda p: p.stat().st_mtime)
-                    if merged_files:
-                        raw = json.loads(merged_files[-1].read_text(encoding="utf-8"))
-                        cands = [CandidateV2(**c) for c in raw][:1]
-                except Exception:  # noqa: BLE001
-                    cands = []
+                cands = _merged_candidates(limit=1)
                 if not cands:
                     cands = (generate_candidates(bundle, project_root=root, limit=1)
                              if bundle is not None else [])
@@ -195,6 +198,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 if not root:
                     root = _prof().abs_project
                 ev_cands, _bundle, ev_path = candidates_from_latest(root, limit=12)
+                merged = _merged_candidates(limit=12)
+                if merged:
+                    ev_cands = merged
             except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理
                 E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
                                     f"证据候选读取失败：{type(e).__name__}: {e}\n")
