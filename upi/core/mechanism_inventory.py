@@ -71,3 +71,15 @@ def scan(project: Path) -> Inventory:
                     inv.sites.append(Site(mech, str(rel).replace("\\", "/"),
                                           i + 1, _method_at(lines, i)))
     return inv
+
+
+def site_hints(project: Path, scopes: list[str]) -> list[str]:
+    """目标 file::method 内全部机制站点，供 planner 覆盖完整站点。"""
+    allowed = {s for s in scopes if "::" in s}
+    out = []
+    for s in scan(project).sites:
+        key = f"{s.file}::{s.method}"
+        if allowed and key not in allowed:
+            continue
+        out.append(f"{s.file}::{s.method}:{s.line} {s.mechanism}")
+    return sorted(out)

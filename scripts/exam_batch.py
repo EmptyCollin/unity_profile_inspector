@@ -229,10 +229,13 @@ def main() -> int:
         seen_plans = []
         meta = {}
         for _k in range(max(1, a.plan_repeat)):
+            from upi.core.mechanism_inventory import site_hints
+            _hints = site_hints(p, list(unit.sites or []))
             _pl, _meta = plan_issue(
                 cfg, X._issue(d["issue"]), h, p,
                 strategy=f"round{round_no}",
                 required_sites=unit.sites,
+                remaining_sites=_hints or None,
                 mechanism_class="unknown")
             seen_plans.append(_pl)
             variants.append({
