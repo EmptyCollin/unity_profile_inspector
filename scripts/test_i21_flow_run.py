@@ -33,6 +33,21 @@ ok("到上限 → max_rounds",
 data = json.loads((TMP / "flow.json").read_text(encoding="utf-8"))
 ok("history 记录阶段", len(data["history"]) >= 1, data)
 
+# LangGraph 轮次图
+class R:
+    def __init__(self, failed):
+        self.failed = failed
+
+
+f4 = FlowRun(TMP / "4", "r4")
+res, decision = f4.run_round(["u1"], 1, 2,
+                             lambda active, rnd: R({"u1": "partial"}))
+ok("LangGraph 执行 batch 节点", isinstance(res, R) and res.failed)
+ok("LangGraph 执行 decide 节点", decision == "retry", decision)
+res2, decision2 = f4.run_round(["u1"], 2, 2,
+                               lambda active, rnd: R({"u1": "partial"}))
+ok("到上限 LangGraph 返回 max_rounds", decision2 == "max_rounds", decision2)
+
 print(f"\n==== I21 流程中枢测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))

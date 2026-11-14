@@ -7,6 +7,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, TypedDict
+
+from langgraph.graph import END, StateGraph
 
 
 @dataclass
@@ -74,3 +77,36 @@ class FlowRun:
                 }, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+    def run_round(self, active: list, round_no: int, max_rounds: int,
+                  batch_fn: Callable[[list, int], object]):
+        """LangGraph：batch → decide；返回 (result, decision)。"""
+        class RoundState(TypedDict, total=False):
+            active: list
+            round: int
+            result: object
+            failed: set
+            decision: str
+
+        def batch_node(st: RoundState) -> RoundState:
+            res = batch_fn(list(st.get("active") or []),
+                           int(st.get("round") or 1))
+            failed = set(getattr(res, "failed", {}) or {}) - {
+                "__compile__", "__capture__"}
+            return {"result": res, "failed": failed}
+
+        def decide_node(st: RoundState) -> RoundState:
+            decision = self.decide(set(st.get("failed") or set()),
+                                   round_no=int(st.get("round") or 1),
+                                   max_rounds=max_rounds)
+            return {"decision": decision}
+
+        g = StateGraph(RoundState)
+        g.add_node("batch", batch_node)
+        g.add_node("decide", decide_node)
+        g.set_entry_point("batch")
+        g.add_edge("batch", "decide")
+        g.add_edge("decide", END)
+        app = g.compile()
+        out = app.invoke({"active": list(active), "round": round_no})
+        return out.get("result"), out.get("decision", "done")

@@ -363,6 +363,12 @@ def main() -> int:
     def rollback(patch):
         return X._git_reset(p, bases.get(patch.unit_id, ""))
 
+    def batch_fn(active_units, round_no):
+        return run_batch(active_units, plan=plan, apply=apply,
+                         compile_fn=compile_fn, capture=capture_fn,
+                         verify=verify, rollback=rollback,
+                         round_no=round_no)
+
     active = list(units)
     flow.enter("plan", active=[u.unit_id for u in active])
     all_verified: set[str] = set()
@@ -372,9 +378,8 @@ def main() -> int:
             break
         flow.enter("round", round_no=r,
                    active=[u.unit_id for u in active])
-        res = run_batch(active, plan=plan, apply=apply, compile_fn=compile_fn,
-                        capture=capture_fn, verify=verify, rollback=rollback,
-                        round_no=r)
+        res, decision = flow.run_round(
+            active, r, a.rounds, batch_fn=batch_fn)
         print("batch", r, res)
         all_verified.update(res.verified)
         for u in active:
@@ -388,7 +393,6 @@ def main() -> int:
                          else res.failed.get(u.unit_id, "not_run")),
                 attempt_no=r, stop_reason=res.failed.get(u.unit_id, "")))
         failed = set(res.failed) - {"__compile__", "__capture__"}
-        decision = flow.decide(failed, round_no=r, max_rounds=a.rounds)
         if decision != "retry":
             active = []
             break
