@@ -229,12 +229,20 @@ def main() -> int:
               meta.get("error", ""),
               f"repeat={len(variants)} unique={uniq} stable={stable}")
         try:
-            (run_dir / "plan_repeat.json").write_text(
-                json.dumps({unit.unit_id: {
-                    "variants": variants, "stable": stable,
-                    "selected": plan_key(pl) if pl else "",
-                    "min_votes": min_votes,
-                }}, ensure_ascii=False, indent=2), encoding="utf-8")
+            rp = run_dir / "plan_repeat.json"
+            old = {}
+            if rp.exists():
+                try:
+                    old = json.loads(rp.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    old = {}
+            old[unit.unit_id] = {
+                "variants": variants, "stable": stable,
+                "selected": plan_key(pl) if pl else "",
+                "min_votes": min_votes,
+            }
+            rp.write_text(json.dumps(old, ensure_ascii=False, indent=2),
+                          encoding="utf-8")
         except OSError:
             pass
         if pl is None:

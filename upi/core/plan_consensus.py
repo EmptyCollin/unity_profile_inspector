@@ -8,10 +8,19 @@ import json
 def plan_key(plan) -> str:
     if plan is None:
         return ""
+    inv = getattr(plan, "invariant", {}) or {}
+    inv_key = None
+    if inv:
+        inv_key = {
+            "file": inv.get("file", ""),
+            "method": inv.get("method", ""),
+            "expect": int(inv.get("expect", 0)),
+        }
     payload = {
         "metric": getattr(plan, "metric", ""),
-        "invariant": getattr(plan, "invariant", {}),
-        "diffs": getattr(plan, "diffs", []),
+        # 同文件/方法/expect 视为同一机制；pattern 粗细不算不同方案
+        "invariant": inv_key,
+        "diffs": [] if inv else getattr(plan, "diffs", []),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()

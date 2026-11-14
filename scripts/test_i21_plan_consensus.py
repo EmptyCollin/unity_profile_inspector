@@ -45,6 +45,18 @@ _, stable5, _ = choose_consensus([a, b, d], min_votes=2)
 ok("metric 不同不算同方案", stable5 is True)  # a,b 仍是多数
 ok("diff 不同 key 不同", plan_key(a) != plan_key(c))
 
+# 有 invariant 时：同机制、不同写法视为同方案
+inv = {"file": "A.cs", "method": "Tick",
+       "pattern": r"new\s+Texture2D", "expect": 0}
+e = p("var x = new Texture2D(1,1);", inv=inv)
+f = p("var y = new Texture2D(2,2);", inv=inv)
+ok("同 invariant 不同 diff → 同 key", plan_key(e) == plan_key(f))
+inv_narrow = {**inv, "pattern": r"new\s+Texture2D\(2, 2"}
+g = p("var z = new Texture2D(1,1);", inv=inv_narrow)
+ok("同方法/expect 不同 pattern 粗细 → 同 key", plan_key(e) == plan_key(g))
+sel, st, _ = choose_consensus([e, f, c], min_votes=2)
+ok("同机制聚类可稳定", st is True and sel is not None)
+
 print(f"\n==== I21 计划一致性测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))
