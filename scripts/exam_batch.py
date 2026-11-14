@@ -82,6 +82,8 @@ def main() -> int:
                     help="decide 节点由 LLM 选择 retry/stop（失败退回规则）")
     ap.add_argument("--adapter", default="upi.adapters.devsim:DevSimAdapter",
                     help="项目适配器 module:Class")
+    ap.add_argument("--static-repair", action="store_true",
+                    help="把静态-only 候选也纳入修复（默认只作 potential）")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -179,7 +181,10 @@ def main() -> int:
                       mode="regression", created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                       findings=findings, repairs=[])
     save_run(run)
-    units = consolidate([f.model_dump() for f in findings] + static_findings)
+    repair_inputs = [f.model_dump() for f in findings]
+    if a.static_repair:
+        repair_inputs += static_findings
+    units = consolidate(repair_inputs)
     if a.targets:
         needles = {x.strip() for x in a.targets.split(",") if x.strip()}
         units = [u for u in units
