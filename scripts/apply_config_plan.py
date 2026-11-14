@@ -20,9 +20,12 @@ def main() -> int:
     ap.add_argument("--field", required=True)
     ap.add_argument("--before", required=True)
     ap.add_argument("--after", required=True)
+    ap.add_argument("--section", default="")
+    ap.add_argument("--index", type=int, default=0)
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
-    edit = ConfigEdit(a.path, a.field, a.before, a.after)
+    edit = ConfigEdit(a.path, a.field, a.before, a.after,
+                      section=a.section, index=a.index)
     errors = validate(a.project, [edit])
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, ensure_ascii=False))
