@@ -121,7 +121,7 @@ def _capture_once(project: Path, project_id: str, replay: str,
                   run_dir: Path, label: str, *,
                   two_pass: bool = False, retries: int = 1,
                   checkpoint=None, light: bool = False,
-                  fast: bool = False):
+                  fast: bool = False, target_windows: bool = False):
     """采集子进程；失败落 tool_errors.jsonl 并重试一次。返回 (ok, out)。"""
     if checkpoint is not None and checkpoint.done(label):
         if (run_dir / "merged_candidates.json").exists():
@@ -149,6 +149,8 @@ def _capture_once(project: Path, project_id: str, replay: str,
             cmd.append("--light")
         if fast:
             cmd.append("--fast")
+        if target_windows:
+            cmd.append("--target-windows")
         try:
             last = subprocess.run(cmd, cwd=str(ROOT), capture_output=True,
                                   text=True, encoding="utf-8",

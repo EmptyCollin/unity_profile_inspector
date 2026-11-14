@@ -310,7 +310,7 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
 
 def run_and_capture(project: Path, run_id: str, limit: int,
                     replay_path: Path, *, enable_deep: bool = True,
-                    fast: bool = False) -> list[dict]:
+                    fast: bool = False, target_windows: bool = False) -> list[dict]:
     """滚动运行 replay：每个动作命令后采一窗；记录帧时间线与异常窗口。"""
     off_first = _eval(project, PROFILER_OFF, timeout=30)
     on = _eval(project, SHALLOW_ON, timeout=30)
@@ -326,6 +326,10 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             return []
         ex = ReplayExecutor(project)
         fast_done = False
+        last_action = {}
+        for idx, cmd in enumerate(spec.commands):
+            if cmd.type in ACTION_CMDS:
+                last_action[cmd.type] = idx
         for i, cmd in enumerate(spec.commands):
             if fast and cmd.type == "stop" and not fast_done:
                 for c in capture_window(project, f"{run_id}_end", limit,
@@ -337,7 +341,11 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             f = _frame(project)
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
-            if cmd.type in ACTION_CMDS and not fast:
+            take = ((cmd.type in ACTION_CMDS)
+                    and (target_windows
+                         and last_action.get(cmd.type) == i
+                         or (not fast and not target_windows)))
+            if take:
                 for c in capture_window(project, f"{run_id}_a{i}", limit):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
@@ -348,7 +356,7 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                 k = str(c.get("root_cause") or "")
                 if k and k not in merged:
                     merged[k] = c
-        if not fast:
+        if not fast and not target_windows:
             for c in capture_window(project, f"{run_id}_end", limit):
                 k = str(c.get("root_cause") or "")
                 if k and k not in merged:
@@ -540,9 +548,13 @@ def main() -> int:
                     help="只做一次轻采，不做 deep（验证/快速基线）")
     ap.add_argument("--fast", action="store_true",
                     help="整轮 replay 只在末尾采一窗，不逐 action 采")
+    ap.add_argument("--target-windows", action="store_true",
+                    help="只在该类动作最后一次发生时采窗")
     a = ap.parse_args()
     if a.two_pass and a.light:
         raise SystemExit("--two-pass 与 --light 不能同时使用")
+    if a.fast and a.target_windows:
+        raise SystemExit("--fast 与 --target-windows 不能同时使用")
     project = Path(a.project).resolve()
     project_id = a.project_id or project.name
     replay_path = Path(a.replay)
@@ -552,7 +564,8 @@ def main() -> int:
     cands = ((run_two_pass_capture(project, run_id, a.limit, replay_path))
              if a.two_pass else
              run_and_capture(project, run_id, a.limit, replay_path,
-                             enable_deep=not a.light, fast=a.fast))
+                             enable_deep=not a.light, fast=a.fast,
+                             target_windows=a.target_windows))
 
     findings: list[ToolFinding] = []
     for i, c in enumerate(cands):
