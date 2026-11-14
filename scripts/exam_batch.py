@@ -98,6 +98,7 @@ def main() -> int:
 
     baseline_roots = set()
     baseline_metrics: dict = {}
+    baseline_runs: list[dict] = []
 
     def capture_with_recovery(label: str, *, two_pass: bool,
                               light: bool = False, fast: bool = False,
@@ -118,11 +119,13 @@ def main() -> int:
             light=light, fast=fast, target_windows=target_windows)
 
     for i in range(max(1, a.baselines)):
+        bstart = time.time()
         ok, _ = capture_with_recovery(
             f"baseline#{i + 1}", two_pass=False,
             light=True, target_windows=True)
         if not ok:
             return 1
+        baseline_runs.append(counters_since(bstart))
         mp = run_dir / "merged_candidates.json"
         if mp.exists():
             roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
@@ -133,7 +136,7 @@ def main() -> int:
         baseline_roots |= roots
         print("baseline", i + 1, "roots", len(baseline_roots))
 
-    baseline_metrics = counters_since(t0)
+    baseline_metrics = baseline_runs
     flow.enter("diagnose")
     collector = X._make_collector(p, a.project_id, a.replay)
     from upi.core.project_store import knowledge_db as _knowledge_db
@@ -420,6 +423,14 @@ def main() -> int:
             from upi.core.target_metrics import metric_series, stats
 
             def _median(metrics, name):
+                if isinstance(metrics, (list, tuple)):
+                    vals = []
+                    for one in metrics:
+                        s = stats(metric_series(one, name))
+                        if s:
+                            vals.append(s["median"])
+                    import statistics
+                    return statistics.median(vals) if vals else None
                 s = stats(metric_series(metrics, name))
                 return s["median"] if s else None
 

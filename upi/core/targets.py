@@ -8,8 +8,17 @@ from upi.core.target_verification import (TargetObservation, TargetSpec,
 
 def build_spec(finding: dict, before: dict, *,
                metric: str = "frame_time") -> TargetSpec:
-    vals = metric_series(before, metric)
-    base = vals[-3:] if vals else []
+    if isinstance(before, (list, tuple)):
+        vals = []
+        for one in before:
+            series = metric_series(one, metric)
+            s = stats(series)
+            if s:
+                vals.append(s["median"])
+        base = vals
+    else:
+        vals = metric_series(before, metric)
+        base = vals[-3:] if vals else []
     return TargetSpec(
         finding_id=str(finding.get("finding_id") or ""),
         mechanism=str(finding.get("mechanism") or ""), metric=metric,
