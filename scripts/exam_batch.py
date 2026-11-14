@@ -372,6 +372,14 @@ def main() -> int:
                                   "find": d.get("find", ""),
                                   "replace": d.get("replace", "")}
                                  for d in pl.diffs])
+        from upi.core.site_scope import sites_remaining_in_scopes
+        _sa_scope = sites_remaining_in_scopes(
+            p, pl.diffs, list(unit.sites or []))
+        for _k, _v in _sa_scope.items():
+            sa.setdefault(_k, [])
+            for _s in _v:
+                if _s not in sa[_k]:
+                    sa[_k].append(_s)
         # I20：机制不变量优先，由补丁/源码模式推导，不查类名表
         inv = unit_inv.get(unit.unit_id)
         if inv:
