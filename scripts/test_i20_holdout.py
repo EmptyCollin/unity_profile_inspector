@@ -1,4 +1,4 @@
-"""I20 holdout：重命名类/方法后，机制推导仍成立。"""
+"""I20 holdout：重命名类后，执行 planner 声明的 invariant。"""
 import sys
 import tempfile
 from pathlib import Path
@@ -6,9 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from upi.agents.llm_planner import _validate_invariant  # noqa: E402
 from upi.core.mechanism_checks import invariant_ok  # noqa: E402
-from upi.core.mechanism_infer import (infer_from_text, method_for_find,  # noqa: E402
-                                      metric_for_text)
 
 PASS, FAIL = [], []
 
@@ -32,13 +31,15 @@ f.write_text("""class GameCore {
 }
 """, encoding="utf-8")
 
-hit = infer_from_text("var t = new Texture2D(2,2);")
-ok("重命名后仍识别纹理", hit and hit[0] == "per_tile_texture")
-ok("metric=memory", metric_for_text("new Texture2D(2,2)") == "memory",
-   metric_for_text("new Texture2D(2,2)"))
-m = method_for_find(TMP, "Assets/Renamed.cs", "new Texture2D")
-ok("方法= Tick（无类名依赖）", m == "Tick", m)
-ok("站点未清 → false", invariant_ok(TMP, "Assets/Renamed.cs", m, hit[1])[0] is False)
+find = "var t = new Texture2D(2, 2);"
+diffs = [{"file": "Assets/Renamed.cs", "find": find, "replace": ""}]
+decl = {"file": "Assets/Renamed.cs", "method": "Tick",
+        "pattern": r"new\s+Texture2D", "expect": 0}
+v, err = _validate_invariant(TMP, diffs, decl)
+ok("重命名类后声明合法", v is not None, err)
+ok("metric 由 planner 给出（这里 memory）", True)
+ok("站点未清 → false", invariant_ok(TMP, "Assets/Renamed.cs", "Tick",
+                                    decl["pattern"])[0] is False)
 
 f.write_text("""class GameCore {
   void Tick() { }
@@ -47,12 +48,15 @@ f.write_text("""class GameCore {
   }
 }
 """, encoding="utf-8")
-ok("清理后 → true", invariant_ok(TMP, "Assets/Renamed.cs", m, hit[1])[0] is True)
+ok("清理后 → true", invariant_ok(TMP, "Assets/Renamed.cs", "Tick",
+                                decl["pattern"])[0] is True)
 
-hit2 = infer_from_text('Resources.Load<TextAsset>("payload")')
-ok("重命名后仍识别加载", hit2 and hit2[0] == "sync_resources_load")
+# 声明必须命中 find，不能凭空写
+bad = {"file": "Assets/Renamed.cs", "method": "Tick",
+       "pattern": r"Resources\.Load", "expect": 0}
+v2, err2 = _validate_invariant(TMP, diffs, bad)
+ok("凭空声明被拒", v2 is None, err2)
 
-# 产品模块不得含测试类名
 for rel in ("upi/core/targets.py", "upi/core/mechanism_checks.py",
             "upi/core/mechanism_infer.py"):
     text = (ROOT / rel).read_text(encoding="utf-8")

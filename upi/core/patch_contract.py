@@ -36,6 +36,4 @@ def validate(meta: PatchMeta, *, required_sites: list[str],
         if not meta.structural or _numeric_only(find, replace):
             return ContractVerdict(False, "pseudo",
                                    "只改数字/未做结构变化")
-    if not meta.invariant:
-        return ContractVerdict(False, "partial", "缺少机制不变量")
     return ContractVerdict(True, "ok", "")

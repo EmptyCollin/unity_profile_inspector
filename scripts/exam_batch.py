@@ -24,8 +24,7 @@ from upi.core.evidence_diagnosis import candidates_from_latest  # noqa: E402
 from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E402
                                save_run, score_run)
 from upi.core.mechanism_batch import PatchRef, consolidate  # noqa: E402
-from upi.core.mechanism_infer import (diff_text, infer_from_text,  # noqa: E402
-                                      method_for_find, metric_for_text)
+from upi.core.mechanism_infer import count_in_method  # noqa: E402
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
@@ -202,18 +201,13 @@ def main() -> int:
         print("plan", unit.unit_id, unit.mechanism, bool(pl), meta.get("error", ""))
         if pl is None:
             return None
-        text = diff_text(pl.diffs)
-        unit_metric[unit.unit_id] = metric_for_text(text)
-        hit = infer_from_text(text)
-        if hit:
-            name, pat = hit
-            for _d in pl.diffs:
-                mm = method_for_find(p, _d.get("file", ""),
-                                     _d.get("find", ""))
-                if mm:
-                    unit_inv[unit.unit_id] = (
-                        name, pat, f"{_d.get('file','')}::{mm}")
-                    break
+        unit_metric[unit.unit_id] = pl.metric or ""
+        inv = pl.invariant or {}
+        if inv:
+            unit_inv[unit.unit_id] = (
+                "declared",
+                str(inv.get("pattern") or ""),
+                f"{inv.get('file','')}::{inv.get('method','')}")
         plans[unit.unit_id] = pl
         bases[unit.unit_id] = X._git_head(p)
         return PatchRef(unit.unit_id, list(pl.touched_assets))

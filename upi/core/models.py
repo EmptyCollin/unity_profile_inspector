@@ -256,6 +256,9 @@ class EditPlan(BaseModel):
     playbook_id: str
     diffs: list[dict] = Field(default_factory=list)
     invariants_assert: list[str] = Field(default_factory=list)
+    # I20：由 planner（LLM）声明，verifier 只执行，不做模式查表
+    metric: str = ""
+    invariant: dict = Field(default_factory=dict)
     side_effect: SideEffect = "unknown"
     touched_assets: list[str] = Field(default_factory=list)
     permission_tier: PermissionTier = "blocked"

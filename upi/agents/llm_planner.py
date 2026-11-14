@@ -56,7 +56,15 @@ code_anchors: {anchors}
 - 只改数字/循环上界不算修复。
 
 ## 输出 JSON
-{{"why":"一句话说明为什么这样改", "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
+{{"why":"一句话说明为什么这样改",
+ "metric":"frame_time|gc_alloc|memory|drawcalls",
+ "invariant":{{"file":"Assets/...","method":"方法名","pattern":"正则","expect":0}},
+ "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
+
+invariant 必须由你根据这次补丁声明：
+- metric 选最能衡量该机制改善的指标；
+- invariant.pattern 必须能在 find 文本中匹配到，并且 apply 后应在 method 内消失；
+- 如果无法声明可靠不变量，invariant 输出 {{}}，metric 仍必须给出。
 """
 
 
@@ -184,6 +192,40 @@ def _validate(project_root: Path, edits: list[dict]) -> tuple[Optional[list[dict
     return out, ""
 
 
+def _validate_invariant(project_root: Path, diffs: list[dict],
+                        inv: dict) -> tuple[Optional[dict], str]:
+    if not inv:
+        return {}, ""
+    import re
+    f = str(inv.get("file", "")).strip()
+    method = str(inv.get("method", "")).strip()
+    pattern = str(inv.get("pattern", "")).strip()
+    if not (f and method and pattern):
+        return None, "invariant 缺 file/method/pattern"
+    if f not in {d["file"] for d in diffs}:
+        return None, "invariant 文件不在 diffs 里"
+    fp = (Path(project_root) / f).resolve()
+    try:
+        fp.relative_to(Path(project_root).resolve())
+    except ValueError:
+        return None, "invariant 文件越界"
+    if not fp.is_file():
+        return None, "invariant 文件不存在"
+    text = fp.read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"\b" + re.escape(method) + r"\s*\(", text):
+        return None, f"invariant 方法不存在：{method}"
+    try:
+        rx = re.compile(pattern)
+    except re.error as e:
+        return None, f"invariant 正则无效：{e}"
+    find = "\n".join(d["find"] for d in diffs if d["file"] == f)
+    if not rx.search(find):
+        return None, "invariant.pattern 不能在 find 中命中"
+    return {"file": f, "method": method, "pattern": pattern,
+            "expect": int(inv.get("expect", 0))}, ""
+
+
+
 def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                project_root: Path | str, *, client=None,
                max_rounds: int = 3, history: str = "",
@@ -269,6 +311,18 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
             prompt += (f"\n\n上次补丁被拒：{last_err}。"
                        "只能修改给定源码片段里的代码。")
             continue
+        metric = str(doc.get("metric") or "").strip()
+        if not metric:
+            last_err = "missing_metric：必须声明 metric"
+            prompt += "\n\n上次没有声明 metric；必须给出最能衡量该机制的指标。"
+            continue
+        decl, derr = _validate_invariant(root, diffs,
+                                         doc.get("invariant") or {})
+        if decl is None:
+            last_err = f"invalid_invariant：{derr}"
+            prompt += (f"\n\n上次 invariant 被拒：{derr}。"
+                       "pattern 必须能在 find 中命中，method 必须存在。")
+            continue
         if required_sites:
             from upi.core.patch_contract import PatchMeta, validate as _pv
             covered = sorted({d["file"] for d in diffs})
@@ -277,7 +331,7 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                 PatchMeta(unit_id="plan", mechanism="", sites_covered=covered,
                           structural=not all(_numeric_only(d["find"], d["replace"])
                                              for d in diffs),
-                          invariant=(invariant or "derived_from_diff")),
+                          invariant=str(decl.get("pattern", ""))),
                 required_sites=req_files, mechanism_class=mechanism_class,
                 find="\n".join(d["find"] for d in diffs),
                 replace="\n".join(d["replace"] for d in diffs))
@@ -288,6 +342,8 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                 continue
         return EditPlan(playbook_id="PB-LLM",
                         diffs=diffs,
+                        metric=metric,
+                        invariant=decl,
                         invariants_assert=["LLM 声称语义保持，需人工复核",
                                            "find 精确命中一次"],
                         side_effect="unknown", permission_tier="semi",

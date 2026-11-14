@@ -59,6 +59,7 @@ hyp = {"root_cause": "hot_function:ChromaGame.UpdateHud",
        "code_anchors": ["Assets/DevSim/Runtime/ChromaGame.cs::ChromaGame.UpdateHudBody"]}
 
 GOOD = json.dumps({"why": "cache text",
+                   "metric": "frame_time",
                    "edits": [{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
                               "find": "private void UpdateHudBody()",
                               "replace": "private void UpdateHudBody()  // cached"}]})
@@ -70,7 +71,8 @@ ok("坏 JSON 后重试成功", plan is not None and meta["rounds"] == 2, meta)
 ok("plan 走 PB-LLM", plan is not None and plan.playbook_id == "PB-LLM")
 
 # 2) find 不命中 → 回喂源码后成功
-BAD = json.dumps({"why": "x", "edits": [{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
+BAD = json.dumps({"why": "x", "metric": "frame_time",
+                  "edits": [{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
                                           "find": "NOPE", "replace": "Y"}]})
 cli2 = FakeClient([BAD, GOOD])
 plan2, meta2 = LP.plan_issue(cfg, issue, hyp, PROJECT, client=cli2)
@@ -83,7 +85,7 @@ ok("insufficient_evidence → 无方案", plan3 is None
    and meta3.get("error") == "insufficient_evidence", meta3)
 
 # 3b) I15 伪优化：只改数字/循环上界 → 拒绝
-NUM = json.dumps({"why": "reduce count",
+NUM = json.dumps({"why": "reduce count", "metric": "frame_time",
                   "edits": [{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
                              "find": "for (int i = 0; i < 32; i++)",
                              "replace": "for (int i = 0; i < 16; i++)"}]})

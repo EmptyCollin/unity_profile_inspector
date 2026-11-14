@@ -1,13 +1,9 @@
-"""I20：机制不变量检查（从代码模式推导，不依赖类名）。"""
+"""I20：执行 planner 声明的静态不变量，不再推导模式。"""
 from __future__ import annotations
 
 from pathlib import Path
 
-from upi.core.mechanism_infer import count_in_method, infer_from_text
-
-
-def invariant_for_text(find: str) -> tuple[str, str] | None:
-    return infer_from_text(find)
+from upi.core.mechanism_infer import count_in_method
 
 
 def invariant_ok(project: Path, file: str, method: str,
