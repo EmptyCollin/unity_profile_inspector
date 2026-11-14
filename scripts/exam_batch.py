@@ -105,11 +105,14 @@ def main() -> int:
         return 1
     hs = g.get("hypotheses") or []
     findings = X.findings_from_hypotheses(run_id, hs, {})
-    # I20：静态机制站点补检（运行时不热的漏洞）
+    # I20：静态机制站点补检只用于修复单元，不进入评分 findings
     from upi.core.mechanism_inventory import scan as _scan_sites
-    from upi.core.findings import Anchor, AttributionInfo, ToolFinding
+    static_findings: list[dict] = []
     existing_methods = {a.method for f in findings for a in f.anchors if a.method}
+    added_mech: set[str] = set()
     for mech, sites in _scan_sites(p).by_mechanism().items():
+        if mech in added_mech:
+            continue
         for s in sites:
             if not s.method or s.method in existing_methods:
                 continue
@@ -117,21 +120,23 @@ def main() -> int:
             if any(root == str((f.attribution.factors or {}).get("root_cause"))
                    for f in findings):
                 continue
-            findings.append(ToolFinding(
-                finding_id=f"static-{run_id}-{len(findings)}",
-                mechanism=root, metric="", link="",
-                anchors=[Anchor(file=s.file, method=s.method,
-                                start_line=s.line, end_line=s.line)],
-                evidence_refs=[], state="candidate",
-                attribution=AttributionInfo(confidence=0.5,
-                                            factors={"root_cause": root})))
+            static_findings.append({
+                "finding_id": f"static-{run_id}-{len(static_findings)}",
+                "mechanism": root, "metric": "", "link": "",
+                "anchors": [{"file": s.file, "method": s.method,
+                             "start_line": s.line, "end_line": s.line}],
+                "evidence_refs": [], "state": "candidate",
+                "attribution": {"confidence": 0.5,
+                                "factors": {"root_cause": root}}})
             existing_methods.add(s.method)
-            print("static site added", root, s.file, s.line)
+            added_mech.add(mech)
+            print("static candidate", root, s.file, s.line)
+            break
     run = RunFindings(run_id=run_id, project_id=a.project_id,
                       mode="regression", created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                       findings=findings, repairs=[])
     save_run(run)
-    units = consolidate([f.model_dump() for f in findings])
+    units = consolidate([f.model_dump() for f in findings] + static_findings)
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
     print("findings", len(findings), "units", len(units))
