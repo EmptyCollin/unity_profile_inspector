@@ -61,20 +61,24 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
     res = BatchResult(round=round_no)
     patches: dict[str, PatchRef] = {}
     planned_units: list = []
+    # 先全部 plan（快照必须都指向同一基线），再统一 apply
     for u in units:
         p = plan(u)
         if p is None:
             res.failed[getattr(u, "unit_id", str(u))] = "no_plan"
             continue
         patches[getattr(u, "unit_id", str(u))] = p
-        if not apply(p):
-            res.failed[getattr(u, "unit_id", str(u))] = "apply_failed"
-            continue
-        res.applied.append(getattr(u, "unit_id", str(u)))
         planned_units.append(u)
+    for u in planned_units:
+        uid = getattr(u, "unit_id", str(u))
+        if not apply(patches[uid]):
+            res.failed[uid] = "apply_failed"
+            continue
+        res.applied.append(uid)
     if not res.applied:
         return res
-    units = planned_units
+    units = [u for u in planned_units
+             if getattr(u, "unit_id", str(u)) in res.applied]
     res.compile_ok = bool(compile_fn())
     if not res.compile_ok:
         good = _isolate_compile(patches, apply, compile_fn, rollback)
