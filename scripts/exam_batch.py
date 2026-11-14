@@ -263,6 +263,10 @@ def main() -> int:
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
     def verify(unit, obs):
+        # G21：回归形态 verified 至少需要 3 次基线；1 次只能算流程冒烟
+        if a.baselines < 3:
+            print("verify blocked: baselines<3 (smoke only)", a.baselines)
+            return "needs_recheck"
         target = unit.targets[0].split(":", 1)[-1] if unit.targets else unit.mechanism
         now = set(obs or [])
         gone = target not in now
@@ -281,7 +285,7 @@ def main() -> int:
             file, _, method = scope.partition("::")
             _ok, _detail = _inv_ok(p, file, method, pat, expect)
             print("invariant-verify", unit.unit_id, name, _ok, _detail)
-            if not _ok:
+            if not _ok or new:
                 return "partial"
             return "partial" if sa else "verified"
         from upi.core.verification_v2 import evaluate_v2
