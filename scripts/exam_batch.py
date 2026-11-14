@@ -28,6 +28,7 @@ from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E
 from upi.core.mechanism_batch import PatchRef, consolidate  # noqa: E402
 from upi.core.mechanism_infer import count_in_method  # noqa: E402
 from upi.core.plan_consensus import choose_consensus, plan_key  # noqa: E402
+from upi.core.repair_verify import decide as _decide_verify  # noqa: E402
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
@@ -354,10 +355,24 @@ def main() -> int:
             file, _, method = scope.partition("::")
             _ok, _detail = _inv_ok(p, file, method, pat, expect)
             print("invariant-verify", unit.unit_id, name, _ok, _detail,
-                  "new=", new)
-            if not _ok or new:
-                return "partial"
-            return "partial" if sa else "verified"
+                  "gone=", gone, "new=", new)
+            # I24：invariant 只是必要条件；target/metric 才决定 verified
+            metric_status = "unmeasured"
+            if baseline_metrics and after_metrics:
+                from upi.core.targets import evaluate as _eval_target
+                _spec, _obs, _tv = _eval_target(
+                    {"finding_id": unit.unit_id, "mechanism": unit.mechanism},
+                    baseline_metrics, after_metrics,
+                    metric=unit_metric.get(unit.unit_id, "frame_time"),
+                    invariant_ok=True, sites_remaining=0)
+                metric_status = _tv.status
+                print("invariant+metric", unit.unit_id, metric_status,
+                      _tv.delta, _tv.threshold)
+            return _decide_verify(
+                baselines=a.baselines, invariant_ok=_ok,
+                target_gone=gone, new_clusters=new,
+                sites_remaining=sum(len(x) for x in sa.values()),
+                metric_status=metric_status)
         from upi.core.verification_v2 import evaluate_v2
         # I20：metric delta + 机制不变量；缺失才退回 cluster
         if baseline_metrics and after_metrics:
@@ -371,6 +386,8 @@ def main() -> int:
             print("metric-verify", unit.unit_id, _tv.status,
                   _tv.delta, _tv.threshold)
             if _tv.status != "unmeasured":
+                if _tv.status == "verified" and (not gone or new):
+                    return "partial"
                 return _tv.status
         v = evaluate_v2(target_gone=gone, new_clusters=new, guards_ok=True,
                         sites_remaining=sa)
