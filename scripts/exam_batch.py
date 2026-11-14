@@ -18,6 +18,7 @@ import exam_live as X  # noqa: E402
 import exam_multi as M  # noqa: E402
 from upi.agents import nodes as N  # noqa: E402
 from upi.adapters.loader import load_adapter  # noqa: E402
+from upi.agents.flow_run import FlowRun  # noqa: E402
 from upi.agents.llm_planner import plan_issue  # noqa: E402
 from upi.core import events as E  # noqa: E402
 from upi.core.batch_round import run_batch  # noqa: E402
@@ -84,6 +85,8 @@ def main() -> int:
     run_id = new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    flow = FlowRun(run_dir, run_id)
+    flow.enter("baseline")
     t0 = time.time()
     M.ensure_ready(p)
     adapter = load_adapter(a.adapter, p)
@@ -126,6 +129,7 @@ def main() -> int:
         print("baseline", i + 1, "roots", len(baseline_roots))
 
     baseline_metrics = counters_since(t0)
+    flow.enter("diagnose")
     collector = X._make_collector(p, a.project_id, a.replay)
     from upi.core.project_store import knowledge_db as _knowledge_db
     nd = N.make_nodes(run_dir, live_llm=True,
@@ -360,11 +364,14 @@ def main() -> int:
         return X._git_reset(p, bases.get(patch.unit_id, ""))
 
     active = list(units)
+    flow.enter("plan", active=[u.unit_id for u in active])
     all_verified: set[str] = set()
     for r in range(1, max(1, a.rounds) + 1):
         round_no = r
         if not active:
             break
+        flow.enter("round", round_no=r,
+                   active=[u.unit_id for u in active])
         res = run_batch(active, plan=plan, apply=apply, compile_fn=compile_fn,
                         capture=capture_fn, verify=verify, rollback=rollback,
                         round_no=r)
@@ -381,9 +388,14 @@ def main() -> int:
                          else res.failed.get(u.unit_id, "not_run")),
                 attempt_no=r, stop_reason=res.failed.get(u.unit_id, "")))
         failed = set(res.failed) - {"__compile__", "__capture__"}
+        decision = flow.decide(failed, round_no=r, max_rounds=a.rounds)
+        if decision != "retry":
+            active = []
+            break
         active = [u for u in units if u.unit_id in failed]
         if not active:
             break
+    flow.enter("record", verified=sorted(all_verified), route="done")
     run.stop_reason = f"batch:verified={len(all_verified)}"
     save_run(run)
     paper = json.loads((ROOT / "runs" / "i8_lab" / "paper.json")
