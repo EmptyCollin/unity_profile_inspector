@@ -56,6 +56,9 @@ class FakeAdapter:
     def capture(self, metrics):
         return {"counters": {}}
 
+    def capture_replay(self, replay_path, run_dir, label, **kwargs):
+        return True, None
+
     def compile(self):
         return {"ok": True}
 

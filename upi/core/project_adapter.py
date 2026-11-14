@@ -43,4 +43,9 @@ class ProjectAdapter(Protocol):
 
     def capture(self, metrics: list[str]) -> dict: ...
 
+    def capture_replay(self, replay_path, run_dir, label: str, *,
+                       two_pass: bool = False, light: bool = False,
+                       fast: bool = False,
+                       target_windows: bool = False): ...
+
     def compile(self) -> CompileResult: ...

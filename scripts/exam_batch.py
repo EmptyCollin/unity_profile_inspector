@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import exam_live as X  # noqa: E402
 import exam_multi as M  # noqa: E402
 from upi.agents import nodes as N  # noqa: E402
-from upi.adapters.devsim import DevSimAdapter  # noqa: E402
+from upi.adapters.loader import load_adapter  # noqa: E402
 from upi.agents.llm_planner import plan_issue  # noqa: E402
 from upi.core import events as E  # noqa: E402
 from upi.core.batch_round import run_batch  # noqa: E402
@@ -77,6 +77,8 @@ def main() -> int:
                     help="同一输入重复 plan 次数，用于统计 LLM 一致性")
     ap.add_argument("--plan-min-votes", type=int, default=2,
                     help="重复采样时判定稳定所需最少同票")
+    ap.add_argument("--adapter", default="upi.adapters.devsim:DevSimAdapter",
+                    help="项目适配器 module:Class")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -84,6 +86,7 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     M.ensure_ready(p)
+    adapter = load_adapter(a.adapter, p)
 
     baseline_roots = set()
     baseline_metrics: dict = {}
@@ -91,7 +94,6 @@ def main() -> int:
     def capture_with_recovery(label: str, *, two_pass: bool,
                               light: bool = False, fast: bool = False,
                               target_windows: bool = False):
-        adapter = DevSimAdapter(p)
         ok, out = adapter.capture_replay(
             a.replay, run_dir, label, two_pass=two_pass, light=light,
             fast=fast, target_windows=target_windows)
