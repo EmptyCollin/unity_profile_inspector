@@ -101,6 +101,7 @@ def main() -> int:
     baseline_roots = set()
     baseline_metrics: dict = {}
     baseline_runs: list[dict] = []
+    last_cap = {"id": ""}
 
     def capture_with_recovery(label: str, *, two_pass: bool,
                               light: bool = False, fast: bool = False,
@@ -109,6 +110,7 @@ def main() -> int:
             a.replay, run_dir, label, two_pass=two_pass, light=light,
             fast=fast, target_windows=target_windows)
         if ok:
+            last_cap["id"] = getattr(adapter, "last_capture_id", "")
             return True, out
         print("capture failed; restart editor and retry", label)
         try:
@@ -116,9 +118,12 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             print("editor restart failed", type(e).__name__, e)
             return False, out
-        return adapter.capture_replay(
+        ok2, out2 = adapter.capture_replay(
             a.replay, run_dir, label + "-retry", two_pass=two_pass,
             light=light, fast=fast, target_windows=target_windows)
+        if ok2:
+            last_cap["id"] = getattr(adapter, "last_capture_id", "")
+        return ok2, out2
 
     for i in range(max(1, a.baselines)):
         bstart = time.time()
@@ -127,7 +132,7 @@ def main() -> int:
             light=True, target_windows=True)
         if not ok:
             return 1
-        baseline_runs.append(counters_since(bstart, a.project_id))
+        baseline_runs.append(counters_since(0, last_cap["id"]))
         mp = run_dir / "merged_candidates.json"
         if mp.exists():
             roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
@@ -340,7 +345,7 @@ def main() -> int:
                                       target_windows=True)
         if not ok:
             raise RuntimeError("batch capture failed")
-        after_metrics = counters_since(after_start, a.project_id)
+        after_metrics = counters_since(0, last_cap["id"])
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 

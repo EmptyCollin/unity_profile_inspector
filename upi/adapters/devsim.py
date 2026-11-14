@@ -130,6 +130,7 @@ class DevSimAdapter:
     def __init__(self, project: Path | str):
         self.root = Path(project).resolve()
         self.ex = ReplayExecutor(self.root)
+        self.last_capture_id = ""
 
     def describe(self):
         from upi.core.project_adapter import ProjectSpec
@@ -155,6 +156,7 @@ class DevSimAdapter:
         safe = "".join(c if c.isalnum() or c in "-_" else "_"
                        for c in f"{label}_{time.strftime('%H%M%S')}")
         cap_id = f"{self.root.name}_{safe}"
+        self.last_capture_id = cap_id
         cmd = [sys.executable, str(root / "scripts" / "capability_run.py"),
                "--project", str(self.root), "--project-id", self.root.name,
                "--replay", str(replay_path), "--no-save",
