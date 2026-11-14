@@ -6,7 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.asset_edit import AssetEdit, apply, rollback, validate  # noqa: E402
+from upi.core.asset_edit import (AssetEdit, apply, apply_and_reimport,  # noqa: E402
+                                 rollback, validate)
 
 PASS, FAIL = [], []
 
@@ -36,6 +37,23 @@ ok("isReadable 已改", "isReadable: 0" in text, text)
 
 rollback(TMP, done)
 ok("rollback 恢复原文", meta.read_text(encoding="utf-8") == original)
+
+calls = []
+done2 = apply_and_reimport(TMP, edits,
+                           eval_fn=lambda p: calls.append(p))
+ok("重导入被调用", calls == ["Assets/big.png"] * 2, calls)
+rollback(TMP, done2)
+
+def boom(_):
+    raise RuntimeError("reimport failed")
+
+try:
+    apply_and_reimport(TMP, edits, eval_fn=boom)
+    ok("重导入失败应抛错", False)
+except RuntimeError:
+    ok("重导入失败应抛错", True)
+ok("重导入失败回滚", meta.read_text(encoding="utf-8") == original,
+   meta.read_text(encoding="utf-8"))
 
 bad = [AssetEdit("Assets/big.png", "compressionFormat", 0, 1)]
 ok("未允许字段被拒", validate(TMP, bad) != [])

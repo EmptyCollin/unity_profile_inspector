@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,3 +73,28 @@ def rollback(project: Path | str, done: list[dict]) -> None:
     root = Path(project).resolve()
     for d in reversed(done):
         _meta(root, d["asset_path"]).write_text(d["before"], encoding="utf-8")
+
+
+def _default_eval(project: Path, asset_path: str) -> None:
+    code = (f"UnityEditor.AssetDatabase.ImportAsset(\"{asset_path}\", "
+            "UnityEditor.ImportAssetOptions.ForceUpdate);")
+    p = subprocess.run(["unity", "command", "script eval", "--code", code,
+                        "--project-path", str(project), "--format", "json"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=180)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr[-400:] or p.stdout[-400:])
+
+
+def apply_and_reimport(project: Path | str, edits: list[AssetEdit],
+                       eval_fn=None) -> list[dict]:
+    root = Path(project).resolve()
+    fn = eval_fn or (lambda asset_path: _default_eval(root, asset_path))
+    done = apply(root, edits)
+    try:
+        for e in edits:
+            fn(e.asset_path)
+    except Exception:
+        rollback(root, done)
+        raise
+    return done
