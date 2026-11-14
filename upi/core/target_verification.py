@@ -48,9 +48,12 @@ def evaluate_target(spec: TargetSpec, obs: TargetObservation) -> TargetVerdict:
         sigma = 0.0
     before = statistics.median(spec.baseline_values)
     # Profiler 采样序列噪声大：σ 超过中位数 5% 时改用相对阈值，
-    # 否则稳定指标仍用 3σ。
+    # 否则稳定指标仍用 3σ。不同 metric 的合理改善幅度不同。
     if before and sigma > 0.05 * abs(before):
-        threshold = max(spec.min_delta, 0.10 * abs(before))
+        rel = {"frame_time": 0.05, "cpu_frame_time": 0.05,
+               "memory": 0.05, "drawcalls": 0.05,
+               "gc_alloc": 0.10}.get(spec.metric, 0.05)
+        threshold = max(spec.min_delta, rel * abs(before))
     else:
         threshold = max(spec.min_delta, spec.k_sigma * sigma)
     delta = before - obs.after
