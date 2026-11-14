@@ -308,6 +308,16 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
         _eval(project, PROFILER_OFF, timeout=30)
 
 
+def capture_window_with_counters(project: Path, tag: str, limit: int,
+                                 since: str | None = None) -> list[dict]:
+    cands = capture_window(project, tag, limit, since=since)
+    try:
+        collect_counters(project, tag)
+    except Exception as e:  # noqa: BLE001
+        print("counters skipped:", type(e).__name__, e)
+    return cands
+
+
 def run_and_capture(project: Path, run_id: str, limit: int,
                     replay_path: Path, *, enable_deep: bool = True,
                     fast: bool = False, target_windows: bool = False) -> list[dict]:
@@ -332,8 +342,8 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                 last_action[cmd.type] = idx
         for i, cmd in enumerate(spec.commands):
             if fast and cmd.type == "stop" and not fast_done:
-                for c in capture_window(project, f"{run_id}_end", limit,
-                                        since=started):
+                for c in capture_window_with_counters(
+                        project, f"{run_id}_end", limit, since=started):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
@@ -346,18 +356,20 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                          and last_action.get(cmd.type) == i
                          or (not fast and not target_windows)))
             if take:
-                for c in capture_window(project, f"{run_id}_a{i}", limit):
+                for c in capture_window_with_counters(
+                        project, f"{run_id}_a{i}", limit):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
         if fast and not fast_done:
-            for c in capture_window(project, f"{run_id}_end", limit,
-                                    since=started):
+            for c in capture_window_with_counters(
+                    project, f"{run_id}_end", limit, since=started):
                 k = str(c.get("root_cause") or "")
                 if k and k not in merged:
                     merged[k] = c
         if not fast and not target_windows:
-            for c in capture_window(project, f"{run_id}_end", limit):
+            for c in capture_window_with_counters(
+                    project, f"{run_id}_end", limit):
                 k = str(c.get("root_cause") or "")
                 if k and k not in merged:
                     merged[k] = c

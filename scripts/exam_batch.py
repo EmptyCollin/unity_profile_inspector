@@ -41,6 +41,25 @@ def latest_counters() -> dict:
         return {}
 
 
+def counters_since(start_ts: float) -> dict:
+    """合并 start_ts 之后所有 capture 的 counters series。"""
+    merged: dict[str, dict] = {}
+    for p in (ROOT / "runs").glob("*/counters.json"):
+        try:
+            if p.stat().st_mtime < start_ts:
+                continue
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        for name, node in (d.get("counters") or {}).items():
+            series = node.get("series") if isinstance(node, dict) else None
+            if not isinstance(series, list):
+                continue
+            slot = merged.setdefault(name, {"series": []})
+            slot["series"].extend(float(x) for x in series)
+    return {"counters": merged}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
@@ -96,7 +115,7 @@ def main() -> int:
         baseline_roots |= roots
         print("baseline", i + 1, "roots", len(baseline_roots))
 
-    baseline_metrics = latest_counters()
+    baseline_metrics = counters_since(t0)
     collector = X._make_collector(p, a.project_id, a.replay)
     from upi.core.project_store import knowledge_db as _knowledge_db
     nd = N.make_nodes(run_dir, live_llm=True,
@@ -153,6 +172,7 @@ def main() -> int:
     plans, bases = {}, {}
     round_no = 1
     after_metrics: dict = {}
+    after_start = 0.0
 
     def plan(unit):
         h = next((x for x in hs
@@ -215,13 +235,14 @@ def main() -> int:
         return ok
 
     def capture_fn():
-        nonlocal after_metrics
+        nonlocal after_metrics, after_start
+        after_start = time.time()
         ok, _ = capture_with_recovery("batch-after", two_pass=False,
                                       light=True, fast=False,
                                       target_windows=True)
         if not ok:
             raise RuntimeError("batch capture failed")
-        after_metrics = latest_counters()
+        after_metrics = counters_since(after_start)
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
