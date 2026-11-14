@@ -57,7 +57,9 @@ agent_model_parameters:
   agents:
     detect:      {}                      # 继承 defaults
     diagnose:    {}
-    fix:         {}
+    fix:
+      # 规划必须可重复：同输入多次采样应尽量收敛
+      temperature: 0.0
     verify:      {}
     review:
       # 同模型下的隔离手段（DESIGN §2.3.5）：独立 prompt 模板 + 独立温度。
