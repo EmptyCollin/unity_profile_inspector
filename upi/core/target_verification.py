@@ -46,8 +46,13 @@ def evaluate_target(spec: TargetSpec, obs: TargetObservation) -> TargetVerdict:
         sigma = statistics.pstdev(spec.baseline_values)
     else:
         sigma = 0.0
-    threshold = max(spec.min_delta, spec.k_sigma * sigma)
     before = statistics.median(spec.baseline_values)
+    # Profiler 采样序列噪声大：σ 超过中位数 5% 时改用相对阈值，
+    # 否则稳定指标仍用 3σ。
+    if before and sigma > 0.05 * abs(before):
+        threshold = max(spec.min_delta, 0.10 * abs(before))
+    else:
+        threshold = max(spec.min_delta, spec.k_sigma * sigma)
     delta = before - obs.after
     if delta < threshold:
         return TargetVerdict("needs_recheck", delta, threshold,
