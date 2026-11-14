@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from upi.agents import nodes as N  # noqa: E402
+from upi.adapters.devsim import DevSimAdapter  # noqa: E402
 from upi.agents.llm_planner import plan_issue  # noqa: E402
 from upi.core import events as E  # noqa: E402
 from upi.core.findings import (Anchor, AttributionInfo, RepairRecord,  # noqa: E402
@@ -140,22 +141,12 @@ def _capture_once(project: Path, project_id: str, replay: str,
             if attempt < retries:
                 time.sleep(0.5)
             continue
-        cmd = [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
-               "--project", str(project), "--project-id", project_id,
-               "--replay", replay, "--no-save"]
-        if two_pass:
-            cmd.append("--two-pass")
-        if light:
-            cmd.append("--light")
-        if fast:
-            cmd.append("--fast")
-        if target_windows:
-            cmd.append("--target-windows")
         try:
-            last = subprocess.run(cmd, cwd=str(ROOT), capture_output=True,
-                                  text=True, encoding="utf-8",
-                                  errors="replace", timeout=2400)
-            if last.returncode == 0:
+            ok, last = DevSimAdapter(project).capture_replay(
+                replay, run_dir, label,
+                two_pass=two_pass, light=light, fast=fast,
+                target_windows=target_windows)
+            if ok:
                 if checkpoint is not None:
                     try:
                         checkpoint.save(step=label, status="done")
@@ -163,9 +154,9 @@ def _capture_once(project: Path, project_id: str, replay: str,
                         pass
                 return True, last
             err = {"label": label, "attempt": attempt + 1,
-                   "returncode": last.returncode,
-                   "stdout": (last.stdout or "")[-2000:],
-                   "stderr": (last.stderr or "")[-2000:]}
+                   "returncode": getattr(last, "returncode", -1),
+                   "stdout": (getattr(last, "stdout", "") or "")[-2000:],
+                   "stderr": (getattr(last, "stderr", "") or "")[-2000:]}
         except Exception as e:  # noqa: BLE001
             err = {"label": label, "attempt": attempt + 1,
                    "returncode": -1,

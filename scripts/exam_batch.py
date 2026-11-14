@@ -284,7 +284,8 @@ def main() -> int:
             name, pat, scope, expect = inv
             file, _, method = scope.partition("::")
             _ok, _detail = _inv_ok(p, file, method, pat, expect)
-            print("invariant-verify", unit.unit_id, name, _ok, _detail)
+            print("invariant-verify", unit.unit_id, name, _ok, _detail,
+                  "new=", new)
             if not _ok or new:
                 return "partial"
             return "partial" if sa else "verified"

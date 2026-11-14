@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -143,6 +145,37 @@ class DevSimAdapter:
 
     def capture(self, metrics):
         return {}
+
+    def capture_replay(self, replay_path: Path | str, run_dir: Path | str,
+                       label: str, *, two_pass: bool = False,
+                       light: bool = False, fast: bool = False,
+                       target_windows: bool = False):
+        """adapter 负责一次 replay 采集；exam 不直接拼 capability 命令。"""
+        root = Path(__file__).resolve().parents[2]
+        safe = "".join(c if c.isalnum() or c in "-_" else "_"
+                       for c in f"{label}_{time.strftime('%H%M%S')}")
+        cap_id = f"{self.root.name}_{safe}"
+        cmd = [sys.executable, str(root / "scripts" / "capability_run.py"),
+               "--project", str(self.root), "--project-id", self.root.name,
+               "--replay", str(replay_path), "--no-save",
+               "--run-id", cap_id]
+        if two_pass:
+            cmd.append("--two-pass")
+        if light:
+            cmd.append("--light")
+        if fast:
+            cmd.append("--fast")
+        if target_windows:
+            cmd.append("--target-windows")
+        out = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=2400)
+        if out.returncode == 0:
+            src = root / "runs" / cap_id / "merged_candidates.json"
+            if src.exists():
+                dst = Path(run_dir) / "merged_candidates.json"
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+        return out.returncode == 0, out
 
     def compile(self):
         from upi.core.project_adapter import CompileResult

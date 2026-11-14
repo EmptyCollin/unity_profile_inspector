@@ -568,6 +568,8 @@ def main() -> int:
                     help="整轮 replay 只在末尾采一窗，不逐 action 采")
     ap.add_argument("--target-windows", action="store_true",
                     help="只在该类动作最后一次发生时采窗")
+    ap.add_argument("--run-id", default="",
+                    help="固定 run_id（adapter 驱动时使用）")
     a = ap.parse_args()
     if a.two_pass and a.light:
         raise SystemExit("--two-pass 与 --light 不能同时使用")
@@ -578,7 +580,7 @@ def main() -> int:
     replay_path = Path(a.replay)
 
     ensure_play(project)
-    run_id = new_run_id(project_id)
+    run_id = a.run_id or new_run_id(project_id)
     cands = ((run_two_pass_capture(project, run_id, a.limit, replay_path))
              if a.two_pass else
              run_and_capture(project, run_id, a.limit, replay_path,
