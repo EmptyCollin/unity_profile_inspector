@@ -264,6 +264,17 @@ def main() -> int:
                                   "find": d.get("find", ""),
                                   "replace": d.get("replace", "")}
                                  for d in pl.diffs])
+        # I20：机制不变量优先，按 target 方法隔离，不共用全局 metric
+        from upi.core.mechanism_checks import (invariant_for as _inv_name,
+                                               invariant_ok as _inv_ok)
+        _iname = _inv_name(unit.mechanism)
+        if _iname:
+            _methods = [s.split("::", 1)[-1] for s in unit.sites if "::" in s]
+            _ok, _detail = _inv_ok(p, unit.mechanism, methods=_methods)
+            print("invariant-verify", unit.unit_id, _iname, _ok, _detail)
+            if not _ok:
+                return "partial"
+            return "partial" if sa else "verified"
         from upi.core.verification_v2 import evaluate_v2
         # I20：先用 metric delta + 机制不变量；缺失才退回 cluster
         if baseline_metrics and after_metrics:

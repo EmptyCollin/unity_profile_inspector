@@ -29,9 +29,13 @@ def invariant_for(mechanism: str) -> str:
     return ""
 
 
-def invariant_ok(project: Path, mechanism: str) -> tuple[bool, str]:
+def invariant_ok(project: Path, mechanism: str,
+                 methods: list[str] | None = None) -> tuple[bool, str]:
     name = invariant_for(mechanism)
     if not name:
         return True, "无静态不变量，交给 metric"
     hits = scan(project).by_mechanism().get(name, [])
+    if methods:
+        wanted = set(methods)
+        hits = [h for h in hits if h.method in wanted]
     return len(hits) == 0, f"{name} sites={len(hits)}"
