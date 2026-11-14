@@ -72,6 +72,8 @@ def main() -> int:
     ap.add_argument("--max-units", type=int, default=0)
     ap.add_argument("--targets", default="",
                     help="逗号分隔的 mechanism 子串，只跑匹配的单元")
+    ap.add_argument("--plan-repeat", type=int, default=1,
+                    help="同一输入重复 plan 次数，用于统计 LLM 一致性")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -194,11 +196,34 @@ def main() -> int:
             h = {"root_cause": unit.targets[0], "code_anchors": anchors[:4]}
         if h is None:
             return None
-        pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
-                              strategy=f"round{round_no}",
-                              required_sites=unit.sites,
-                              mechanism_class="unknown")
-        print("plan", unit.unit_id, unit.mechanism, bool(pl), meta.get("error", ""))
+        variants = []
+        pl = None
+        meta = {}
+        for _k in range(max(1, a.plan_repeat)):
+            _pl, _meta = plan_issue(
+                cfg, X._issue(d["issue"]), h, p,
+                strategy=f"round{round_no}",
+                required_sites=unit.sites,
+                mechanism_class="unknown")
+            variants.append({
+                "ok": _pl is not None,
+                "metric": (_pl.metric if _pl else ""),
+                "invariant": (_pl.invariant if _pl else {}),
+                "diffs": (_pl.diffs if _pl else []),
+                "error": _meta.get("error", ""),
+            })
+            pl = pl or _pl
+            meta = _meta
+        uniq = len({json.dumps(v["diffs"], sort_keys=True, ensure_ascii=False)
+                    for v in variants if v["ok"]})
+        print("plan", unit.unit_id, unit.mechanism, bool(pl),
+              meta.get("error", ""), f"repeat={len(variants)} unique={uniq}")
+        try:
+            (run_dir / "plan_repeat.json").write_text(
+                json.dumps({unit.unit_id: variants}, ensure_ascii=False,
+                           indent=2), encoding="utf-8")
+        except OSError:
+            pass
         if pl is None:
             return None
         unit_metric[unit.unit_id] = pl.metric or ""
