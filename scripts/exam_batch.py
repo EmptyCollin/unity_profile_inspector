@@ -351,10 +351,11 @@ def main() -> int:
         from upi.core.site_audit import sites_remaining
 
         def finish(status: str, *, inv_ok=None, metric_status="",
-                   sites=0) -> str:
+                   sites=0, scope="function") -> str:
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,
+                "target_scope": scope,
                 "gone": gone,
                 "new_clusters": new,
                 "invariant_ok": inv_ok,
@@ -393,10 +394,12 @@ def main() -> int:
                 baselines=a.baselines, invariant_ok=_ok,
                 target_gone=gone, new_clusters=new,
                 sites_remaining=sum(len(x) for x in sa.values()),
-                metric_status=metric_status)
+                metric_status=metric_status,
+                require_target_gone=False)
             return finish(_status, inv_ok=_ok,
                           metric_status=metric_status,
-                          sites=sum(len(x) for x in sa.values()))
+                          sites=sum(len(x) for x in sa.values()),
+                          scope="mechanism")
         from upi.core.verification_v2 import evaluate_v2
         # I24：有 repair_contract 时用主指标+guard+汇率判合算性
         contract = unit_contract.get(unit.unit_id)

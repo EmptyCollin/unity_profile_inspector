@@ -23,6 +23,9 @@ ok("invariant 失败 → partial",
    decide(**{**base, "invariant_ok": False}) == "partial")
 ok("target 未消失 → partial",
    decide(**{**base, "target_gone": False}) == "partial")
+ok("mechanism 粒度可不要求 root 消失",
+   decide(**{**base, "target_gone": False,
+             "require_target_gone": False}) == "verified")
 ok("有新 cluster → partial",
    decide(**{**base, "new_clusters": ["X"]}) == "partial")
 ok("有剩余站点 → partial",

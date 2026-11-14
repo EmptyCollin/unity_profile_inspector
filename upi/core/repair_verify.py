@@ -4,10 +4,12 @@ from __future__ import annotations
 
 def decide(*, baselines: int, invariant_ok: bool, target_gone: bool,
            new_clusters: list[str], sites_remaining: int,
-           metric_status: str) -> str:
+           metric_status: str, require_target_gone: bool = True) -> str:
     if baselines < 3:
         return "needs_recheck"
-    if not invariant_ok or not target_gone:
+    if require_target_gone and not target_gone:
+        return "partial"
+    if not invariant_ok:
         return "partial"
     if new_clusters:
         return "partial"
