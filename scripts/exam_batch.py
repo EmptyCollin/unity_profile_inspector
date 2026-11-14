@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import exam_live as X  # noqa: E402
 import exam_multi as M  # noqa: E402
 from upi.agents import nodes as N  # noqa: E402
+from upi.adapters.devsim import DevSimAdapter  # noqa: E402
 from upi.agents.llm_planner import plan_issue  # noqa: E402
 from upi.core import events as E  # noqa: E402
 from upi.core.batch_round import run_batch  # noqa: E402
@@ -85,10 +86,10 @@ def main() -> int:
     def capture_with_recovery(label: str, *, two_pass: bool,
                               light: bool = False, fast: bool = False,
                               target_windows: bool = False):
-        ok, out = X._capture_once(p, a.project_id, a.replay, run_dir,
-                                  label, two_pass=two_pass, retries=1,
-                                  light=light, fast=fast,
-                                  target_windows=target_windows)
+        adapter = DevSimAdapter(p)
+        ok, out = adapter.capture_replay(
+            a.replay, run_dir, label, two_pass=two_pass, light=light,
+            fast=fast, target_windows=target_windows)
         if ok:
             return True, out
         print("capture failed; restart editor and retry", label)
@@ -97,10 +98,9 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             print("editor restart failed", type(e).__name__, e)
             return False, out
-        return X._capture_once(p, a.project_id, a.replay, run_dir,
-                               label + "-retry", two_pass=two_pass,
-                               retries=1, light=light, fast=fast,
-                               target_windows=target_windows)
+        return adapter.capture_replay(
+            a.replay, run_dir, label + "-retry", two_pass=two_pass,
+            light=light, fast=fast, target_windows=target_windows)
 
     for i in range(max(1, a.baselines)):
         ok, _ = capture_with_recovery(
