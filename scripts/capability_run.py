@@ -325,7 +325,15 @@ def run_and_capture(project: Path, run_id: str, limit: int,
         if spec is None:
             return []
         ex = ReplayExecutor(project)
+        fast_done = False
         for i, cmd in enumerate(spec.commands):
+            if fast and cmd.type == "stop" and not fast_done:
+                for c in capture_window(project, f"{run_id}_end", limit,
+                                        since=started):
+                    k = str(c.get("root_cause") or "")
+                    if k and k not in merged:
+                        merged[k] = c
+                fast_done = True
             f = _frame(project)
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
@@ -334,7 +342,7 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
-        if fast:
+        if fast and not fast_done:
             for c in capture_window(project, f"{run_id}_end", limit,
                                     since=started):
                 k = str(c.get("root_cause") or "")

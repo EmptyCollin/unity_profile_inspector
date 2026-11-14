@@ -59,9 +59,12 @@ def ensure_ready(project: Path) -> None:
     _unity("scene open", "--path", "Assets/Scenes/00_Bootstrap.unity")
     from upi.tooling import probe_control as PC
     PC.install(project)
+    # 不复用上一局 Play 状态：旧局面会让 OpenShop/Board 在空对象上刷 NRE
+    _unity("editor.playmode stop")
+    time.sleep(1)
     _unity("editor.playmode start")
     time.sleep(4)
-    print("editor ready / play")
+    print("editor ready / play (fresh)")
 
 
 def main() -> int:
