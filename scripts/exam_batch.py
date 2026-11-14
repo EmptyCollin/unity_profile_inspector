@@ -182,6 +182,12 @@ def main() -> int:
                       findings=findings, repairs=[])
     save_run(run)
     repair_inputs = [f.model_dump() for f in findings]
+    try:
+        (run_dir / "potentials.json").write_text(
+            json.dumps(static_findings, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except OSError:
+        pass
     if a.static_repair:
         repair_inputs += static_findings
     units = consolidate(repair_inputs)
