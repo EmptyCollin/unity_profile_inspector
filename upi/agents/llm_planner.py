@@ -59,12 +59,16 @@ code_anchors: {anchors}
 {{"why":"一句话说明为什么这样改",
  "metric":"frame_time|gc_alloc|memory|drawcalls",
  "invariant":{{"file":"Assets/...","method":"方法名","pattern":"正则","expect":0}},
+ "repair_contract":{{"primary_metric":"frame_time","min_improve":0.05,
+   "guards":[{{"metric":"memory","max_relative":0.10}}],"mb_per_ms":8}},
  "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
 
 invariant 必须由你根据这次补丁声明：
 - metric 选最能衡量该机制改善的指标；
 - invariant.pattern 必须能在 find 文本中匹配到，并且 apply 后应在 method 内消失；
 - 如果无法声明可靠不变量，invariant 输出 {{}}，metric 仍必须给出。
+- repair_contract 可选：声明主指标、最小改善、守护预算和内存/时间汇率。
+  不声明则 verifier 使用默认规则。
 """
 
 
@@ -323,6 +327,9 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
             prompt += (f"\n\n上次 invariant 被拒：{derr}。"
                        "pattern 必须能在 find 中命中，method 必须存在。")
             continue
+        contract = doc.get("repair_contract") or {}
+        if not isinstance(contract, dict):
+            contract = {}
         if required_sites:
             from upi.core.patch_contract import PatchMeta, validate as _pv
             covered = sorted({d["file"] for d in diffs})
@@ -344,6 +351,7 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                         diffs=diffs,
                         metric=metric,
                         invariant=decl,
+                        repair_contract=contract,
                         invariants_assert=["LLM 声称语义保持，需人工复核",
                                            "find 精确命中一次"],
                         side_effect="unknown", permission_tier="semi",

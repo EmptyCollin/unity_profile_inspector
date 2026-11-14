@@ -259,6 +259,7 @@ class EditPlan(BaseModel):
     # I20：由 planner（LLM）声明，verifier 只执行，不做模式查表
     metric: str = ""
     invariant: dict = Field(default_factory=dict)
+    repair_contract: dict = Field(default_factory=dict)
     side_effect: SideEffect = "unknown"
     touched_assets: list[str] = Field(default_factory=list)
     permission_tier: PermissionTier = "blocked"

@@ -210,6 +210,7 @@ def main() -> int:
     plans, bases = {}, {}
     unit_metric: dict[str, str] = {}
     unit_inv: dict[str, tuple[str, str, str, int]] = {}
+    unit_contract: dict[str, dict] = {}
     round_no = 1
     after_metrics: dict = {}
     after_start = 0.0
@@ -280,6 +281,8 @@ def main() -> int:
                 str(inv.get("pattern") or ""),
                 f"{inv.get('file','')}::{inv.get('method','')}",
                 int(inv.get("expect", 0)))
+        if pl.repair_contract:
+            unit_contract[unit.unit_id] = dict(pl.repair_contract)
         plans[unit.unit_id] = pl
         bases[unit.unit_id] = X._git_head(p)
         return PatchRef(unit.unit_id, list(pl.touched_assets))
@@ -395,6 +398,48 @@ def main() -> int:
                           metric_status=metric_status,
                           sites=sum(len(x) for x in sa.values()))
         from upi.core.verification_v2 import evaluate_v2
+        # I24：有 repair_contract 时用主指标+guard+汇率判合算性
+        contract = unit_contract.get(unit.unit_id)
+        if contract and baseline_metrics and after_metrics:
+            from upi.core.repair_contract import (GuardBudget,
+                                                  RepairContract, evaluate)
+            from upi.core.target_metrics import metric_series, stats
+
+            def _median(metrics, name):
+                s = stats(metric_series(metrics, name))
+                return s["median"] if s else None
+
+            primary = str(contract.get("primary_metric")
+                          or unit_metric.get(unit.unit_id, "frame_time"))
+            before_v = _median(baseline_metrics, primary)
+            after_v = _median(after_metrics, primary)
+            guards = {}
+            for g in contract.get("guards") or []:
+                name = str(g.get("metric") or "")
+                b = _median(baseline_metrics, name)
+                a = _median(after_metrics, name)
+                if b is not None and a is not None:
+                    guards[name] = (b, a)
+            if before_v is not None and after_v is not None:
+                rc = RepairContract(
+                    primary_metric=primary,
+                    min_improve=float(contract.get("min_improve") or 0.05),
+                    guards=[GuardBudget(
+                        metric=str(g.get("metric") or ""),
+                        max_relative=float(g.get("max_relative") or 0.05),
+                        max_absolute=g.get("max_absolute"))
+                        for g in (contract.get("guards") or [])],
+                    mb_per_ms=float(contract.get("mb_per_ms") or 8.0),
+                    min_net=float(contract.get("min_net") or 0.0))
+                cr = evaluate(rc, primary_before=before_v,
+                              primary_after=after_v, guards=guards)
+                print("contract-verify", unit.unit_id, cr.status, cr.net)
+                if cr.status == "regressed":
+                    return finish("regressed", metric_status=cr.status)
+                if (cr.status == "verified_with_tradeoff"
+                        and gone and not new and not sa):
+                    return finish("verified_with_tradeoff",
+                                  metric_status=cr.status)
         # I20：metric delta + 机制不变量；缺失才退回 cluster
         if baseline_metrics and after_metrics:
             from upi.core.targets import evaluate as _eval_target
