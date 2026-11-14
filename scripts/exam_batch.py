@@ -101,8 +101,8 @@ def main() -> int:
 
     for i in range(max(1, a.baselines)):
         ok, _ = capture_with_recovery(
-            f"baseline#{i + 1}", two_pass=(i == 0),
-            light=(i > 0), fast=False)
+            f"baseline#{i + 1}", two_pass=False,
+            light=True, target_windows=True)
         if not ok:
             return 1
         mp = run_dir / "merged_candidates.json"
