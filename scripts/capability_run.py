@@ -309,9 +309,15 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
 
 
 def capture_window_with_counters(project: Path, tag: str, limit: int,
-                                 since: str | None = None) -> list[dict]:
+                                 since: str | None = None,
+                                 meta: dict | None = None) -> list[dict]:
     cands = capture_window(project, tag, limit, since=since)
     try:
+        d = ROOT / "runs" / tag
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "window_meta.json").write_text(
+            json.dumps(meta or {}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
         collect_counters(project, tag)
     except Exception as e:  # noqa: BLE001
         print("counters skipped:", type(e).__name__, e)

@@ -68,6 +68,8 @@ def main() -> int:
     ap.add_argument("--baselines", type=int, default=3)
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-units", type=int, default=0)
+    ap.add_argument("--targets", default="",
+                    help="逗号分隔的 mechanism 子串，只跑匹配的单元")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -163,6 +165,10 @@ def main() -> int:
                       findings=findings, repairs=[])
     save_run(run)
     units = consolidate([f.model_dump() for f in findings] + static_findings)
+    if a.targets:
+        needles = [x.strip() for x in a.targets.split(",") if x.strip()]
+        units = [u for u in units
+                 if any(n.lower() in u.mechanism.lower() for n in needles)]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
     print("findings", len(findings), "units", len(units))
