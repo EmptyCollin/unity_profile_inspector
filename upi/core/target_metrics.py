@@ -6,15 +6,7 @@ import statistics
 from pathlib import Path
 from typing import Optional
 
-ALIASES = {
-    "frame_time": ["CPU Main Thread Frame Time", "frame_time_ms"],
-    "cpu_frame_time": ["CPU Main Thread Frame Time", "cpuMainThreadFrameTimeMs"],
-    "gc_alloc": ["GC Allocated In Frame", "gc_alloc_per_frame"],
-    "memory": ["Total Used Memory", "total_used_memory"],
-    "drawcalls": ["Draw Calls Count", "drawCalls"],
-    "setpass": ["SetPass Calls Count", "setPassCalls"],
-    "triangles": ["Triangles Count", "triangles"],
-}
+from upi.core.metric_registry import default_registry
 
 
 def load_counters(path: Path) -> dict:
@@ -25,16 +17,7 @@ def load_counters(path: Path) -> dict:
 
 
 def metric_series(data: dict, metric: str) -> list[float]:
-    counters = data.get("counters") if isinstance(data, dict) else None
-    if not isinstance(counters, dict):
-        return []
-    for name in ALIASES.get(metric, [metric]):
-        node = counters.get(name)
-        if isinstance(node, dict):
-            vals = node.get("series")
-            if isinstance(vals, list) and vals:
-                return [float(x) for x in vals]
-    return []
+    return default_registry().series(data, metric)
 
 
 def stats(values: list[float]) -> Optional[dict]:

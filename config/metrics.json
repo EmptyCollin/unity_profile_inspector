@@ -1,0 +1,60 @@
+{
+  "metrics": [
+    {
+      "id": "frame_time",
+      "unit": "ms",
+      "aliases": ["CPU Main Thread Frame Time", "frame_time_ms"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "cpu_frame_time",
+      "unit": "ms",
+      "aliases": ["CPU Main Thread Frame Time", "cpuMainThreadFrameTimeMs"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "gc_alloc",
+      "unit": "bytes/frame",
+      "aliases": ["GC Allocated In Frame", "gc_alloc_per_frame"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "memory",
+      "unit": "bytes",
+      "aliases": ["Total Used Memory", "total_used_memory"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "drawcalls",
+      "unit": "count",
+      "aliases": ["Draw Calls Count", "drawCalls"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "setpass",
+      "unit": "count",
+      "aliases": ["SetPass Calls Count", "setPassCalls"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    },
+    {
+      "id": "triangles",
+      "unit": "count",
+      "aliases": ["Triangles Count", "triangles"],
+      "aggregation": "median",
+      "higher_is_better": false,
+      "guard": true
+    }
+  ]
+}
