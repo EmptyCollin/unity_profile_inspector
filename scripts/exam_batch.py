@@ -104,6 +104,28 @@ def main() -> int:
         return 1
     hs = g.get("hypotheses") or []
     findings = X.findings_from_hypotheses(run_id, hs, {})
+    # I20：静态机制站点补检（运行时不热的漏洞）
+    from upi.core.mechanism_inventory import scan as _scan_sites
+    from upi.core.findings import Anchor, AttributionInfo, ToolFinding
+    existing_methods = {a.method for f in findings for a in f.anchors if a.method}
+    for mech, sites in _scan_sites(p).by_mechanism().items():
+        for s in sites:
+            if not s.method or s.method in existing_methods:
+                continue
+            root = f"hot_function:{Path(s.file).stem}.{s.method}"
+            if any(root == str((f.attribution.factors or {}).get("root_cause"))
+                   for f in findings):
+                continue
+            findings.append(ToolFinding(
+                finding_id=f"static-{run_id}-{len(findings)}",
+                mechanism=root, metric="", link="",
+                anchors=[Anchor(file=s.file, method=s.method,
+                                start_line=s.line, end_line=s.line)],
+                evidence_refs=[], state="candidate",
+                attribution=AttributionInfo(confidence=0.5,
+                                            factors={"root_cause": root})))
+            existing_methods.add(s.method)
+            print("static site added", root, s.file, s.line)
     run = RunFindings(run_id=run_id, project_id=a.project_id,
                       mode="regression", created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                       findings=findings, repairs=[])
@@ -121,6 +143,9 @@ def main() -> int:
         h = next((x for x in hs
                   if str(x.get("root_cause")) in unit.targets
                   or str(x.get("root_cause")) == unit.mechanism), None)
+        if h is None and unit.targets:
+            anchors = [s for s in unit.sites if "::" in s]
+            h = {"root_cause": unit.targets[0], "code_anchors": anchors[:4]}
         if h is None:
             return None
         pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
