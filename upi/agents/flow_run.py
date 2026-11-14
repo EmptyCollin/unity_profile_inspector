@@ -51,14 +51,23 @@ class FlowRun:
         return self.state
 
     def decide(self, failed: set[str], *, round_no: int,
-               max_rounds: int) -> str:
-        """返回 next：retry / done / max_rounds。"""
+               max_rounds: int, policy=None) -> str:
+        """返回 next：retry / done / max_rounds / stop。"""
         if not failed:
             self.enter("done", route="done")
             return "done"
         if round_no >= max_rounds:
             self.enter("max_rounds", route="max_rounds")
             return "max_rounds"
+        next_route = "retry"
+        if policy is not None:
+            try:
+                next_route = str(policy(set(failed), round_no, max_rounds))
+            except Exception:  # noqa: BLE001
+                next_route = "retry"
+        if next_route == "stop":
+            self.enter("stop", route="stop")
+            return "stop"
         self.enter("retry", route="retry", round_no=round_no)
         return "retry"
 
@@ -79,7 +88,7 @@ class FlowRun:
             pass
 
     def run_round(self, active: list, round_no: int, max_rounds: int,
-                  batch_fn: Callable[[list, int], object]):
+                  batch_fn: Callable[[list, int], object], policy=None):
         """LangGraph：batch → decide；返回 (result, decision)。"""
         class RoundState(TypedDict, total=False):
             active: list
@@ -98,7 +107,7 @@ class FlowRun:
         def decide_node(st: RoundState) -> RoundState:
             decision = self.decide(set(st.get("failed") or set()),
                                    round_no=int(st.get("round") or 1),
-                                   max_rounds=max_rounds)
+                                   max_rounds=max_rounds, policy=policy)
             return {"decision": decision}
 
         g = StateGraph(RoundState)

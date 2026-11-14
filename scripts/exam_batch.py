@@ -78,6 +78,8 @@ def main() -> int:
                     help="同一输入重复 plan 次数，用于统计 LLM 一致性")
     ap.add_argument("--plan-min-votes", type=int, default=2,
                     help="重复采样时判定稳定所需最少同票")
+    ap.add_argument("--llm-decide", action="store_true",
+                    help="decide 节点由 LLM 选择 retry/stop（失败退回规则）")
     ap.add_argument("--adapter", default="upi.adapters.devsim:DevSimAdapter",
                     help="项目适配器 module:Class")
     a = ap.parse_args()
@@ -188,6 +190,10 @@ def main() -> int:
     print("findings", len(findings), "units", len(units))
 
     cfg = N.load_config(ROOT / "llm_config.yaml")
+    decide_policy = None
+    if a.llm_decide:
+        from upi.agents.flow_policy import llm_decide
+        decide_policy = lambda f, r, m: llm_decide(cfg, f, r, m)  # noqa: E731
     store = TicketStore()
     plans, bases = {}, {}
     unit_metric: dict[str, str] = {}
@@ -379,7 +385,7 @@ def main() -> int:
         flow.enter("round", round_no=r,
                    active=[u.unit_id for u in active])
         res, decision = flow.run_round(
-            active, r, a.rounds, batch_fn=batch_fn)
+            active, r, a.rounds, batch_fn=batch_fn, policy=decide_policy)
         print("batch", r, res)
         all_verified.update(res.verified)
         for u in active:

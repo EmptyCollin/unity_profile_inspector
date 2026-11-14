@@ -48,6 +48,16 @@ res2, decision2 = f4.run_round(["u1"], 2, 2,
                                lambda active, rnd: R({"u1": "partial"}))
 ok("到上限 LangGraph 返回 max_rounds", decision2 == "max_rounds", decision2)
 
+# policy 只能 stop/retry
+f5 = FlowRun(TMP / "5", "r5")
+ok("policy=stop → stop",
+   f5.decide({"u"}, round_no=1, max_rounds=2,
+             policy=lambda f, r, m: "stop") == "stop")
+f6 = FlowRun(TMP / "6", "r6")
+ok("policy=retry → retry",
+   f6.decide({"u"}, round_no=1, max_rounds=2,
+             policy=lambda f, r, m: "retry") == "retry")
+
 print(f"\n==== I21 流程中枢测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))
