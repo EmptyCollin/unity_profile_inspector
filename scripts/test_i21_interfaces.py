@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 from upi.core.metric_registry import MetricRegistry, default_registry  # noqa: E402
 from upi.core.project_adapter import Command, ProjectAdapter, Replay  # noqa: E402
 from upi.core.target_metrics import metric_series  # noqa: E402
+from upi.adapters.devsim import DevSimAdapter  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -39,6 +40,12 @@ cmd = Command(name="任意项目命令", args={"x": 1})
 ok("Command 不限制命令名", cmd.name == "任意项目命令")
 ok("Replay 组合命令", Replay("r", [cmd]).commands[0].args["x"] == 1)
 ok("ProjectAdapter 是协议", isinstance(object(), ProjectAdapter) is False)
+
+dev = DevSimAdapter(tmp.parent)
+ok("DevSimAdapter 实现协议", isinstance(dev, ProjectAdapter) is True)
+ok("DevSimAdapter 只在 adapter 层", dev.describe().adapter == "devsim")
+ok("任意 wait 命令可映射",
+   dev.run_replay(Replay("r", [Command("wait", {"seconds": 0})]))[0]["type"] == "wait")
 
 for rel in ("upi/core/project_adapter.py", "upi/core/metric_registry.py"):
     text = (ROOT / rel).read_text(encoding="utf-8")

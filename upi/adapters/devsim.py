@@ -120,3 +120,30 @@ class ReplayExecutor:
         if cmd.type == "open_shop":
             return {"type": "open_shop", "state": self.open_shop()}
         raise UnsupportedCommand(cmd.type)
+
+
+class DevSimAdapter:
+    """把通用 Command 映射到 DevSim 的调试命令。仅 adapter 层知道项目语义。"""
+
+    def __init__(self, project: Path | str):
+        self.root = Path(project).resolve()
+        self.ex = ReplayExecutor(self.root)
+
+    def describe(self):
+        from upi.core.project_adapter import ProjectSpec
+        return ProjectSpec(project_id=self.root.name, root=self.root,
+                           metrics=(), adapter="devsim")
+
+    def run_replay(self, replay):
+        cmds = [ReplayCommand(type=c.name, **(c.args or {}))
+                for c in replay.commands]
+        return self.ex.run(ReplaySpec(replay_id=replay.replay_id,
+                                      commands=cmds,
+                                      notes=replay.notes))
+
+    def capture(self, metrics):
+        return {}
+
+    def compile(self):
+        from upi.core.project_adapter import CompileResult
+        return CompileResult(ok=False, output="compile 由 UnityTicketExecutor 负责")

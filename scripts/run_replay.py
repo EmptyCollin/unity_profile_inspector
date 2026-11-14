@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.replay_exec import ReplayExecutor  # noqa: E402
+from upi.adapters.devsim import ReplayExecutor  # noqa: E402
 from upi.core.replay_spec import load_replay  # noqa: E402
 
 

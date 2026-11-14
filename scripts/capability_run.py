@@ -24,7 +24,7 @@ from upi.core.findings import (Anchor, AttributionInfo,  # noqa: E402
                                RunFindings, ToolFinding, new_run_id,
                                normalize_file, normalize_method, save_run)
 from upi.core.protocol import build as fp_build, digest as fp_digest, file_hash  # noqa: E402
-from upi.core.replay_exec import ReplayExecutor  # noqa: E402
+from upi.adapters.devsim import ReplayExecutor  # noqa: E402
 from upi.core.replay_spec import load_replay  # noqa: E402
 
 PROBE = ROOT / "probe" / "upi_marker_evidence.cs"
