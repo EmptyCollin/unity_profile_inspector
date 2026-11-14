@@ -166,9 +166,10 @@ def main() -> int:
     save_run(run)
     units = consolidate([f.model_dump() for f in findings] + static_findings)
     if a.targets:
-        needles = [x.strip() for x in a.targets.split(",") if x.strip()]
+        needles = {x.strip() for x in a.targets.split(",") if x.strip()}
         units = [u for u in units
-                 if any(n.lower() in u.mechanism.lower() for n in needles)]
+                 if u.mechanism in needles
+                 or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
     print("findings", len(findings), "units", len(units))
