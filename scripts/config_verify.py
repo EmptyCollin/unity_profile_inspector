@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import asset_verify as AV  # noqa: E402
 from upi.core.config_edit import ConfigEdit, apply, rollback, validate  # noqa: E402
+from upi.core.fresh_memory import read_median  # noqa: E402
 from upi.core.target_metrics import metric_series, stats  # noqa: E402
 
 
@@ -41,6 +42,7 @@ def main() -> int:
         print(json.dumps({"ok": False, "errors": errs}, ensure_ascii=False))
         return 1
     b, _ = AV._capture(project, Path(a.replay), "cfg_before")
+    bm_fresh = read_median(project) if a.metric == "memory" else None
     done = apply(project, [edit])
     try:
         subprocess.run(["unity", "command", "script eval", "--code",
@@ -51,17 +53,26 @@ def main() -> int:
         import exam_multi as X
         X.ensure_ready(project)
         af, _ = AV._capture(project, Path(a.replay), "cfg_after")
-        bm = stats(metric_series(b, a.metric))
-        am = stats(metric_series(af, a.metric))
-        delta = (bm["median"] - am["median"]) if bm and am else None
-        reliable = bool(
-            bm and am and bm["median"]
-            and bm["sigma"] <= 0.2 * abs(bm["median"])
-            and am["sigma"] <= 0.2 * abs(am["median"]))
-        threshold = None
-        if reliable:
-            threshold = max(0.05 * abs(bm["median"]),
-                            3 * max(bm["sigma"], am["sigma"]))
+        if a.metric == "memory":
+            am_fresh = read_median(project)
+            bm = bm_fresh
+            am = am_fresh
+            delta = (bm["total"] - am["total"]) if bm and am else None
+            threshold = max(0.01 * abs(bm["total"]),
+                            4 * 1024 * 1024) if bm else None
+            reliable = True
+        else:
+            bm = stats(metric_series(b, a.metric))
+            am = stats(metric_series(af, a.metric))
+            delta = (bm["median"] - am["median"]) if bm and am else None
+            reliable = bool(
+                bm and am and bm["median"]
+                and bm["sigma"] <= 0.2 * abs(bm["median"])
+                and am["sigma"] <= 0.2 * abs(am["median"]))
+            threshold = None
+            if reliable:
+                threshold = max(0.05 * abs(bm["median"]),
+                                3 * max(bm["sigma"], am["sigma"]))
         good = bool(reliable and delta is not None and delta > threshold)
         if not good:
             rollback(project, done)
