@@ -46,10 +46,12 @@ def latest_counters() -> dict:
         return {}
 
 
-def counters_since(start_ts: float) -> dict:
-    """合并 start_ts 之后所有 capture 的 counters series。"""
+def counters_since(start_ts: float, prefix: str = "") -> dict:
+    """合并 start_ts 之后、指定项目前缀的 capture counters series。"""
     merged: dict[str, dict] = {}
     for p in (ROOT / "runs").glob("*/counters.json"):
+        if prefix and not p.parent.name.startswith(prefix):
+            continue
         try:
             if p.stat().st_mtime < start_ts:
                 continue
@@ -125,7 +127,7 @@ def main() -> int:
             light=True, target_windows=True)
         if not ok:
             return 1
-        baseline_runs.append(counters_since(bstart))
+        baseline_runs.append(counters_since(bstart, a.project_id))
         mp = run_dir / "merged_candidates.json"
         if mp.exists():
             roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
@@ -338,7 +340,7 @@ def main() -> int:
                                       target_windows=True)
         if not ok:
             raise RuntimeError("batch capture failed")
-        after_metrics = counters_since(after_start)
+        after_metrics = counters_since(after_start, a.project_id)
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
