@@ -1,11 +1,13 @@
-"""I22：action ablation 的离线部分。"""
+"""I22：action ablation 与静态锚点可迁移性。"""
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bench.anti_cheat import remove_action  # noqa: E402
+from upi.core.mechanism_inventory import scan  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -38,6 +40,28 @@ ok("删除最后一个 open_shop", [c["type"] for c in out2["commands"]] ==
 out3 = remove_action(two, "open_shop", all_occurrences=True)
 ok("删除全部 open_shop", [c["type"] for c in out3["commands"]] == ["wait"],
    out3["commands"])
+
+# 静态锚点迁移：同一机制换方法名，扫描应跟随
+TMP = Path(tempfile.mkdtemp())
+assets = TMP / "Assets"
+assets.mkdir()
+f = assets / "Hot.cs"
+f.write_text("class Hot { void MethodA() { var t = new Texture2D(1,1); } }\n",
+             encoding="utf-8")
+sites = scan(TMP).by_mechanism().get("per_tile_texture", [])
+ok("静态扫描命中 MethodA",
+   bool(sites) and sites[0].method == "MethodA", sites)
+
+f.write_text("class Hot { void MethodB() { var t = new Texture2D(1,1); } }\n",
+             encoding="utf-8")
+sites2 = scan(TMP).by_mechanism().get("per_tile_texture", [])
+ok("方法改名后跟随 MethodB",
+   bool(sites2) and sites2[0].method == "MethodB", sites2)
+
+f.write_text("class Hot { void MethodB() { var x = 1; } }\n",
+             encoding="utf-8")
+ok("clean 文件无站点",
+   not scan(TMP).by_mechanism().get("per_tile_texture", []))
 
 print(f"\n==== I22 action ablation 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
