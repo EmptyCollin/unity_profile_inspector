@@ -24,7 +24,7 @@ from upi.core import events as E  # noqa: E402
 from upi.core.batch_round import run_batch  # noqa: E402
 from upi.core.evidence_diagnosis import candidates_from_latest  # noqa: E402
 from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E402
-                               save_run, score_run)
+                               save_run)
 from upi.core.mechanism_batch import PatchRef, consolidate  # noqa: E402
 from upi.core.mechanism_infer import count_in_method  # noqa: E402
 from upi.core.plan_consensus import choose_consensus, plan_key  # noqa: E402
@@ -419,9 +419,7 @@ def main() -> int:
     flow.enter("record", verified=sorted(all_verified), route="done")
     run.stop_reason = f"batch:verified={len(all_verified)}"
     save_run(run)
-    paper = json.loads((ROOT / "runs" / "i8_lab" / "paper.json")
-                       .read_text(encoding="utf-8"))
-    print(json.dumps(score_run(paper, run), ensure_ascii=False, indent=1))
+    print("scoring deferred to bench/scorer.py")
     print("elapsed", round(time.time() - t0, 1))
     return 0
 
