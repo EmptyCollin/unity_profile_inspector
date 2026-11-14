@@ -48,6 +48,7 @@ def main() -> int:
     ap.add_argument("--project-id", default="test_project")
     ap.add_argument("--baselines", type=int, default=3)
     ap.add_argument("--rounds", type=int, default=2)
+    ap.add_argument("--max-units", type=int, default=0)
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -131,6 +132,8 @@ def main() -> int:
                       findings=findings, repairs=[])
     save_run(run)
     units = consolidate([f.model_dump() for f in findings])
+    if a.max_units and a.max_units < len(units):
+        units = units[:a.max_units]
     print("findings", len(findings), "units", len(units))
 
     cfg = N.load_config(ROOT / "llm_config.yaml")
