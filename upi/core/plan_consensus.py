@@ -16,12 +16,14 @@ def plan_key(plan) -> str:
             "method": inv.get("method", ""),
             "expect": int(inv.get("expect", 0)),
         }
-    payload = {
-        "metric": getattr(plan, "metric", ""),
-        # 同文件/方法/expect 视为同一机制；pattern 粗细不算不同方案
-        "invariant": inv_key,
-        "diffs": [] if inv else getattr(plan, "diffs", []),
-    }
+    payload = (
+        # 有 invariant：同文件/方法/expect 即同机制，metric 选择差异不拆组
+        {"invariant": inv_key}
+        if inv else
+        # 无 invariant：只能按 metric + diff 精确匹配
+        {"metric": getattr(plan, "metric", ""),
+         "diffs": getattr(plan, "diffs", [])}
+    )
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()

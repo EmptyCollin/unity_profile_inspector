@@ -54,6 +54,8 @@ ok("同 invariant 不同 diff → 同 key", plan_key(e) == plan_key(f))
 inv_narrow = {**inv, "pattern": r"new\s+Texture2D\(2, 2"}
 g = p("var z = new Texture2D(1,1);", inv=inv_narrow)
 ok("同方法/expect 不同 pattern 粗细 → 同 key", plan_key(e) == plan_key(g))
+h = p("var q = new Texture2D(1,1);", metric="memory", inv=inv)
+ok("同 invariant 不同 metric → 同 key", plan_key(e) == plan_key(h))
 sel, st, _ = choose_consensus([e, f, c], min_votes=2)
 ok("同机制聚类可稳定", st is True and sel is not None)
 
