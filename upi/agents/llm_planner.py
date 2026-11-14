@@ -190,7 +190,10 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                candidate_card: str = "",
                retry_insufficient: bool = False,
                remaining_sites: list[str] | None = None,
-               strategy: str = "") -> tuple[Optional[EditPlan], dict]:
+               strategy: str = "",
+               required_sites: list[str] | None = None,
+               mechanism_class: str = "unknown",
+               invariant: str = "") -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -266,6 +269,23 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
             prompt += (f"\n\n上次补丁被拒：{last_err}。"
                        "只能修改给定源码片段里的代码。")
             continue
+        if required_sites:
+            from upi.core.patch_contract import PatchMeta, validate as _pv
+            covered = sorted({d["file"] for d in diffs})
+            req_files = sorted({s.split("::")[0] for s in required_sites})
+            verdict = _pv(
+                PatchMeta(unit_id="plan", mechanism="", sites_covered=covered,
+                          structural=not all(_numeric_only(d["find"], d["replace"])
+                                             for d in diffs),
+                          invariant=invariant),
+                required_sites=req_files, mechanism_class=mechanism_class,
+                find="\n".join(d["find"] for d in diffs),
+                replace="\n".join(d["replace"] for d in diffs))
+            if not verdict.ok:
+                last_err = f"{verdict.status}: {verdict.reason}"
+                prompt += (f"\n\n上次补丁被拒：{last_err}。"
+                           "必须覆盖全部站点并满足不变量。")
+                continue
         return EditPlan(playbook_id="PB-LLM",
                         diffs=diffs,
                         invariants_assert=["LLM 声称语义保持，需人工复核",

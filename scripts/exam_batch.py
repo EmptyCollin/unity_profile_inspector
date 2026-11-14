@@ -148,8 +148,13 @@ def main() -> int:
             h = {"root_cause": unit.targets[0], "code_anchors": anchors[:4]}
         if h is None:
             return None
+        from upi.core.mechanism_checks import invariant_for as _inv_name
+        inv = _inv_name(unit.mechanism)
         pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
-                              strategy=f"round{round_no}")
+                              strategy=f"round{round_no}",
+                              required_sites=unit.sites,
+                              mechanism_class=("init_only" if inv else "unknown"),
+                              invariant=inv)
         print("plan", unit.unit_id, unit.mechanism, bool(pl), meta.get("error", ""))
         if pl is None:
             return None
