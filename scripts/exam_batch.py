@@ -213,6 +213,7 @@ def main() -> int:
     round_no = 1
     after_metrics: dict = {}
     after_start = 0.0
+    cf_records: list[dict] = []
 
     def plan(unit):
         h = next((x for x in hs
@@ -336,12 +337,29 @@ def main() -> int:
         # G21：回归形态 verified 至少需要 3 次基线；1 次只能算流程冒烟
         if a.baselines < 3:
             print("verify blocked: baselines<3 (smoke only)", a.baselines)
+            cf_records.append({"unit_id": unit.unit_id,
+                               "status": "needs_recheck",
+                               "reason": "baselines<3"})
             return "needs_recheck"
         target = unit.targets[0].split(":", 1)[-1] if unit.targets else unit.mechanism
         now = set(obs or [])
         gone = target not in now
         new = sorted(now - baseline_roots - {target})
         from upi.core.site_audit import sites_remaining
+
+        def finish(status: str, *, inv_ok=None, metric_status="",
+                   sites=0) -> str:
+            cf_records.append({
+                "unit_id": unit.unit_id,
+                "target": target,
+                "gone": gone,
+                "new_clusters": new,
+                "invariant_ok": inv_ok,
+                "metric_status": metric_status,
+                "sites_remaining": sites,
+                "status": status,
+            })
+            return status
         pl = plans[unit.unit_id]
         sa = sites_remaining(p, [{"file": d.get("file", ""),
                                   "find": d.get("find", ""),
@@ -368,11 +386,14 @@ def main() -> int:
                 metric_status = _tv.status
                 print("invariant+metric", unit.unit_id, metric_status,
                       _tv.delta, _tv.threshold)
-            return _decide_verify(
+            _status = _decide_verify(
                 baselines=a.baselines, invariant_ok=_ok,
                 target_gone=gone, new_clusters=new,
                 sites_remaining=sum(len(x) for x in sa.values()),
                 metric_status=metric_status)
+            return finish(_status, inv_ok=_ok,
+                          metric_status=metric_status,
+                          sites=sum(len(x) for x in sa.values()))
         from upi.core.verification_v2 import evaluate_v2
         # I20：metric delta + 机制不变量；缺失才退回 cluster
         if baseline_metrics and after_metrics:
@@ -386,13 +407,14 @@ def main() -> int:
             print("metric-verify", unit.unit_id, _tv.status,
                   _tv.delta, _tv.threshold)
             if _tv.status != "unmeasured":
-                if _tv.status == "verified" and (not gone or new):
-                    return "partial"
-                return _tv.status
+                _status = ("partial" if _tv.status == "verified"
+                           and (not gone or new) else _tv.status)
+                return finish(_status, metric_status=_tv.status,
+                              sites=sum(len(x) for x in sa.values()))
         v = evaluate_v2(target_gone=gone, new_clusters=new, guards_ok=True,
                         sites_remaining=sa)
         print("verify", unit.unit_id, target, v.status)
-        return v.status
+        return finish(v.status)
 
     def rollback(patch):
         return X._git_reset(p, bases.get(patch.unit_id, ""))
@@ -434,6 +456,12 @@ def main() -> int:
         if not active:
             break
     flow.enter("record", verified=sorted(all_verified), route="done")
+    try:
+        (run_dir / "counterfactual.jsonl").write_text(
+            "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
+            encoding="utf-8")
+    except OSError:
+        pass
     run.stop_reason = f"batch:verified={len(all_verified)}"
     save_run(run)
     print("scoring deferred to bench/scorer.py")
