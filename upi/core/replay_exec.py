@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
 from upi.core.replay_spec import ReplayCommand, ReplaySpec
+
+GAME_TYPE = os.environ.get("UPI_GAME_TYPE", "DevSim.ChromaGame")
 
 SUPPORTED = {"start_game", "load_scene", "swap", "wait", "open_shop", "stop",
              "set_board", "resolve", "resolve_board"}
@@ -41,8 +44,8 @@ class ReplayExecutor:
         return r.get("result")
 
     def _game(self) -> str:
-        return ('var g=UnityEngine.Object.FindFirstObjectByType<DevSim.ChromaGame>();'
-                'if(g==null) throw new System.Exception("ChromaGame not found");')
+        return (f'var g=UnityEngine.Object.FindFirstObjectByType<{GAME_TYPE}>();'
+                f'if(g==null) throw new System.Exception("{GAME_TYPE} not found");')
 
     def start_game(self) -> Any:
         cfg = json.dumps({"seed": 20261112, "autoplay": False,

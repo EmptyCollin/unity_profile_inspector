@@ -24,6 +24,8 @@ from upi.core.evidence_diagnosis import candidates_from_latest  # noqa: E402
 from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E402
                                save_run, score_run)
 from upi.core.mechanism_batch import PatchRef, consolidate  # noqa: E402
+from upi.core.mechanism_infer import (diff_text, infer_from_text,  # noqa: E402
+                                      method_for_find, metric_for_text)
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
@@ -178,6 +180,8 @@ def main() -> int:
     cfg = N.load_config(ROOT / "llm_config.yaml")
     store = TicketStore()
     plans, bases = {}, {}
+    unit_metric: dict[str, str] = {}
+    unit_inv: dict[str, tuple[str, str, str]] = {}
     round_no = 1
     after_metrics: dict = {}
     after_start = 0.0
@@ -191,16 +195,25 @@ def main() -> int:
             h = {"root_cause": unit.targets[0], "code_anchors": anchors[:4]}
         if h is None:
             return None
-        from upi.core.mechanism_checks import invariant_for as _inv_name
-        inv = _inv_name(unit.mechanism)
         pl, meta = plan_issue(cfg, X._issue(d["issue"]), h, p,
                               strategy=f"round{round_no}",
                               required_sites=unit.sites,
-                              mechanism_class=("init_only" if inv else "unknown"),
-                              invariant=inv)
+                              mechanism_class="unknown")
         print("plan", unit.unit_id, unit.mechanism, bool(pl), meta.get("error", ""))
         if pl is None:
             return None
+        text = diff_text(pl.diffs)
+        unit_metric[unit.unit_id] = metric_for_text(text)
+        hit = infer_from_text(text)
+        if hit:
+            name, pat = hit
+            for _d in pl.diffs:
+                mm = method_for_find(p, _d.get("file", ""),
+                                     _d.get("find", ""))
+                if mm:
+                    unit_inv[unit.unit_id] = (
+                        name, pat, f"{_d.get('file','')}::{mm}")
+                    break
         plans[unit.unit_id] = pl
         bases[unit.unit_id] = X._git_head(p)
         return PatchRef(unit.unit_id, list(pl.touched_assets))
@@ -265,27 +278,26 @@ def main() -> int:
                                   "find": d.get("find", ""),
                                   "replace": d.get("replace", "")}
                                  for d in pl.diffs])
-        # I20：机制不变量优先，按 target 方法隔离，不共用全局 metric
-        from upi.core.mechanism_checks import (invariant_for as _inv_name,
-                                               invariant_ok as _inv_ok)
-        _iname = _inv_name(unit.mechanism)
-        if _iname:
-            _methods = [s.split("::", 1)[-1] for s in unit.sites if "::" in s]
-            _ok, _detail = _inv_ok(p, unit.mechanism, methods=_methods)
-            print("invariant-verify", unit.unit_id, _iname, _ok, _detail)
+        # I20：机制不变量优先，由补丁/源码模式推导，不查类名表
+        inv = unit_inv.get(unit.unit_id)
+        if inv:
+            from upi.core.mechanism_checks import invariant_ok as _inv_ok
+            name, pat, scope = inv
+            file, _, method = scope.partition("::")
+            _ok, _detail = _inv_ok(p, file, method, pat)
+            print("invariant-verify", unit.unit_id, name, _ok, _detail)
             if not _ok:
                 return "partial"
             return "partial" if sa else "verified"
         from upi.core.verification_v2 import evaluate_v2
-        # I20：先用 metric delta + 机制不变量；缺失才退回 cluster
+        # I20：metric delta + 机制不变量；缺失才退回 cluster
         if baseline_metrics and after_metrics:
-            from upi.core.mechanism_checks import invariant_ok as _inv
             from upi.core.targets import evaluate as _eval_target
-            inv_ok, _inv_reason = _inv(p, unit.mechanism)
             _spec, _obs, _tv = _eval_target(
                 {"finding_id": unit.unit_id, "mechanism": unit.mechanism},
                 baseline_metrics, after_metrics,
-                invariant_ok=inv_ok,
+                metric=unit_metric.get(unit.unit_id, "frame_time"),
+                invariant_ok=True,
                 sites_remaining=sum(len(x) for x in sa.values()))
             print("metric-verify", unit.unit_id, _tv.status,
                   _tv.delta, _tv.threshold)

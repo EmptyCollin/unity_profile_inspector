@@ -30,10 +30,10 @@ from upi.tooling import snapshot as SN  # noqa: E402
 EDITOR = Path(r"D:\unity_editor\6000.6.7f1\Editor\Unity.exe")
 
 
-def _unity(*args, timeout=120):
+def _unity(*args, timeout=120, project=None):
     import subprocess
     p = subprocess.run(["unity", "command", *args, "--project-path",
-                        "test_project", "--format", "json"],
+                        str(project or "test_project"), "--format", "json"],
                        cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=timeout)
     try:
@@ -45,24 +45,24 @@ def _unity(*args, timeout=120):
 def ensure_ready(project: Path) -> None:
     """编辑器就绪是硬步骤：不能假设 unity open 返回就等于可用。"""
     import subprocess
-    if not _unity("editor status", timeout=30).get("success"):
+    if not _unity("editor status", timeout=30, project=project).get("success"):
         print("editor not ready; starting direct")
         subprocess.Popen([str(EDITOR), "-projectPath", str(project),
                           "-acceptSoftwareTermsForThisRunOnly"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(150):
             time.sleep(4)
-            if _unity("editor status", timeout=30).get("success"):
+            if _unity("editor status", timeout=30, project=project).get("success"):
                 break
         else:
             raise SystemExit("Unity 启动超时")
-    _unity("scene open", "--path", "Assets/Scenes/00_Bootstrap.unity")
+    _unity("scene open", "--path", "Assets/Scenes/00_Bootstrap.unity", project=project)
     from upi.tooling import probe_control as PC
     PC.install(project)
     # 不复用上一局 Play 状态：旧局面会让 OpenShop/Board 在空对象上刷 NRE
-    _unity("editor.playmode stop")
+    _unity("editor.playmode stop", project=project)
     time.sleep(1)
-    _unity("editor.playmode start")
+    _unity("editor.playmode start", project=project)
     time.sleep(4)
     print("editor ready / play (fresh)")
 

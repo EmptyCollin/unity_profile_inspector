@@ -277,7 +277,7 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                 PatchMeta(unit_id="plan", mechanism="", sites_covered=covered,
                           structural=not all(_numeric_only(d["find"], d["replace"])
                                              for d in diffs),
-                          invariant=invariant),
+                          invariant=(invariant or "derived_from_diff")),
                 required_sites=req_files, mechanism_class=mechanism_class,
                 find="\n".join(d["find"] for d in diffs),
                 replace="\n".join(d["replace"] for d in diffs))
