@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import asset_verify as AV  # noqa: E402
 from upi.core.config_edit import ConfigEdit, apply, rollback, validate  # noqa: E402
 from upi.core.fresh_memory import read_median  # noqa: E402
+from upi.core.perception import capture as shot, gate as percept_gate  # noqa: E402
 from upi.core.target_metrics import metric_series, stats  # noqa: E402
 
 
@@ -43,6 +44,11 @@ def main() -> int:
         return 1
     b, _ = AV._capture(project, Path(a.replay), "cfg_before")
     bm_fresh = read_median(project) if a.metric == "memory" else None
+    shot_before = None
+    try:
+        shot_before = shot(project, ROOT / "runs" / "_probe" / "cfg_before.png")
+    except Exception:  # noqa: BLE001
+        pass
     done = apply(project, [edit])
     try:
         subprocess.run(["unity", "command", "script eval", "--code",
@@ -53,6 +59,14 @@ def main() -> int:
         import exam_multi as X
         X.ensure_ready(project)
         af, _ = AV._capture(project, Path(a.replay), "cfg_after")
+        perception = {"available": False}
+        try:
+            shot_after = shot(project, ROOT / "runs" / "_probe" / "cfg_after.png")
+            if shot_before is not None:
+                perception = percept_gate(shot_before, shot_after)
+                perception["available"] = True
+        except Exception as e:  # noqa: BLE001
+            perception = {"available": False, "error": str(e)[:200]}
         if a.metric == "memory":
             am_fresh = read_median(project)
             bm = bm_fresh
@@ -73,12 +87,14 @@ def main() -> int:
             if reliable:
                 threshold = max(0.05 * abs(bm["median"]),
                                 3 * max(bm["sigma"], am["sigma"]))
-        good = bool(reliable and delta is not None and delta > threshold)
+        good = bool(reliable and delta is not None and delta > threshold
+                    and perception.get("available"))
         if not good:
             rollback(project, done)
         print(json.dumps({"ok": good, "metric": a.metric,
                           "before": bm, "after": am, "delta": delta,
                           "reliable": reliable, "threshold": threshold,
+                          "perception": perception,
                           "rolled_back": not good}, ensure_ascii=False,
                          indent=1))
         return 0 if good else 1

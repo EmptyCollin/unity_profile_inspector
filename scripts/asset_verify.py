@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core.asset_edit import AssetEdit, apply, rollback, validate  # noqa: E402
 from upi.core.fresh_memory import read_median  # noqa: E402
+from upi.core.perception import capture as shot, gate as percept_gate  # noqa: E402
 from upi.core.target_metrics import metric_series, stats  # noqa: E402
 
 
@@ -74,6 +75,12 @@ def main() -> int:
         return 1
     b, _ = _capture(project, Path(a.replay), "before")
     bm_fresh = read_median(project) if a.metric == "memory" else None
+    shot_before = None
+    try:
+        shot_before = shot(project, ROOT / "runs" / "_probe" / "asset_before.png")
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"perception_warning": str(e)[:200]},
+                         ensure_ascii=False))
     done = apply(project, [edit])
     try:
         subprocess.run(["unity", "command", "script eval", "--code",
@@ -83,6 +90,14 @@ def main() -> int:
                        cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", timeout=180)
         af, _ = _capture(project, Path(a.replay), "after")
+        perception = {"available": False}
+        try:
+            shot_after = shot(project, ROOT / "runs" / "_probe" / "asset_after.png")
+            if shot_before is not None:
+                perception = percept_gate(shot_before, shot_after)
+                perception["available"] = True
+        except Exception as e:  # noqa: BLE001
+            perception = {"available": False, "error": str(e)[:200]}
         if a.metric == "memory":
             am_fresh = read_median(project)
             bm = bm_fresh
@@ -103,12 +118,14 @@ def main() -> int:
             if reliable:
                 threshold = max(0.05 * abs(bm["median"]),
                                 3 * max(bm["sigma"], am["sigma"]))
-        good = bool(reliable and delta is not None and delta > threshold)
+        good = bool(reliable and delta is not None and delta > threshold
+                    and perception.get("available"))
         if not good:
             rollback(project, done)
         print(json.dumps({"ok": good, "metric": a.metric,
                           "before": bm, "after": am, "delta": delta,
                           "reliable": reliable, "threshold": threshold,
+                          "perception": perception,
                           "rolled_back": not good}, ensure_ascii=False,
                          indent=1))
         return 0 if good else 1
