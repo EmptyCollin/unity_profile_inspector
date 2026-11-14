@@ -30,6 +30,17 @@ from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
 from upi.tooling import snapshot as SN  # noqa: E402
 
 
+def latest_counters() -> dict:
+    files = sorted((ROOT / "runs").glob("*/counters.json"),
+                   key=lambda p: p.stat().st_mtime)
+    if not files:
+        return {}
+    try:
+        return json.loads(files[-1].read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
@@ -46,6 +57,7 @@ def main() -> int:
     M.ensure_ready(p)
 
     baseline_roots = set()
+    baseline_metrics: dict = {}
 
     def capture_with_recovery(label: str, *, two_pass: bool):
         ok, out = X._capture_once(p, a.project_id, a.replay, run_dir,
@@ -76,6 +88,7 @@ def main() -> int:
         baseline_roots |= roots
         print("baseline", i + 1, "roots", len(baseline_roots))
 
+    baseline_metrics = latest_counters()
     collector = X._make_collector(p, a.project_id, a.replay)
     from upi.core.project_store import knowledge_db as _knowledge_db
     nd = N.make_nodes(run_dir, live_llm=True,
@@ -102,6 +115,7 @@ def main() -> int:
     store = TicketStore()
     plans, bases = {}, {}
     round_no = 1
+    after_metrics: dict = {}
 
     def plan(unit):
         h = next((x for x in hs
@@ -156,9 +170,11 @@ def main() -> int:
         return ok
 
     def capture_fn():
+        nonlocal after_metrics
         ok, _ = capture_with_recovery("batch-after", two_pass=False)
         if not ok:
             raise RuntimeError("batch capture failed")
+        after_metrics = latest_counters()
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
@@ -174,6 +190,20 @@ def main() -> int:
                                   "replace": d.get("replace", "")}
                                  for d in pl.diffs])
         from upi.core.verification_v2 import evaluate_v2
+        # I20：先用 metric delta + 机制不变量；缺失才退回 cluster
+        if baseline_metrics and after_metrics:
+            from upi.core.mechanism_checks import invariant_ok as _inv
+            from upi.core.targets import evaluate as _eval_target
+            inv_ok, _inv_reason = _inv(p, unit.mechanism)
+            _spec, _obs, _tv = _eval_target(
+                {"finding_id": unit.unit_id, "mechanism": unit.mechanism},
+                baseline_metrics, after_metrics,
+                invariant_ok=inv_ok,
+                sites_remaining=sum(len(x) for x in sa.values()))
+            print("metric-verify", unit.unit_id, _tv.status,
+                  _tv.delta, _tv.threshold)
+            if _tv.status != "unmeasured":
+                return _tv.status
         v = evaluate_v2(target_gone=gone, new_clusters=new, guards_ok=True,
                         sites_remaining=sa)
         print("verify", unit.unit_id, target, v.status)

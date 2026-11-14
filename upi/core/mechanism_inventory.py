@@ -15,6 +15,8 @@ PATTERNS: dict[str, re.Pattern] = {
     "per_frame_instantiate": re.compile(r"\bInstantiate\s*\("),
     "idle_hint_scan": re.compile(r"\bHasMatch\s*\("),
     "per_frame_animation": re.compile(r"\blocalScale\s*="),
+    "canvas_force_update": re.compile(r"ForceUpdateCanvases\s*\("),
+    "bool_buffer_alloc": re.compile(r"new\s+bool\s*\["),
 }
 
 

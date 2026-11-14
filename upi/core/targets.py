@@ -18,10 +18,33 @@ METRIC_BY_MECHANISM = {
     "oversized_resource_asset": "memory",
 }
 
+_ROOT_METRIC = {
+    "ChromaGame.Update": "frame_time",
+    "ChromaGame.RefreshTiles": "memory",
+    "ChromaGame.UpdateHud": "frame_time",
+    "ChromaGame.UpdateBody": "frame_time",
+    "ChromaGame.OpenShop": "frame_time",
+    "ChromaGame.ResolveAllSync": "gc_alloc",
+    "ChromaGame.ResolvePendingWhenIdle": "frame_time",
+    "ChromaGame.RefreshItemLabels": "frame_time",
+    "BoardModel.FindMatches": "gc_alloc",
+    "ChromaGame.BuildBoard": "drawcalls",
+    "payload_0.txt": "memory",
+}
+
+
+def metric_for(mechanism: str) -> str:
+    if mechanism in METRIC_BY_MECHANISM:
+        return METRIC_BY_MECHANISM[mechanism]
+    for root, metric in _ROOT_METRIC.items():
+        if root in mechanism:
+            return metric
+    return "frame_time"
+
 
 def build_spec(finding: dict, before: dict) -> TargetSpec:
     mech = str(finding.get("mechanism") or "")
-    metric = METRIC_BY_MECHANISM.get(mech, "frame_time")
+    metric = metric_for(mech)
     vals = metric_series(before, metric)
     # 用前 3 个窗口/最后 3 个采样做基线
     base = vals[-3:] if vals else []
