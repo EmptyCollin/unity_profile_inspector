@@ -180,7 +180,7 @@ def main() -> int:
     store = TicketStore()
     plans, bases = {}, {}
     unit_metric: dict[str, str] = {}
-    unit_inv: dict[str, tuple[str, str, str]] = {}
+    unit_inv: dict[str, tuple[str, str, str, int]] = {}
     round_no = 1
     after_metrics: dict = {}
     after_start = 0.0
@@ -207,7 +207,8 @@ def main() -> int:
             unit_inv[unit.unit_id] = (
                 "declared",
                 str(inv.get("pattern") or ""),
-                f"{inv.get('file','')}::{inv.get('method','')}")
+                f"{inv.get('file','')}::{inv.get('method','')}",
+                int(inv.get("expect", 0)))
         plans[unit.unit_id] = pl
         bases[unit.unit_id] = X._git_head(p)
         return PatchRef(unit.unit_id, list(pl.touched_assets))
@@ -276,9 +277,9 @@ def main() -> int:
         inv = unit_inv.get(unit.unit_id)
         if inv:
             from upi.core.mechanism_checks import invariant_ok as _inv_ok
-            name, pat, scope = inv
+            name, pat, scope, expect = inv
             file, _, method = scope.partition("::")
-            _ok, _detail = _inv_ok(p, file, method, pat)
+            _ok, _detail = _inv_ok(p, file, method, pat, expect)
             print("invariant-verify", unit.unit_id, name, _ok, _detail)
             if not _ok:
                 return "partial"

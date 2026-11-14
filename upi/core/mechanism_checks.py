@@ -7,6 +7,6 @@ from upi.core.mechanism_infer import count_in_method
 
 
 def invariant_ok(project: Path, file: str, method: str,
-                 pattern: str) -> tuple[bool, str]:
+                 pattern: str, expect: int = 0) -> tuple[bool, str]:
     n = count_in_method(Path(project), file, method, pattern)
-    return n == 0, f"sites={n}"
+    return n == expect, f"sites={n} expect={expect}"
