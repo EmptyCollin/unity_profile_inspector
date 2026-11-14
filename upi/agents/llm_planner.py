@@ -60,7 +60,8 @@ code_anchors: {anchors}
  "metric":"frame_time|gc_alloc|memory|drawcalls",
  "invariant":{{"file":"Assets/...","method":"方法名","pattern":"正则","expect":0}},
  "repair_contract":{{"primary_metric":"frame_time","min_improve":0.05,
-   "guards":[{{"metric":"memory","max_relative":0.10}}],"mb_per_ms":8}},
+   "guards":[{{"metric":"memory","max_relative":0.10}}],"mb_per_ms":8,
+   "window":"open_shop"}},
  "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
 
 invariant 必须由你根据这次补丁声明：
@@ -68,6 +69,7 @@ invariant 必须由你根据这次补丁声明：
 - invariant.pattern 必须能在 find 文本中匹配到，并且 apply 后应在 method 内消失；
 - 如果无法声明可靠不变量，invariant 输出 {{}}，metric 仍必须给出。
 - repair_contract 可选：声明主指标、最小改善、守护预算和内存/时间汇率。
+  window 可选，取 replay 动作名（如 open_shop），metric 只比较该动作窗口。
   不声明则 verifier 使用默认规则。
 """
 

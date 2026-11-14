@@ -101,6 +101,11 @@ def main() -> int:
     baseline_roots = set()
     baseline_metrics: dict = {}
     baseline_runs: list[dict] = []
+    baseline_windows: list[dict[int, dict]] = []
+    after_windows: dict[int, dict] = {}
+    from upi.core.window_metrics import action_indices, index_for_window
+    from upi.core.window_metrics import window_counters
+    action_idx = action_indices(a.replay)
     last_cap = {"id": ""}
 
     def capture_with_recovery(label: str, *, two_pass: bool,
@@ -133,6 +138,7 @@ def main() -> int:
         if not ok:
             return 1
         baseline_runs.append(counters_since(0, last_cap["id"]))
+        baseline_windows.append(window_counters(last_cap["id"]))
         mp = run_dir / "merged_candidates.json"
         if mp.exists():
             roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
@@ -338,7 +344,7 @@ def main() -> int:
         return ok
 
     def capture_fn():
-        nonlocal after_metrics, after_start
+        nonlocal after_metrics, after_start, after_windows
         after_start = time.time()
         ok, _ = capture_with_recovery("batch-after", two_pass=False,
                                       light=True, fast=False,
@@ -346,6 +352,7 @@ def main() -> int:
         if not ok:
             raise RuntimeError("batch capture failed")
         after_metrics = counters_since(0, last_cap["id"])
+        after_windows = window_counters(last_cap["id"])
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
@@ -377,6 +384,16 @@ def main() -> int:
                 "status": status,
             })
             return status
+        bmetrics, ametrics = baseline_metrics, after_metrics
+        _win = str((unit_contract.get(unit.unit_id) or {}).get("window") or "")
+        if _win:
+            _idx = index_for_window(action_idx, _win)
+            if _idx is not None:
+                _b = [w.get(_idx) for w in baseline_windows if w.get(_idx)]
+                _a = after_windows.get(_idx)
+                if _b and _a:
+                    bmetrics, ametrics = _b, _a
+                    print("metric-window", unit.unit_id, _win, _idx)
         pl = plans[unit.unit_id]
         sa = sites_remaining(p, [{"file": d.get("file", ""),
                                   "find": d.get("find", ""),
@@ -401,11 +418,11 @@ def main() -> int:
                   "gone=", gone, "new=", new)
             # I24：invariant 只是必要条件；target/metric 才决定 verified
             metric_status = "unmeasured"
-            if baseline_metrics and after_metrics:
+            if bmetrics and ametrics:
                 from upi.core.targets import evaluate as _eval_target
                 _spec, _obs, _tv = _eval_target(
                     {"finding_id": unit.unit_id, "mechanism": unit.mechanism},
-                    baseline_metrics, after_metrics,
+                    bmetrics, ametrics,
                     metric=unit_metric.get(unit.unit_id, "frame_time"),
                     invariant_ok=True, sites_remaining=0)
                 metric_status = _tv.status
@@ -424,7 +441,7 @@ def main() -> int:
         from upi.core.verification_v2 import evaluate_v2
         # I24：有 repair_contract 时用主指标+guard+汇率判合算性
         contract = unit_contract.get(unit.unit_id)
-        if contract and baseline_metrics and after_metrics:
+        if contract and bmetrics and ametrics:
             from upi.core.repair_contract import (GuardBudget,
                                                   RepairContract, evaluate)
             from upi.core.target_metrics import metric_series, stats
@@ -443,13 +460,13 @@ def main() -> int:
 
             primary = str(contract.get("primary_metric")
                           or unit_metric.get(unit.unit_id, "frame_time"))
-            before_v = _median(baseline_metrics, primary)
-            after_v = _median(after_metrics, primary)
+            before_v = _median(bmetrics, primary)
+            after_v = _median(ametrics, primary)
             guards = {}
             for g in contract.get("guards") or []:
                 name = str(g.get("metric") or "")
-                b = _median(baseline_metrics, name)
-                ga = _median(after_metrics, name)
+                b = _median(bmetrics, name)
+                ga = _median(ametrics, name)
                 if b is not None and ga is not None:
                     guards[name] = (b, ga)
             if before_v is not None and after_v is not None:
@@ -473,11 +490,11 @@ def main() -> int:
                     return finish("verified_with_tradeoff",
                                   metric_status=cr.status)
         # I20：metric delta + 机制不变量；缺失才退回 cluster
-        if baseline_metrics and after_metrics:
+        if bmetrics and ametrics:
             from upi.core.targets import evaluate as _eval_target
             _spec, _obs, _tv = _eval_target(
                 {"finding_id": unit.unit_id, "mechanism": unit.mechanism},
-                baseline_metrics, after_metrics,
+                bmetrics, ametrics,
                 metric=unit_metric.get(unit.unit_id, "frame_time"),
                 invariant_ok=True,
                 sites_remaining=sum(len(x) for x in sa.values()))
