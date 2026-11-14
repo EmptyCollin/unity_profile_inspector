@@ -137,9 +137,9 @@ def main() -> int:
     from upi.core.mechanism_inventory import scan as _scan_sites
     static_findings: list[dict] = []
     existing_methods = {a.method for f in findings for a in f.anchors if a.method}
-    added_mech: set[str] = set()
+    added_mech: dict[str, int] = {}
     for mech, sites in _scan_sites(p).by_mechanism().items():
-        if mech in added_mech:
+        if added_mech.get(mech, 0) >= 3:
             continue
         for s in sites:
             if not s.method or s.method in existing_methods:
@@ -157,9 +157,10 @@ def main() -> int:
                 "attribution": {"confidence": 0.5,
                                 "factors": {"root_cause": root}}})
             existing_methods.add(s.method)
-            added_mech.add(mech)
+            added_mech[mech] = added_mech.get(mech, 0) + 1
             print("static candidate", root, s.file, s.line)
-            break
+            if added_mech[mech] >= 3:
+                break
     run = RunFindings(run_id=run_id, project_id=a.project_id,
                       mode="regression", created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                       findings=findings, repairs=[])
