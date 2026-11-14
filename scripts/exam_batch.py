@@ -26,6 +26,7 @@ from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E
                                save_run, score_run)
 from upi.core.mechanism_batch import PatchRef, consolidate  # noqa: E402
 from upi.core.mechanism_infer import count_in_method  # noqa: E402
+from upi.core.plan_consensus import choose_consensus, plan_key  # noqa: E402
 from upi.core.ticket import (BatchTicket, TicketItem, TicketStore,  # noqa: E402
                              _item_token, _token, approve, approve_item)
 from upi.core.unity_exec import UnityTicketExecutor  # noqa: E402
@@ -74,6 +75,8 @@ def main() -> int:
                     help="逗号分隔的 mechanism 子串，只跑匹配的单元")
     ap.add_argument("--plan-repeat", type=int, default=1,
                     help="同一输入重复 plan 次数，用于统计 LLM 一致性")
+    ap.add_argument("--plan-min-votes", type=int, default=2,
+                    help="重复采样时判定稳定所需最少同票")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -197,7 +200,7 @@ def main() -> int:
         if h is None:
             return None
         variants = []
-        pl = None
+        seen_plans = []
         meta = {}
         for _k in range(max(1, a.plan_repeat)):
             _pl, _meta = plan_issue(
@@ -205,23 +208,33 @@ def main() -> int:
                 strategy=f"round{round_no}",
                 required_sites=unit.sites,
                 mechanism_class="unknown")
+            seen_plans.append(_pl)
             variants.append({
                 "ok": _pl is not None,
+                "key": plan_key(_pl),
                 "metric": (_pl.metric if _pl else ""),
                 "invariant": (_pl.invariant if _pl else {}),
                 "diffs": (_pl.diffs if _pl else []),
                 "error": _meta.get("error", ""),
             })
-            pl = pl or _pl
             meta = _meta
-        uniq = len({json.dumps(v["diffs"], sort_keys=True, ensure_ascii=False)
-                    for v in variants if v["ok"]})
+        min_votes = a.plan_min_votes if a.plan_repeat > 1 else 1
+        pl, stable, counts = choose_consensus(seen_plans, min_votes=min_votes)
+        if pl is None:
+            meta = {"error": "unstable_plan",
+                    "why": f"重复 {len(seen_plans)} 次无多数方案",
+                    "counts": counts}
+        uniq = len({v["key"] for v in variants if v["ok"]})
         print("plan", unit.unit_id, unit.mechanism, bool(pl),
-              meta.get("error", ""), f"repeat={len(variants)} unique={uniq}")
+              meta.get("error", ""),
+              f"repeat={len(variants)} unique={uniq} stable={stable}")
         try:
             (run_dir / "plan_repeat.json").write_text(
-                json.dumps({unit.unit_id: variants}, ensure_ascii=False,
-                           indent=2), encoding="utf-8")
+                json.dumps({unit.unit_id: {
+                    "variants": variants, "stable": stable,
+                    "selected": plan_key(pl) if pl else "",
+                    "min_votes": min_votes,
+                }}, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
         if pl is None:
