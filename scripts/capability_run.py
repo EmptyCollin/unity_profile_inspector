@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -27,7 +28,29 @@ from upi.core.protocol import build as fp_build, digest as fp_digest, file_hash 
 from upi.adapters.devsim import ReplayExecutor  # noqa: E402
 from upi.core.replay_spec import load_replay  # noqa: E402
 
-PROBE = ROOT / "probe" / "upi_marker_evidence.cs"
+def _render_probe(src: Path, name: str) -> Path:
+    """按 UPI_GAME_TYPE/UPI_BOARD_TYPE 生成探针，避免测试工程类名写死。"""
+    game = os.environ.get("UPI_GAME_TYPE", "DevSim.ChromaGame")
+    board = os.environ.get("UPI_BOARD_TYPE", "DevSim.BoardModel")
+    gsimple = game.rsplit(".", 1)[-1]
+    bsimple = board.rsplit(".", 1)[-1]
+    text = src.read_text(encoding="utf-8")
+    text = (text.replace("DevSim.ChromaGame", game)
+                .replace("DevSim.BoardModel", board)
+                .replace("ChromaGame", gsimple)
+                .replace("BoardModel", bsimple))
+    out = ROOT / "runs" / "_probe" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    return out
+
+
+PROBE = _render_probe(ROOT / "probe" / "upi_marker_evidence.cs",
+                      "generated_marker_evidence.cs")
+EVIDENCE_PROBE = _render_probe(ROOT / "probe" / "upi_evidence_v1.cs",
+                               "generated_evidence_v1.cs")
+COUNTERS_PROBE = _render_probe(ROOT / "probe" / "upi_counters_v1.cs",
+                               "generated_counters_v1.cs")
 EV = ROOT / "runs" / "_probe" / "marker_evidence.json"
 CFG = ROOT / "runs" / "_probe" / "capture_cfg.json"
 
@@ -141,7 +164,7 @@ def collect_counters(project: Path, run_id: str) -> dict:
         pass
     try:
         d = unity("script eval", "--file",
-                  str(ROOT / "probe" / "upi_counters_v1.cs"),
+                  str(COUNTERS_PROBE),
                   "--project-path", str(project), "--timeout", "120")
         if not d.get("success"):
             return {}
@@ -174,7 +197,7 @@ def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
     since = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
         time.sleep(1.2)
-        d = unity("script eval", "--file", str(ROOT / "probe" / "upi_evidence_v1.cs"),
+        d = unity("script eval", "--file", str(EVIDENCE_PROBE),
                   "--project-path", str(project), "--timeout", "120")
         if not d.get("success"):
             return []
@@ -266,7 +289,7 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
                     try:
                         EV_DEEP.unlink(missing_ok=True)
                         d = unity("script eval", "--file",
-                                  str(ROOT / "probe" / "upi_evidence_v1.cs"),
+                                  str(EVIDENCE_PROBE),
                                   "--project-path", str(project),
                                   "--timeout", "120")
                         if not d.get("success"):
