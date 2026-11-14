@@ -120,7 +120,8 @@ def _log_tool_error(run_dir: Path, stage: str, exc: BaseException) -> None:
 def _capture_once(project: Path, project_id: str, replay: str,
                   run_dir: Path, label: str, *,
                   two_pass: bool = False, retries: int = 1,
-                  checkpoint=None):
+                  checkpoint=None, light: bool = False,
+                  fast: bool = False):
     """采集子进程；失败落 tool_errors.jsonl 并重试一次。返回 (ok, out)。"""
     if checkpoint is not None and checkpoint.done(label):
         if (run_dir / "merged_candidates.json").exists():
@@ -144,6 +145,10 @@ def _capture_once(project: Path, project_id: str, replay: str,
                "--replay", replay, "--no-save"]
         if two_pass:
             cmd.append("--two-pass")
+        if light:
+            cmd.append("--light")
+        if fast:
+            cmd.append("--fast")
         try:
             last = subprocess.run(cmd, cwd=str(ROOT), capture_output=True,
                                   text=True, encoding="utf-8",

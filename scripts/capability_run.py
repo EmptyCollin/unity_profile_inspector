@@ -82,7 +82,8 @@ def ensure_play(project: Path) -> dict:
     raise RuntimeError("进入 Play Mode 超时")
 
 
-def capture_window(project: Path, run_id: str, limit: int) -> list[dict]:
+def capture_window(project: Path, run_id: str, limit: int,
+                   since: str | None = None) -> list[dict]:
     """采一窗（不跑 replay）：扫最近若干帧的 marker，生成候选。"""
     CFG.parent.mkdir(parents=True, exist_ok=True)
     CFG.write_text(json.dumps({"marker_frames": 300, "board_threads": 8,
@@ -91,7 +92,7 @@ def capture_window(project: Path, run_id: str, limit: int) -> list[dict]:
         EV.unlink(missing_ok=True)
     except OSError:
         pass
-    since = time.strftime("%Y-%m-%dT%H:%M:%S")
+    since = since or time.strftime("%Y-%m-%dT%H:%M:%S")
     d = unity("script eval", "--file", str(PROBE), "--project-path", str(project),
               "--timeout", "120")
     if not d.get("success"):
@@ -308,7 +309,8 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
 
 
 def run_and_capture(project: Path, run_id: str, limit: int,
-                    replay_path: Path, *, enable_deep: bool = True) -> list[dict]:
+                    replay_path: Path, *, enable_deep: bool = True,
+                    fast: bool = False) -> list[dict]:
     """滚动运行 replay：每个动作命令后采一窗；记录帧时间线与异常窗口。"""
     off_first = _eval(project, PROFILER_OFF, timeout=30)
     on = _eval(project, SHALLOW_ON, timeout=30)
@@ -327,15 +329,22 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             f = _frame(project)
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
-            if cmd.type in ACTION_CMDS:
+            if cmd.type in ACTION_CMDS and not fast:
                 for c in capture_window(project, f"{run_id}_a{i}", limit):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
-        for c in capture_window(project, f"{run_id}_end", limit):
-            k = str(c.get("root_cause") or "")
-            if k and k not in merged:
-                merged[k] = c
+        if fast:
+            for c in capture_window(project, f"{run_id}_end", limit,
+                                    since=started):
+                k = str(c.get("root_cause") or "")
+                if k and k not in merged:
+                    merged[k] = c
+        if not fast:
+            for c in capture_window(project, f"{run_id}_end", limit):
+                k = str(c.get("root_cause") or "")
+                if k and k not in merged:
+                    merged[k] = c
         wins = _windows_since(project, started)
         try:
             from upi.core.anomaly_candidates import windows_from_bundle
@@ -519,7 +528,13 @@ def main() -> int:
                     help="只采集证据，不写 findings（考试时由诊断产物负责记账）")
     ap.add_argument("--two-pass", action="store_true",
                     help="r 轻采→选≤3窗→r′ 完整重放、窗口内深采")
+    ap.add_argument("--light", action="store_true",
+                    help="只做一次轻采，不做 deep（验证/快速基线）")
+    ap.add_argument("--fast", action="store_true",
+                    help="整轮 replay 只在末尾采一窗，不逐 action 采")
     a = ap.parse_args()
+    if a.two_pass and a.light:
+        raise SystemExit("--two-pass 与 --light 不能同时使用")
     project = Path(a.project).resolve()
     project_id = a.project_id or project.name
     replay_path = Path(a.replay)
@@ -528,7 +543,8 @@ def main() -> int:
     run_id = new_run_id(project_id)
     cands = ((run_two_pass_capture(project, run_id, a.limit, replay_path))
              if a.two_pass else
-             run_and_capture(project, run_id, a.limit, replay_path))
+             run_and_capture(project, run_id, a.limit, replay_path,
+                             enable_deep=not a.light, fast=a.fast))
 
     findings: list[ToolFinding] = []
     for i, c in enumerate(cands):

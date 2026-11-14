@@ -60,9 +60,11 @@ def main() -> int:
     baseline_roots = set()
     baseline_metrics: dict = {}
 
-    def capture_with_recovery(label: str, *, two_pass: bool):
+    def capture_with_recovery(label: str, *, two_pass: bool,
+                              light: bool = False, fast: bool = False):
         ok, out = X._capture_once(p, a.project_id, a.replay, run_dir,
-                                  label, two_pass=two_pass, retries=1)
+                                  label, two_pass=two_pass, retries=1,
+                                  light=light, fast=fast)
         if ok:
             return True, out
         print("capture failed; restart editor and retry", label)
@@ -73,10 +75,12 @@ def main() -> int:
             return False, out
         return X._capture_once(p, a.project_id, a.replay, run_dir,
                                label + "-retry", two_pass=two_pass,
-                               retries=1)
+                               retries=1, light=light, fast=fast)
 
     for i in range(max(1, a.baselines)):
-        ok, _ = capture_with_recovery(f"baseline#{i + 1}", two_pass=True)
+        ok, _ = capture_with_recovery(
+            f"baseline#{i + 1}", two_pass=(i == 0),
+            light=(i > 0), fast=False)
         if not ok:
             return 1
         mp = run_dir / "merged_candidates.json"
@@ -209,7 +213,8 @@ def main() -> int:
 
     def capture_fn():
         nonlocal after_metrics
-        ok, _ = capture_with_recovery("batch-after", two_pass=False)
+        ok, _ = capture_with_recovery("batch-after", two_pass=False,
+                                      light=True, fast=True)
         if not ok:
             raise RuntimeError("batch capture failed")
         after_metrics = latest_counters()

@@ -18,9 +18,14 @@ ROOT_CHECK = {
 
 
 def invariant_for(mechanism: str) -> str:
-    for root, mech in ROOT_CHECK.items():
-        if root in mechanism:
-            return mech
+    # mechanism 形如 hot_function:ChromaGame.UpdateBody / callstack_hot:...
+    tail = mechanism.split(":", 1)[-1]
+    if tail in ROOT_CHECK:
+        return ROOT_CHECK[tail]
+    # 兼容 Type.Method 前缀差异，但只接受最长匹配，避免 Update 误吃 UpdateHud
+    hits = [k for k in ROOT_CHECK if tail.endswith(k)]
+    if hits:
+        return ROOT_CHECK[max(hits, key=len)]
     return ""
 
 

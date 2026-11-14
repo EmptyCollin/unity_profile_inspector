@@ -60,6 +60,7 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
               round_no: int = 1) -> BatchResult:
     res = BatchResult(round=round_no)
     patches: dict[str, PatchRef] = {}
+    planned_units: list = []
     for u in units:
         p = plan(u)
         if p is None:
@@ -70,12 +71,10 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
             res.failed[getattr(u, "unit_id", str(u))] = "apply_failed"
             continue
         res.applied.append(getattr(u, "unit_id", str(u)))
-    if res.failed:
-        # 有补丁没应用：先回滚已应用的，保证工程干净
-        for uid in list(res.applied):
-            if rollback(patches[uid]):
-                res.rolled_back.append(uid)
+        planned_units.append(u)
+    if not res.applied:
         return res
+    units = planned_units
     res.compile_ok = bool(compile_fn())
     if not res.compile_ok:
         good = _isolate_compile(patches, apply, compile_fn, rollback)
