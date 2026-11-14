@@ -431,9 +431,9 @@ def main() -> int:
             for g in contract.get("guards") or []:
                 name = str(g.get("metric") or "")
                 b = _median(baseline_metrics, name)
-                a = _median(after_metrics, name)
-                if b is not None and a is not None:
-                    guards[name] = (b, a)
+                ga = _median(after_metrics, name)
+                if b is not None and ga is not None:
+                    guards[name] = (b, ga)
             if before_v is not None and after_v is not None:
                 rc = RepairContract(
                     primary_metric=primary,
