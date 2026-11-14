@@ -10,6 +10,7 @@ from upi.core.metric_registry import MetricRegistry, default_registry  # noqa: E
 from upi.core.project_adapter import Command, ProjectAdapter, Replay  # noqa: E402
 from upi.core.target_metrics import metric_series  # noqa: E402
 from upi.adapters.devsim import DevSimAdapter  # noqa: E402
+from upi.adapters.loader import load_adapter  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -46,6 +47,8 @@ ok("DevSimAdapter 实现协议", isinstance(dev, ProjectAdapter) is True)
 ok("DevSimAdapter 只在 adapter 层", dev.describe().adapter == "devsim")
 ok("任意 wait 命令可映射",
    dev.run_replay(Replay("r", [Command("wait", {"seconds": 0})]))[0]["type"] == "wait")
+loaded = load_adapter("upi.adapters.devsim:DevSimAdapter", tmp.parent)
+ok("按 module:Class 加载 adapter", isinstance(loaded, ProjectAdapter) is True)
 
 for rel in ("upi/core/project_adapter.py", "upi/core/metric_registry.py"):
     text = (ROOT / rel).read_text(encoding="utf-8")
