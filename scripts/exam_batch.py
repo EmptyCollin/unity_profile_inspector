@@ -238,6 +238,18 @@ def main() -> int:
         return 1
     hs = g.get("hypotheses") or []
     findings = X.findings_from_hypotheses(run_id, hs, {})
+    _asset_findings = [f for f in findings
+                       if "oversized_resource_asset" in str(f.mechanism)]
+    findings = [f for f in findings
+                if "oversized_resource_asset" not in str(f.mechanism)]
+    try:
+        from upi.core.opportunity import scan as _scan_opps
+        _opps = [o.as_dict() for o in _scan_opps(p)]
+        (run_dir / "opportunities.json").write_text(
+            json.dumps(_opps, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
     # I20：静态机制站点补检只用于修复单元，不进入评分 findings
     from upi.core.mechanism_inventory import scan as _scan_sites
     static_findings: list[dict] = []

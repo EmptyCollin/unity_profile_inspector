@@ -636,7 +636,15 @@ def main() -> int:
             attribution=AttributionInfo(confidence=0.0, factors={}),
             state="candidate",
         ))
-    findings.extend(asset_findings(project))
+    from upi.core.opportunity import scan as _scan_opportunities
+    opportunities = _scan_opportunities(project)
+    try:
+        (ROOT / "runs" / run_id).mkdir(parents=True, exist_ok=True)
+        (ROOT / "runs" / run_id / "opportunities.json").write_text(
+            json.dumps([o.as_dict() for o in opportunities],
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
     run = RunFindings(
         run_id=run_id, project_id=project_id, mode="resident",
         protocol_fingerprint=fp_digest(fp_build(
