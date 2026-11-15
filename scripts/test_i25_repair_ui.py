@@ -30,6 +30,7 @@ ok("审计读取不炸", isinstance(audit_entries(), list))
 ok("命中读取不炸", isinstance(skips(), list))
 ok("页面含命中", "/api/repair/skips" in REPAIR_HTML)
 ok("页面含模式接口", "/api/repair/mode" in REPAIR_HTML)
+ok("页面含轨迹", "轨迹" in REPAIR_HTML)
 ok("默认 production", mode() == "production", mode())
 
 b = budget()

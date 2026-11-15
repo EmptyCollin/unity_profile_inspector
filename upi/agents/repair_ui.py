@@ -108,6 +108,7 @@ async function rollbackState(){
     ["finding",r=>`<span class="mono">${esc(r.finding_id)}</span>`],
     ["states",r=>`<span class="mono">${(r.states||[]).map(s=>esc(s.state_id)+":"+esc(s.status)).join(" ")}</span>`],
     ["attempts",r=>esc(r.total_attempts)],
+    ["轨迹",r=>`<span class="mono">${(r.attempts||[]).map(a=>esc(a.status)).join(" → ")}</span>`],
     ["current",r=>`<span class="mono">${esc(r.current)}</span>`],
     ["root_failed",r=>`<span class="${r.root_failed?'bad':'ok'}">${r.root_failed}</span>`],
     ["reason",r=>esc(r.reason||"")],
