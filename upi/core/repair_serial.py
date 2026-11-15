@@ -25,6 +25,7 @@ def run_repair_loop(
     verify: Callable[[object, object], str],
     rollback: Callable[[object], bool],
     git_head: Callable[[], str] = lambda: "",
+    on_failure: Callable[[RepairTree], None] | None = None,
     max_steps: int = 32,
 ) -> LoopResult:
     """一次只修一个 finding；keep 写 git_ref，失败只回滚当前 patch。"""
@@ -68,4 +69,6 @@ def run_repair_loop(
         if tree.finished:
             out.stopped = tree.reason or "finished"
             break
+    if tree.root_failed() and on_failure is not None:
+        on_failure(tree)
     return out

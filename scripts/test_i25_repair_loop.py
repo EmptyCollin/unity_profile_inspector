@@ -89,6 +89,18 @@ r2 = run_repair_loop(tree2, plan=plan, apply=apply, compile_fn=comp,
 ok("子失败回退父", tree2.current_id == "s1", tree2.current_id)
 ok("父状态保留", tree2.states["s1"].git_ref == "r1", tree2.states)
 
+# 根失败回调
+tree3 = RepairTree(finding_id="h", budget=Budget(
+    max_depth=2, max_attempts_per_state=1, max_attempts_per_finding=1,
+    max_total_attempts=4))
+calls = []
+run_repair_loop(tree3, plan=plan, apply=apply, compile_fn=comp,
+                capture=capture, verify=lambda s, o: "no_effect",
+                rollback=rollback, on_failure=lambda t: calls.append(t),
+                max_steps=1)
+ok("根失败回调一次", len(calls) == 1 and calls[0] is tree3, len(calls))
+ok("根失败状态", tree3.root_failed() is True)
+
 print(f"\n==== I25 串行循环测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))
