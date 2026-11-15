@@ -5,6 +5,7 @@ N findings → M 机制单元 → M 补丁 → 全部应用 → 编译一次 →
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -93,6 +94,8 @@ def main() -> int:
                     help="after 采集重复次数；>=3 才可判 measured")
     ap.add_argument("--asset-attempt", action="store_true",
                     help="对 asset unit 走 proposal→apply→memory→rollback")
+    ap.add_argument("--baseline-cache", action="store_true",
+                    help="按 replay+project+baselines 复用 baseline")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -114,6 +117,23 @@ def main() -> int:
     from upi.core.window_metrics import window_counters
     action_idx = action_indices(a.replay)
     last_cap = {"id": ""}
+    cache_key = hashlib.sha256(
+        (str(p) + "|" + str(a.baselines) + "|" +
+         Path(a.replay).read_text(encoding="utf-8")).encode("utf-8")
+    ).hexdigest()
+    cache_hit = False
+    if a.baseline_cache:
+        from upi.core.baseline_cache import get as _cache_get
+        _cached = _cache_get(cache_key)
+        if _cached and isinstance(_cached.get("data"), dict):
+            _d = _cached["data"]
+            baseline_roots = set(_d.get("roots") or [])
+            baseline_runs = list(_d.get("runs") or [])
+            baseline_windows = [
+                {int(k): v for k, v in (w or {}).items()}
+                for w in (_d.get("windows") or [])]
+            cache_hit = True
+            print("baseline cache hit", len(baseline_runs))
 
     def capture_with_recovery(label: str, *, two_pass: bool,
                               light: bool = False, fast: bool = False,
@@ -137,24 +157,32 @@ def main() -> int:
             last_cap["id"] = getattr(adapter, "last_capture_id", "")
         return ok2, out2
 
-    for i in range(max(1, a.baselines)):
-        bstart = time.time()
-        ok, _ = capture_with_recovery(
-            f"baseline#{i + 1}", two_pass=False,
-            light=True, target_windows=True)
-        if not ok:
-            return 1
-        baseline_runs.append(counters_since(0, last_cap["id"]))
-        baseline_windows.append(window_counters(last_cap["id"]))
-        mp = run_dir / "merged_candidates.json"
-        if mp.exists():
-            roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
-                     for x in json.loads(mp.read_text(encoding="utf-8"))}
-        else:
-            cands, _, _ = candidates_from_latest(p, limit=12)
-            roots = {str(c.root_cause).split(":", 1)[-1] for c in cands}
-        baseline_roots |= roots
-        print("baseline", i + 1, "roots", len(baseline_roots))
+    if not cache_hit:
+        for i in range(max(1, a.baselines)):
+            bstart = time.time()
+            ok, _ = capture_with_recovery(
+                f"baseline#{i + 1}", two_pass=False,
+                light=True, target_windows=True)
+            if not ok:
+                return 1
+            baseline_runs.append(counters_since(0, last_cap["id"]))
+            baseline_windows.append(window_counters(last_cap["id"]))
+            mp = run_dir / "merged_candidates.json"
+            if mp.exists():
+                roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
+                         for x in json.loads(mp.read_text(encoding="utf-8"))}
+            else:
+                cands, _, _ = candidates_from_latest(p, limit=12)
+                roots = {str(c.root_cause).split(":", 1)[-1] for c in cands}
+            baseline_roots |= roots
+            print("baseline", i + 1, "roots", len(baseline_roots))
+    if a.baseline_cache and not cache_hit:
+        from upi.core.baseline_cache import put as _cache_put
+        _cache_put(cache_key, {
+            "roots": sorted(baseline_roots),
+            "runs": baseline_runs,
+            "windows": baseline_windows,
+        })
 
     baseline_metrics = baseline_runs
     flow.enter("diagnose")
