@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 KEEP = {"improved_partial", "verified"}
@@ -16,9 +17,36 @@ class Budget:
     max_depth: int = 2
     max_branches: int = 2
     max_total_attempts: int = 12
+    max_captures: int = 24
+    max_wallclock_s: int = 3600
+    max_tokens: int = 200000
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
+
+
+def load_budget(path: str | Path | None = None) -> Budget:
+    """从 config/repair_budget.yaml 读预算；缺省用默认值。"""
+    import yaml
+    from pathlib import Path as _Path
+    root = _Path(__file__).resolve().parents[2]
+    p = _Path(path) if path else root / "config" / "repair_budget.yaml"
+    data = {}
+    if p.is_file():
+        try:
+            data = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get(
+                "budget") or {}
+        except Exception:  # noqa: BLE001
+            data = {}
+    defaults = Budget()
+    vals = {}
+    for k, default in defaults.as_dict().items():
+        try:
+            v = int(data.get(k, default))
+        except (TypeError, ValueError):
+            v = default
+        vals[k] = max(0, v)
+    return Budget(**vals)
 
 
 @dataclass
@@ -152,3 +180,12 @@ class RepairTree:
             "states": [s.as_dict() for s in self.states.values()],
             "attempts": [a.__dict__ for a in self.attempts],
         }
+
+
+def save_tree(tree: RepairTree, path: str | Path) -> Path:
+    import json
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(tree.to_dict(), ensure_ascii=False, indent=2),
+                 encoding="utf-8")
+    return p

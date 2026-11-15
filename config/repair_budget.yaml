@@ -1,0 +1,9 @@
+budget:
+  max_attempts_per_finding: 6
+  max_attempts_per_state: 2
+  max_branches: 2
+  max_depth: 2
+  max_total_attempts: 12
+  max_captures: 24
+  max_wallclock_s: 3600
+  max_tokens: 200000

@@ -1,11 +1,13 @@
 """I25：checkpoint 状态树与预算。"""
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.repair_tree import Budget, RepairTree  # noqa: E402
+from upi.core.repair_tree import (Budget, RepairTree, load_budget,  # noqa: E402
+                                  save_tree)
 
 PASS, FAIL = [], []
 
@@ -50,6 +52,15 @@ ok("第二次预算耗尽", t4.record("no_effect") == "budget_exhausted")
 # 6. 深度上限
 t5 = RepairTree(finding_id="f", budget=Budget(max_depth=0))
 ok("深度耗尽", t5.record("improved_partial") == "depth_exhausted")
+
+# 7. 预算 YAML
+b = load_budget()
+ok("读取 max_attempts_per_finding", b.max_attempts_per_finding == 6, b)
+ok("读取 max_captures", b.max_captures == 24, b)
+ok("读取 max_tokens", b.max_tokens == 200000, b)
+
+p = save_tree(t, Path(tempfile.mkdtemp()) / "tree.json")
+ok("状态树落盘", p.is_file() and '"states"' in p.read_text(encoding="utf-8"))
 
 print(f"\n==== I25 状态树测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
