@@ -73,6 +73,11 @@ def legacy_stop() -> None:
     time.sleep(0.25)
 
 
+def set_window(window: str, *, wait: bool = False) -> str:
+    """设置当前动作窗口；探针会写入 breach JSON 的 window 字段。"""
+    return send_cmd("window " + str(window or ""), wait=wait, timeout_s=2.0)
+
+
 def install(project: Optional[Path | str] = None, *, timeout_s: int = 180) -> dict:
     if not PROBE_FILE.exists():
         return {"ok": False, "detail": f"probe file missing: {PROBE_FILE}"}

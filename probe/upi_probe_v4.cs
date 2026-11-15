@@ -46,6 +46,7 @@ public static class UpiProbeV4
     static long _thrNs;
     static long _gcThrBytes;
     static int _seed = -1;
+    static string _window = "";
     static int _before = 10;
     static int _after = 14;
 
@@ -384,6 +385,8 @@ public static class UpiProbeV4
         sb.Append(']');
         sb.Append(",\"data_tier\":\"A2\"");
         sb.Append(",\"replay_seed\":" + _seed.ToString(CultureInfo.InvariantCulture));
+        if (_window.Length > 0)
+            sb.Append(",\"window\":\"" + _window.Replace("\"", "") + "\"");
         sb.Append('}');
         return sb.ToString();
     }
@@ -436,6 +439,8 @@ public static class UpiProbeV4
 
         sb.Append(",\"data_tier\":\"A4\"");
         sb.Append(",\"replay_seed\":" + _seed.ToString(CultureInfo.InvariantCulture));
+        if (_window.Length > 0)
+            sb.Append(",\"window\":\"" + _window.Replace("\"", "") + "\"");
         sb.Append('}');
         return sb.ToString();
     }
@@ -573,6 +578,10 @@ public static class UpiProbeV4
                 if (long.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out gc))
                 { _gcThrBytes = gc; Write("gcthr=" + gc); }
                 else Write("ERR gcthr " + arg);
+                break;
+            case "window":
+                _window = arg ?? "";
+                Write("window=" + _window);
                 break;
             case "seed":
                 int sd;

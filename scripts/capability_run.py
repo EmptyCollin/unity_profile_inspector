@@ -378,6 +378,12 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                         merged[k] = c
                 fast_done = True
             f = _frame(project)
+            if cmd.type in ACTION_CMDS:
+                try:
+                    from upi.tooling import probe_control as _PC
+                    _PC.set_window(cmd.type, wait=False)
+                except Exception:  # noqa: BLE001
+                    pass
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
             take = ((cmd.type in ACTION_CMDS)
