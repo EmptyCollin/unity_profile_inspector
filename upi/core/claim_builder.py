@@ -9,25 +9,24 @@ from upi.core.verification_contract import (PatchClaim, SiteSpec,
                                             validate_claim)
 
 
-def _sites_from_diffs(diffs: list[dict]) -> list[SiteSpec]:
+def _sites_from_diffs(diffs: list[dict], method: str = "") -> list[SiteSpec]:
     out = []
     for d in diffs:
         file = str(d.get("file") or "")
-        find = str(d.get("find") or "")
-        line = next((x.strip() for x in find.splitlines() if x.strip()), "")
         if file:
-            out.append(SiteSpec(file=file, method="", pattern=line))
+            out.append(SiteSpec(file=file, method=method, pattern=""))
     return out
 
 
 def claim_from_plan(plan, *, mechanism: str, window_indices: list[int],
                     metric: str = "", invariants: list[str] | None = None,
                     evidence_refs: list[str] | None = None,
-                    provenance: str = "planner") -> PatchClaim:
+                    provenance: str = "planner",
+                    method: str = "") -> PatchClaim:
     diffs = list(getattr(plan, "diffs", []) or [])
     return claim_from_diffs(
         diffs, mechanism=mechanism,
-        sites=_sites_from_diffs(diffs),
+        sites=_sites_from_diffs(diffs, method),
         windows=list(window_indices), metric=metric or getattr(plan, "metric", ""),
         invariants=list(invariants or []),
         evidence_refs=list(evidence_refs or []),
@@ -35,7 +34,8 @@ def claim_from_plan(plan, *, mechanism: str, window_indices: list[int],
 
 
 def build_and_validate(plan, contract, *, window_indices: list[int],
-                       evidence_refs: list[str] | None = None) -> tuple[
+                       evidence_refs: list[str] | None = None,
+                       method: str = "") -> tuple[
                            PatchClaim | None, list[str]]:
     metric = ""
     if contract.required_effect:
@@ -44,11 +44,28 @@ def build_and_validate(plan, contract, *, window_indices: list[int],
         plan, mechanism=contract.mechanism,
         window_indices=window_indices, metric=metric,
         invariants=contract.invariants,
-        evidence_refs=evidence_refs)
+        evidence_refs=evidence_refs, method=method)
     freeze_claim(claim)
     errs = validate_claim(claim, contract, getattr(plan, "diffs", None),
                           require_frozen=True)
     return (claim if not errs else None), errs
+
+
+def method_for_target(contract, target: str) -> str:
+    suffix = str(target).split(":")[-1].split(".")[-1]
+    for s in contract.acceptable_sites:
+        if s.method and (s.method == suffix or s.method == suffix + "Body"):
+            return s.method
+    return suffix
+
+
+def contract_for_target(contracts: dict, target: str):
+    suffix = str(target).split(":")[-1].split(".")[-1]
+    for c in contracts.values():
+        for s in c.acceptable_sites:
+            if s.method and (s.method == suffix or s.method == suffix + "Body"):
+                return c
+    return None
 
 
 def write_claims(path: Path | str, claims: list[PatchClaim]) -> Path:

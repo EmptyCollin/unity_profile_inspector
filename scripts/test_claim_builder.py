@@ -37,10 +37,10 @@ if claim:
     ok("已冻结", claim.frozen is True, claim.frozen_at)
     ok("site 来自 diff", claim.sites[0].file.endswith("ChromaGame.cs"), claim.sites)
 
-p2 = Plan([{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
+p2 = Plan([{"file": "Assets/DevSim/Runtime/Other.cs",
             "find": "other", "replace": "x"}])
 claim2, errs2 = build_and_validate(p2, c07, window_indices=[23],
-                                   evidence_refs=["e1"])
+                                   evidence_refs=["e1"], method="Update")
 ok("错误 site 拒绝", claim2 is None and "site_not_acceptable" in errs2, errs2)
 
 p3 = Plan([{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
