@@ -584,10 +584,34 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         rec = {"kind": "verify", "status": v.status,
                "target": v.target, "unevaluated": detail.get("memory_guards_unevaluated", []),
                "floor_before_err": pre["floor_before_err"]}
+        # I25-ext：主流程也要有 repair_tree，先记录 verdict，不改变旧判定
+        tree_dict = st.get("repair_tree")
+        try:
+            from upi.core.repair_tree import RepairTree, save_tree
+            raw = st.get("repair_tree") or {}
+            tree = RepairTree.from_dict(raw) if raw else RepairTree(
+                finding_id=str(st.get("issue_id") or run_dir.name),
+                project_root=str(_ctx(st)[0]))
+            delta = getattr(getattr(v, "target", None), "delta", None)
+            status = str(getattr(v, "status", "unknown"))
+            mapped = {"resolved": "verified", "regressed": "regressed",
+                      "not_significant": ("improved_partial"
+                                          if (delta or 0) > 0 else "no_effect")
+                      }.get(status, "no_effect")
+            tree.record(mapped,
+                        patch_id=str((st.get("edit_plan") or {}).get("playbook_id", "")),
+                        git_ref=str((st.get("snapshot") or {}).get("git_ref", "")))
+            save_tree(tree, run_dir / "repair_tree.json")
+            tree_dict = tree.to_dict()
+            st = dict(st)
+            st["repair_tree"] = tree_dict
+        except Exception:  # noqa: BLE001
+            pass
         # 判定产出才计 attempt（与 fix 侧注释配对）：走到这里说明这次
         # 写入已被同一协议双侧采样评估过，无论 resolved/regressed 都算
         # 消耗了一次完整尝试；反之 fix 落地后 verify 崩溃不计数。
         return {"verdict": v.model_dump(),
+                "repair_tree": tree_dict,
                 "attempts": st.get("attempts", 0) + 1,
                 "records": st.get("records", []) + [rec], "route": "proceed"}
 

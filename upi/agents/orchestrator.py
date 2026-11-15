@@ -47,6 +47,7 @@ class RunState(TypedDict, total=False):
     pre_attempt: Optional[dict]   # fix 节点写入前锁定：before 束路径+改前态 fresh
     approval_request: Optional[dict]  # 先报后批闸的工单位置（awaiting/rejected 停轮）
     verdict: Optional[dict]
+    repair_tree: Optional[dict]
     review_decision: Optional[str]
     review_reason: Optional[str]
     attempts: int
