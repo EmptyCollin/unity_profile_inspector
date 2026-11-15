@@ -98,13 +98,15 @@ async function rollbackState(){
 }
 (async()=>{
  try{
+  const m=await get("/api/repair/mode");
+  document.getElementById("mode").textContent=m.mode||"production";
   const b=await get("/api/repair/budget");
   document.getElementById("budget").textContent=JSON.stringify(b.budget||b,null,2);
   document.getElementById("budgetEdit").value=JSON.stringify(b.budget||b,null,2);
   const t=await get("/api/repair/trees");
   document.getElementById("trees").innerHTML=table(t.trees||[], [
     ["finding",r=>`<span class="mono">${esc(r.finding_id)}</span>`],
-    ["states",r=>esc((r.states||[]).length)],
+    ["states",r=>`<span class="mono">${(r.states||[]).map(s=>esc(s.state_id)+":"+esc(s.status)).join(" ")}</span>`],
     ["attempts",r=>esc(r.total_attempts)],
     ["current",r=>`<span class="mono">${esc(r.current)}</span>`],
     ["root_failed",r=>`<span class="${r.root_failed?'bad':'ok'}">${r.root_failed}</span>`],
@@ -184,6 +186,11 @@ def blacklist_entries() -> list[dict]:
 def budget() -> dict:
     from upi.core.repair_tree import load_budget
     return load_budget().as_dict()
+
+
+def mode() -> str:
+    import os
+    return os.environ.get("UPI_RUN_MODE", "production")
 
 
 def rollback_tree(path: str | Path, state_id: str) -> dict:

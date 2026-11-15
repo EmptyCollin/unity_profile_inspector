@@ -1249,6 +1249,10 @@ class _Handler(BaseHTTPRequestHandler):
             from upi.agents.repair_ui import skips
             self._send_json(200, {"ok": True, "skips": skips()})
             return
+        if parsed.path == "/api/repair/mode":
+            from upi.agents.repair_ui import mode
+            self._send_json(200, {"ok": True, "mode": mode()})
+            return
         if parsed.path == "/api/repair/budget":
             from upi.agents.repair_ui import budget
             self._send_json(200, {"ok": True, "budget": budget()})
