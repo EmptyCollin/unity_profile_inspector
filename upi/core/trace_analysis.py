@@ -26,6 +26,38 @@ def _window_stats(counters: dict) -> dict:
     return out
 
 
+def _site_metrics(base: Path, windows: list[dict]) -> list[dict]:
+    """聚合每个 window 的 evidence_v2.functions，产出 site 级 self/call。"""
+    by: dict[tuple, dict] = {}
+    for w in windows:
+        idx = w["index"]
+        d = base.parent / f"{base.name}_a{idx}" / "evidence" / "evidence_v2.json"
+        if not d.is_file():
+            continue
+        doc = _read_json(d)
+        for fn in doc.get("functions") or []:
+            src = fn.get("source") or {}
+            key = (str(fn.get("symbol") or ""), str(src.get("file") or ""),
+                   int(src.get("start_line") or 0))
+            slot = by.setdefault(key, {
+                "symbol": key[0], "file": key[1], "line": key[2],
+                "calls": 0, "self_ms": 0.0, "total_ms": 0.0,
+                "frames": 0, "windows": set(),
+            })
+            slot["calls"] += int(fn.get("calls") or 0)
+            slot["self_ms"] += float(fn.get("self_ms") or 0.0)
+            slot["total_ms"] += float(fn.get("total_ms") or 0.0)
+            slot["frames"] += 1
+            slot["windows"].add(idx)
+    out = []
+    for slot in by.values():
+        slot["windows"] = sorted(slot["windows"])
+        calls = max(1, slot["calls"])
+        slot["self_ms_per_call"] = round(slot["self_ms"] / calls, 6)
+        out.append(slot)
+    return sorted(out, key=lambda x: x["self_ms"], reverse=True)
+
+
 def build_trace(cap_id: str, root: Path | str = "runs") -> dict:
     base = Path(root) / cap_id
     timeline = _read_json(base / "pass1_timeline.json")
@@ -56,6 +88,7 @@ def build_trace(cap_id: str, root: Path | str = "runs") -> dict:
         "timeline": timeline,
         "windows": windows,
         "roots": roots,
+        "site_metrics": _site_metrics(base, windows),
         "n_windows": len(windows),
     }
 
