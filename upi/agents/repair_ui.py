@@ -39,6 +39,10 @@ button{background:#22314a;color:var(--tx);border:1px solid #36527a;border-radius
 <div class="card"><h2>预算</h2><textarea id="budgetEdit" rows="8"></textarea>
 <button onclick="saveBudget()">保存预算</button><span id="budgetMsg" class="mut"></span></div>
 <div class="card"><h2>审计</h2><div id="audit" class="mut">加载中…</div></div>
+<div class="card"><h2>回滚 checkpoint</h2>
+<div class="row"><input id="rb-run" placeholder="run_id"><input id="rb-unit" placeholder="unit_id">
+<input id="rb-state" placeholder="state_id"><button onclick="rollbackState()">回滚指针</button></div>
+<div class="mut">只切换状态指针并审计；不恢复工程文件。</div></div>
 </div>
 <script>
 const TOKEN="__UPI_TOKEN__";
@@ -81,6 +85,15 @@ async function saveBudget(){
  const r=await post("/api/repair/budget",{budget:obj,actor:"ui",approval_code:code});
  document.getElementById("budgetMsg").textContent=r.ok?"已保存":"失败: "+(r.error||"");
  if(r.ok)location.reload();
+}
+async function rollbackState(){
+ const run=document.getElementById("rb-run").value.trim();
+ const unit=document.getElementById("rb-unit").value.trim();
+ const state=document.getElementById("rb-state").value.trim();
+ if(!run||!unit||!state){alert("run/unit/state 都要填");return}
+ const code=await approval("rollback",run+"|"+unit+"|"+state); if(code===null)return;
+ const r=await post("/api/repair/rollback",{run_id:run,unit_id:unit,state_id:state,approval_code:code});
+ if(!r.ok)alert(r.error||"失败");else{alert("已切换指针，未恢复工程文件");location.reload()}
 }
 (async()=>{
  try{
@@ -150,6 +163,32 @@ def blacklist_entries() -> list[dict]:
 def budget() -> dict:
     from upi.core.repair_tree import load_budget
     return load_budget().as_dict()
+
+
+def rollback_tree(path: str | Path, state_id: str) -> dict:
+    """只切换 repair_tree.json 的 current 指针并审计。
+
+    不恢复工程文件；真实回滚需带 git_ref 的 checkpoint。
+    """
+    p = Path(path)
+    d = json.loads(p.read_text(encoding="utf-8"))
+    ids = {str(s.get("state_id")) for s in d.get("states") or []}
+    if state_id not in ids:
+        raise ValueError(f"state not found: {state_id}")
+    from_state = d.get("current")
+    d["current"] = state_id
+    p.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                 encoding="utf-8")
+    audit = ROOT / "runs" / "repair_ui_audit.jsonl"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    with audit.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "ts": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"),
+            "actor": "ui", "action": "rollback_pointer",
+            "detail": f"{from_state}->{state_id}",
+            "path": str(p)}, ensure_ascii=False) + "\n")
+    return {"ok": True, "from": from_state, "to": state_id,
+            "pointer_only": True}
 
 
 def audit_entries(limit: int = 200) -> list[dict]:

@@ -1356,6 +1356,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": f"bad json: {e}"})
             return
 
+        if parsed.path == "/api/repair/rollback":
+            try:
+                from upi.agents.repair_ui import ROOT, rollback_tree
+                from upi.agents.approval import verify as _verify_approval
+                run_id = str(body.get("run_id") or "")
+                unit_id = str(body.get("unit_id") or "")
+                state_id = str(body.get("state_id") or "")
+                target = f"{run_id}|{unit_id}|{state_id}"
+                if not _verify_approval(self.ui.token, "rollback", target,
+                                        str(body.get("approval_code") or "")):
+                    self._send_json(403, {"ok": False,
+                                          "error": "approval_code_invalid"})
+                    return
+                path = ROOT / "runs" / run_id / unit_id / "repair_tree.json"
+                self._send_json(200, rollback_tree(path, state_id))
+            except Exception as e:  # noqa: BLE001
+                self._send_json(400, {"ok": False, "error": str(e)})
+            return
+
         if parsed.path == "/api/blacklist":
             try:
                 from upi.core.finding_blacklist import (BlacklistFingerprint,

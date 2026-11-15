@@ -1,12 +1,15 @@
 """I25：修复 UI 只读数据。"""
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents.repair_ui import (REPAIR_HTML, audit_entries,  # noqa: E402
-                                  blacklist_entries, budget, trees)
+                                  blacklist_entries, budget, rollback_tree,
+                                  trees)
+from upi.core.repair_tree import Budget, RepairTree, save_tree  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -29,6 +32,13 @@ b = budget()
 ok("预算字段", b["max_attempts_per_finding"] == 6 and b["max_total_attempts"] == 12, b)
 ok("树读取不炸", isinstance(trees(), list))
 ok("黑名单读取不炸", isinstance(blacklist_entries(), list))
+
+t = RepairTree(finding_id="f", budget=Budget())
+t.record("improved_partial", patch_id="p1")
+p = save_tree(t, Path(tempfile.mkdtemp()) / "repair_tree.json")
+r = rollback_tree(p, "root")
+ok("回滚指针", r["ok"] and r["pointer_only"] and r["to"] == "root", r)
+ok("回滚已落盘", '"current": "root"' in p.read_text(encoding="utf-8"))
 
 print(f"\n==== I25 UI 只读测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
