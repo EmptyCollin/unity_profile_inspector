@@ -60,7 +60,8 @@ def _isolate_compile(patches: dict[str, PatchRef], apply: ApplyFn,
 def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
               compile_fn: CompileFn, capture: CaptureFn,
               verify: VerifyFn, rollback: RollbackFn,
-              round_no: int = 1, tree=None) -> BatchResult:
+              round_no: int = 1, tree=None,
+              on_failure=None) -> BatchResult:
     """LangGraph 版：plan → apply → compile → capture → verify。"""
     class S(TypedDict, total=False):
         units: list
@@ -140,6 +141,8 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
                     else:
                         res.partial.append(uid)
                     continue
+                if action == "finding_failed" and on_failure is not None:
+                    on_failure(uid, verdict, tree)
                 res.failed[uid] = verdict
                 if action not in ("infra_retry",) and rollback(st["patches"][uid]):
                     res.rolled_back.append(uid)
