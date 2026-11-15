@@ -1,0 +1,157 @@
+{
+  "c01": {
+    "case_id": "c01",
+    "mechanism": "match_scan_allocation",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/BoardModel.cs", "method": "FindMatchesBody", "pattern": "new bool[N, N]"},
+      {"file": "Assets/DevSim/Runtime/BoardModel.cs", "method": "CountByColor", "pattern": "new int[Colors]"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/BoardModel.cs", "pattern": "var hit = new bool[N, N];"}
+    ],
+    "required_effect": {"metric": "gc_alloc", "direction": "down", "min_delta": 0.0},
+    "invariants": ["match_result_same", "buffer_cleared_before_use"],
+    "forbidden": ["delete_match_logic"],
+    "expected_windows": [18, 23]
+  },
+  "c02": {
+    "case_id": "c02",
+    "mechanism": "ui_text_rebuild_per_frame",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "UpdateHudBody", "pattern": "roundText.text"}
+    ],
+    "predicates": [
+      {"kind": "source_present", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "lastHudRound"}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["hud_content_same"],
+    "forbidden": ["remove_hud_update"],
+    "expected_windows": [18, 21, 23, 28]
+  },
+  "c03": {
+    "case_id": "c03",
+    "mechanism": "item_label_rebuild_per_frame",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "RefreshItemLabelsBody", "pattern": "itemCountLabels[i].text"}
+    ],
+    "predicates": [
+      {"kind": "source_present", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "lastItemCounts"}
+    ],
+    "required_effect": {"metric": "gc_alloc", "direction": "down", "min_delta": 0.0},
+    "invariants": ["label_text_same"],
+    "forbidden": ["remove_label_update"],
+    "expected_windows": [18, 21, 23, 28]
+  },
+  "c04": {
+    "case_id": "c04",
+    "mechanism": "oversized_payload_asset",
+    "acceptable_sites": [
+      {"file": "Assets/Resources/DevSim/payload_0.txt", "pattern": "payload_0.txt"}
+    ],
+    "predicates": [
+      {"kind": "asset_size_max", "file": "Assets/Resources/DevSim/payload_0.txt", "max_count": 131072}
+    ],
+    "required_effect": {"metric": "memory", "direction": "down", "min_delta": 0.0},
+    "invariants": ["shop_content_same"],
+    "forbidden": ["delete_shop_payload"],
+    "expected_windows": [28]
+  },
+  "c05": {
+    "case_id": "c05",
+    "mechanism": "per_tile_material_clone",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "BuildBoard", "pattern": "new Material(img.material)"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "img.material = new Material(img.material);"}
+    ],
+    "required_effect": {"metric": "drawcalls", "direction": "down", "min_delta": 0.0},
+    "invariants": ["tile_color_same"],
+    "forbidden": ["remove_tile_rendering"],
+    "expected_windows": [21]
+  },
+  "c06": {
+    "case_id": "c06",
+    "mechanism": "per_clear_particle_instantiate",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "ResolveAllSync", "pattern": "new GameObject(\"FxClear\""}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "var fx = new GameObject(\"FxClear\""}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["resolve_result_same"],
+    "forbidden": ["remove_resolve"],
+    "expected_windows": [18]
+  },
+  "c07": {
+    "case_id": "c07",
+    "mechanism": "forced_canvas_rebuild_per_frame",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "Update", "pattern": "Canvas.ForceUpdateCanvases"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "Canvas.ForceUpdateCanvases();"}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["hud_layout_same"],
+    "forbidden": ["remove_update"],
+    "expected_windows": [18, 21, 23, 28]
+  },
+  "c08": {
+    "case_id": "c08",
+    "mechanism": "per_tile_texture_allocation",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "RefreshTiles", "pattern": "new Texture2D"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "var tmpTex = new Texture2D"}
+    ],
+    "required_effect": {"metric": "gc_alloc", "direction": "down", "min_delta": 0.0},
+    "invariants": ["tile_pixels_same"],
+    "forbidden": ["remove_tile_refresh"],
+    "expected_windows": [18, 21, 23]
+  },
+  "c09": {
+    "case_id": "c09",
+    "mechanism": "idle_hint_scan_per_frame",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "ResolvePendingWhenIdle", "pattern": "model.HasMatch()"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "for (int guard = 0; guard < 4; guard++)"}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["hint_behavior_same"],
+    "forbidden": ["remove_idle_resolve"],
+    "expected_windows": [18, 21, 23, 28]
+  },
+  "c10": {
+    "case_id": "c10",
+    "mechanism": "per_frame_tile_animation",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "UpdateBody", "pattern": "Time.unscaledTime * 6f"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "Time.unscaledTime * 6f + r + c"}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["tile_animation_visual_same"],
+    "forbidden": ["remove_tile_animation"],
+    "expected_windows": [18, 21, 23, 28]
+  },
+  "c11": {
+    "case_id": "c11",
+    "mechanism": "sync_shop_payload_load",
+    "acceptable_sites": [
+      {"file": "Assets/DevSim/Runtime/ChromaGame.cs", "method": "OpenShop", "pattern": "Resources.Load<TextAsset>"}
+    ],
+    "predicates": [
+      {"kind": "source_absent", "file": "Assets/DevSim/Runtime/ChromaGame.cs", "pattern": "_shopPayloadChars"}
+    ],
+    "required_effect": {"metric": "frame_time", "direction": "down", "min_delta": 0.0},
+    "invariants": ["shop_content_same"],
+    "forbidden": ["remove_shop"],
+    "expected_windows": [28]
+  }
+}
