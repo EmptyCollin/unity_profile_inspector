@@ -73,7 +73,7 @@ def main() -> int:
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--project-id", default="test_project")
-    ap.add_argument("--baselines", type=int, default=5)
+    ap.add_argument("--baselines", type=int, default=None)
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-units", type=int, default=0)
     ap.add_argument("--targets", default="",
@@ -90,13 +90,22 @@ def main() -> int:
                     help="把静态-only 候选也纳入修复（默认只作 potential）")
     ap.add_argument("--serial", action="store_true",
                     help="逐 finding 串行修复（RepairTree），默认批量")
-    ap.add_argument("--after-repeats", type=int, default=3,
-                    help="after 采集重复次数；>=3 才可判 measured")
+    ap.add_argument("--after-repeats", type=int, default=None,
+                    help="after 采集重复次数；默认按 measure-profile")
+    ap.add_argument("--measure-profile", default="final",
+                    choices=["screen", "candidate", "final"],
+                    help="测量分层；只有 final 可 verified")
     ap.add_argument("--asset-attempt", action="store_true",
                     help="对 asset unit 走 proposal→apply→memory→rollback")
     ap.add_argument("--baseline-cache", action="store_true",
                     help="按 replay+project+baselines 复用 baseline")
     a = ap.parse_args()
+    from upi.core.measure_profile import get as _mp
+    _prof = _mp(a.measure_profile)
+    if a.baselines is None:
+        a.baselines = _prof.baselines
+    if a.after_repeats is None:
+        a.after_repeats = _prof.after
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
@@ -510,11 +519,14 @@ def main() -> int:
             from upi.core.repair_verify import (
                 measurement_status as _measurement)
             gate = _measurement(window=window_used, after_n=after_n,
-                                before_n=before_n)
+                                before_n=before_n,
+                                require_n=_prof.require_after)
             if semantic_risk:
                 status = "semantic_risk"
             elif gate != "measured":
                 status = gate
+            elif status == "verified" and not _prof.can_verify:
+                status = "candidate_only"
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,

@@ -30,11 +30,11 @@ def refine_partial(status: str, *, delta: float | None,
 
 
 def measurement_status(*, window: str, after_n: int,
-                       before_n: int = 0) -> str:
+                       before_n: int = 0, require_n: int = 3) -> str:
     """判断这次测量是否有资格进入 verdict。"""
     if not window:
         return "unmeasured"
-    if after_n < 3:
+    if after_n < max(1, require_n):
         return "unstable"
     if before_n < 3:
         return "unmeasured"
