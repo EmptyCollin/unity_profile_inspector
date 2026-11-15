@@ -108,6 +108,8 @@ def main() -> int:
     adapter = load_adapter(a.adapter, p)
 
     baseline_roots = set()
+    baseline_root_counts: dict[str, int] = {}
+    baseline_stable: set[str] = set()
     baseline_metrics: dict = {}
     baseline_runs: list[dict] = []
     baseline_windows: list[dict[int, dict]] = []
@@ -129,6 +131,7 @@ def main() -> int:
         if _cached and isinstance(_cached.get("data"), dict):
             _d = _cached["data"]
             baseline_roots = set(_d.get("roots") or [])
+            baseline_root_counts = dict(_d.get("root_counts") or {})
             baseline_runs = list(_d.get("runs") or [])
             baseline_windows = [
                 {int(k): v for k, v in (w or {}).items()}
@@ -177,6 +180,8 @@ def main() -> int:
                 cands, _, _ = candidates_from_latest(p, limit=12)
                 roots = {str(c.root_cause).split(":", 1)[-1] for c in cands}
             baseline_roots |= roots
+            for _r in roots:
+                baseline_root_counts[_r] = baseline_root_counts.get(_r, 0) + 1
             print("baseline", i + 1, "roots", len(baseline_roots))
     if a.baseline_cache and not cache_hit:
         from upi.core.baseline_cache import put as _cache_put
@@ -193,12 +198,20 @@ def main() -> int:
                 _card = ""
         _cache_put(cache_key, {
             "roots": sorted(baseline_roots),
+            "root_counts": baseline_root_counts,
             "runs": baseline_runs,
             "windows": baseline_windows,
             "site_card": _card,
         })
         cached_site_card = _card
 
+    if baseline_root_counts:
+        import math
+        _need = max(2, math.ceil(0.6 * max(1, len(baseline_runs))))
+        baseline_stable = {r for r, n in baseline_root_counts.items()
+                           if n >= _need}
+    else:
+        baseline_stable = set(baseline_roots)
     baseline_metrics = baseline_runs
     flow.enter("diagnose")
     collector = X._make_collector(p, a.project_id, a.replay)
@@ -506,6 +519,8 @@ def main() -> int:
                 "status": status,
             })
             return status
+        if baseline_stable and target not in baseline_stable:
+            return finish("unstable_baseline", metric_status="unstable_baseline")
         bmetrics, ametrics = baseline_metrics, after_metrics
         window_used = ""
         before_n = len(baseline_runs)
