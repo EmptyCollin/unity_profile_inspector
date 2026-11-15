@@ -47,7 +47,7 @@ def semantic_risk_for_diffs(diffs: list[dict]) -> str:
         repl = str(d.get("replace") or "")
         if not repl.strip():
             risk = "empty_replace"
-        elif len(find) - len(repl) > 400:
+        elif len(repl.strip()) < 50 and len(find) - len(repl) > 400:
             risk = "block_delete"
     return risk
 

@@ -99,6 +99,12 @@ def main() -> int:
                     help="对 asset unit 走 proposal→apply→memory→rollback")
     ap.add_argument("--baseline-cache", action="store_true",
                     help="按 replay+project+baselines 复用 baseline")
+    ap.add_argument("--oracle-plans", default="",
+                    help="oracle clean plans JSON（绕过 LLM planner）")
+    ap.add_argument("--claim-gate", action="store_true",
+                    help="plan 阶段生成/校验/冻结 PatchClaim")
+    ap.add_argument("--claim-contracts",
+                    default="sim/cases/verification_contracts.json")
     a = ap.parse_args()
     from upi.core.measure_profile import get as _mp
     _prof = _mp(a.measure_profile)
@@ -106,6 +112,15 @@ def main() -> int:
         a.baselines = _prof.baselines
     if a.after_repeats is None:
         a.after_repeats = _prof.after
+    _oracle_plans = {}
+    if a.oracle_plans:
+        _oracle_plans = json.loads(
+            Path(a.oracle_plans).read_text(encoding="utf-8"))
+    _claim_contracts = {}
+    _claims = {}
+    if a.claim_gate:
+        from upi.core.verification_contract import load_contracts
+        _claim_contracts = load_contracts(a.claim_contracts)
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
@@ -386,6 +401,32 @@ def main() -> int:
         _site_cache.update(cap=cap, card=card)
         return card
 
+    def _check_claim(pl, unit) -> bool:
+        if not a.claim_gate or pl is None:
+            return True
+        from upi.core.claim_builder import (build_and_validate,
+                                            contract_for_target,
+                                            method_for_target, write_claims)
+        target = str((unit.targets or [unit.mechanism])[0])
+        contract = contract_for_target(_claim_contracts, target)
+        if contract is None:
+            print("claim-gate: no contract", unit.unit_id, target)
+            return False
+        claim, errs = build_and_validate(
+            pl, contract, window_indices=contract.expected_windows,
+            evidence_refs=[unit.unit_id],
+            method=method_for_target(contract, target),
+            unit_id=unit.unit_id)
+        if claim is None:
+            print("claim-gate: rejected", unit.unit_id, errs)
+            return False
+        _claims[unit.unit_id] = claim
+        try:
+            write_claims(run_dir / "claims.json", list(_claims.values()))
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
     def plan(unit):
         h = next((x for x in hs
                   if str(x.get("root_cause")) in unit.targets
@@ -395,6 +436,45 @@ def main() -> int:
             h = {"root_cause": unit.targets[0], "code_anchors": anchors[:4]}
         if h is None:
             return None
+        _op = None
+        if _oracle_plans:
+            _op = _oracle_plans.get(unit.unit_id)
+            if _op is None:
+                for _cand in _oracle_plans.values():
+                    _t = str(_cand.get("target") or "")
+                    if _t and any(x.endswith(_t) or _t in x
+                                  for x in (unit.targets or [])):
+                        _op = _cand
+                        break
+        if _op is not None:
+            from upi.core.models import EditPlan
+            _pl = EditPlan(playbook_id=_op.get("playbook_id", "oracle-clean"),
+                           diffs=_op.get("diffs") or [],
+                           metric=_op.get("metric", ""),
+                           invariant=_op.get("invariant") or {},
+                           repair_contract=_op.get("repair_contract") or {},
+                           side_effect="none", permission_tier="auto")
+            try:
+                rp = run_dir / "plan_repeat.json"
+                old = json.loads(rp.read_text(encoding="utf-8")) if rp.exists() else {}
+            except Exception:  # noqa: BLE001
+                old = {}
+            old[unit.unit_id] = {"variants": [{
+                "ok": True, "key": "oracle", "metric": _pl.metric,
+                "invariant": _pl.invariant, "diffs": _pl.diffs,
+                "error": ""}]}
+            (run_dir / "plan_repeat.json").write_text(
+                json.dumps(old, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            if not _check_claim(_pl, unit):
+                return None
+            plans[unit.unit_id] = _pl
+            unit_contract[unit.unit_id] = dict(_pl.repair_contract)
+            print("plan", unit.unit_id, "ORACLE CLEAN")
+            return PatchRef(unit.unit_id,
+                            sorted({str(d.get("file", ""))
+                                    for d in (_pl.diffs or [])
+                                    if d.get("file")}))
         variants = []
         seen_plans = []
         meta = {}
@@ -455,6 +535,8 @@ def main() -> int:
                 str(inv.get("pattern") or ""),
                 f"{inv.get('file','')}::{inv.get('method','')}",
                 int(inv.get("expect", 0)))
+        if not _check_claim(pl, unit):
+            return None
         if pl.repair_contract:
             unit_contract[unit.unit_id] = dict(pl.repair_contract)
         plans[unit.unit_id] = pl
@@ -601,6 +683,9 @@ def main() -> int:
         _m = unit_metric.get(unit.unit_id, "")
         if _m and not metric_allowed(patch_family, _m):
             return finish("metric_mismatch", metric_status="metric_mismatch",
+                          sites=0)
+        if patch_class == "identity":
+            return finish("identity_noop", metric_status="identity_noop",
                           sites=0)
         if _win:
             _idx = index_for_window(action_idx, _win)

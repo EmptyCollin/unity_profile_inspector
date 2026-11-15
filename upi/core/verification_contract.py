@@ -165,6 +165,8 @@ def validate_claim(claim: PatchClaim, contract: CaseContract,
         errs.append("claim_not_frozen")
     if not claim.changed:
         errs.append("identity_noop")
+    if claim.semantic_risk:
+        errs.append("semantic_risk")
     if not claim.sites:
         errs.append("missing_site")
     if claim.mechanism not in MECHANISMS:

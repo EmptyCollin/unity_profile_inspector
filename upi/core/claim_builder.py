@@ -47,6 +47,9 @@ def build_and_validate(plan, contract, *, window_indices: list[int],
         invariants=contract.invariants,
         evidence_refs=evidence_refs, method=method,
         case_id=contract.case_id, unit_id=unit_id)
+    from upi.core.repair_candidate import semantic_risk_for_diffs
+    claim.semantic_risk = bool(
+        semantic_risk_for_diffs(getattr(plan, "diffs", []) or []))
     freeze_claim(claim)
     errs = validate_claim(claim, contract, getattr(plan, "diffs", None),
                           require_frozen=True)

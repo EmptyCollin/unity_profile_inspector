@@ -16,6 +16,11 @@ def ok(name, cond, detail=""):
 
 
 ok("空 diffs", classify([]) == "empty")
+ok("identity",
+   classify([{"find": "a", "replace": "a"}]) == "identity")
+ok("identity 多段",
+   classify([{"find": "a", "replace": "a"},
+             {"find": "b", "replace": "b"}]) == "identity")
 ok("空 replace → semantic_delete",
    classify([{"find": "x()", "replace": ""}]) == "semantic_delete")
 ok("大块删除 → semantic_delete",

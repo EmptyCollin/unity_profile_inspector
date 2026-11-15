@@ -28,7 +28,7 @@ cs = load_contracts(ROOT / "sim" / "cases" / "verification_contracts.json")
 c07 = cs["c07"]
 p = Plan([{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
            "find": "Canvas.ForceUpdateCanvases();",
-           "replace": ""}])
+           "replace": "// no force"}])
 claim, errs = build_and_validate(p, c07, window_indices=[23],
                                  evidence_refs=["e1"])
 ok("plan -> claim", claim is not None, errs)
@@ -44,7 +44,7 @@ claim2, errs2 = build_and_validate(p2, c07, window_indices=[23],
 ok("错误 site 拒绝", claim2 is None and "site_not_acceptable" in errs2, errs2)
 
 p3 = Plan([{"file": "Assets/DevSim/Runtime/ChromaGame.cs",
-            "find": "Canvas.ForceUpdateCanvases();", "replace": ""}])
+            "find": "Canvas.ForceUpdateCanvases();", "replace": "// no force"}])
 claim3, errs3 = build_and_validate(p3, c07, window_indices=[23])
 ok("缺证据拒绝", claim3 is None and "missing_evidence" in errs3, errs3)
 
