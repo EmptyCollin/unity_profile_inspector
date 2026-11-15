@@ -18,3 +18,12 @@ def decide(*, baselines: int, invariant_ok: bool, target_gone: bool,
     if metric_status == "unmeasured":
         return "needs_recheck"
     return metric_status
+
+
+def refine_partial(status: str, *, delta: float | None,
+                   new_clusters: list[str] | None = None) -> str:
+    """有正改善但未达标时保留为 improved_partial。"""
+    if status in ("partial", "needs_recheck") and delta is not None \
+            and delta > 0 and not (new_clusters or []):
+        return "improved_partial"
+    return status

@@ -420,6 +420,7 @@ def main() -> int:
                   "gone=", gone, "new=", new)
             # I24：invariant 只是必要条件；target/metric 才决定 verified
             metric_status = "unmeasured"
+            delta_val = None
             if bmetrics and ametrics:
                 from upi.core.targets import evaluate as _eval_target
                 _spec, _obs, _tv = _eval_target(
@@ -428,6 +429,7 @@ def main() -> int:
                     metric=unit_metric.get(unit.unit_id, "frame_time"),
                     invariant_ok=True, sites_remaining=0)
                 metric_status = _tv.status
+                delta_val = _tv.delta
                 print("invariant+metric", unit.unit_id, metric_status,
                       _tv.delta, _tv.threshold)
             _status = _decide_verify(
@@ -436,6 +438,8 @@ def main() -> int:
                 sites_remaining=sum(len(x) for x in sa.values()),
                 metric_status=metric_status,
                 require_target_gone=False)
+            from upi.core.repair_verify import refine_partial as _refine
+            _status = _refine(_status, delta=delta_val, new_clusters=new)
             return finish(_status, inv_ok=_ok,
                           metric_status=metric_status,
                           sites=sum(len(x) for x in sa.values()),
@@ -505,6 +509,8 @@ def main() -> int:
             if _tv.status != "unmeasured":
                 _status = ("partial" if _tv.status == "verified"
                            and (not gone or new) else _tv.status)
+                from upi.core.repair_verify import refine_partial as _refine
+                _status = _refine(_status, delta=_tv.delta, new_clusters=new)
                 return finish(_status, metric_status=_tv.status,
                               sites=sum(len(x) for x in sa.values()))
         v = evaluate_v2(target_gone=gone, new_clusters=new, guards_ok=True,

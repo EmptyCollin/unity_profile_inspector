@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.repair_verify import decide  # noqa: E402
+from upi.core.repair_verify import decide, refine_partial  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -36,6 +36,15 @@ ok("metric unmeasured → needs_recheck",
    decide(**{**base, "metric_status": "unmeasured"}) == "needs_recheck")
 ok("基线不足 → needs_recheck",
    decide(**{**base, "baselines": 1}) == "needs_recheck")
+
+ok("partial + 正改善 → improved_partial",
+   refine_partial("partial", delta=100) == "improved_partial")
+ok("needs_recheck + 正改善 → improved_partial",
+   refine_partial("needs_recheck", delta=100) == "improved_partial")
+ok("partial + 新 cluster 不保留",
+   refine_partial("partial", delta=100, new_clusters=["X"]) == "partial")
+ok("partial + 无改善不保留",
+   refine_partial("partial", delta=0) == "partial")
 
 print(f"\n==== I24 verified 语义测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
