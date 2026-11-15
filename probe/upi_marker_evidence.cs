@@ -24,6 +24,7 @@ public static class UpiMarkerEvidence
     static int _framesBack = 8;
     static long _budgetMs = 5000;
     static string _action = "none";
+    static int _windowStart = -1;
 
     public static string Main()
     {
@@ -60,6 +61,7 @@ public static class UpiMarkerEvidence
             double budget = ReadNum(j, "marker_budget_ms", 5000);
             _budgetMs = (long)Math.Min(30000.0, Math.Max(500.0, budget));
             _action = ReadStr(j, "marker_action", "none");
+            _windowStart = (int)ReadNum(j, "marker_start_frame", -1);
         }
         catch (Exception) { }
     }
@@ -116,6 +118,8 @@ public static class UpiMarkerEvidence
         bool truncated = false;
         int last = ProfilerDriver.lastFrameIndex;
         int first = Math.Max(ProfilerDriver.firstFrameIndex, last - (_framesBack - 1));
+        if (_windowStart >= 0 && _windowStart > first)
+            first = Math.Min(last, _windowStart);
         var funcs = new Dictionary<string, long[]>();
         var frames = new List<int>();
         for (int frame = last; frame >= first; frame--)

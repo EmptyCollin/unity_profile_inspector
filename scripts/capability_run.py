@@ -90,6 +90,14 @@ def _eval(project: Path, code: str, timeout: int = 60) -> dict:
     return ((d.get("data") or {}).get("result") or {})
 
 
+def _profiler_frame(project: Path) -> int:
+    try:
+        r = _eval(project, "return UnityEditorInternal.ProfilerDriver.lastFrameIndex;")
+        return int(r.get("result", r.get("output", -1)))
+    except Exception:  # noqa: BLE001
+        return -1
+
+
 def ensure_play(project: Path) -> dict:
     st = _status(project)
     if not st:
@@ -106,10 +114,12 @@ def ensure_play(project: Path) -> dict:
 
 
 def capture_window(project: Path, run_id: str, limit: int,
-                   since: str | None = None) -> list[dict]:
-    """采一窗（不跑 replay）：扫最近若干帧的 marker，生成候选。"""
+                   since: str | None = None,
+                   start_frame: int = -1) -> list[dict]:
+    """采一窗（不跑 replay）：只收动作开始后的 marker。"""
     CFG.parent.mkdir(parents=True, exist_ok=True)
     CFG.write_text(json.dumps({"marker_frames": 300, "board_threads": 8,
+                               "marker_start_frame": start_frame,
                                "marker_budget_ms": 15000}), encoding="utf-8")
     try:
         EV.unlink(missing_ok=True)
@@ -333,8 +343,10 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
 
 def capture_window_with_counters(project: Path, tag: str, limit: int,
                                  since: str | None = None,
-                                 meta: dict | None = None) -> list[dict]:
-    cands = capture_window(project, tag, limit, since=since)
+                                 meta: dict | None = None,
+                                 start_frame: int = -1) -> list[dict]:
+    cands = capture_window(project, tag, limit, since=since,
+                           start_frame=start_frame)
     try:
         d = ROOT / "runs" / tag
         d.mkdir(parents=True, exist_ok=True)
@@ -378,6 +390,11 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                         merged[k] = c
                 fast_done = True
             f = _frame(project)
+            take = ((cmd.type in ACTION_CMDS)
+                    and (target_windows
+                         and last_action.get(cmd.type) == i
+                         or (not fast and not target_windows)))
+            win_start = _profiler_frame(project) if take else -1
             if cmd.type in ACTION_CMDS:
                 try:
                     from upi.tooling import probe_control as _PC
@@ -386,13 +403,10 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                     pass
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
-            take = ((cmd.type in ACTION_CMDS)
-                    and (target_windows
-                         and last_action.get(cmd.type) == i
-                         or (not fast and not target_windows)))
             if take:
                 for c in capture_window_with_counters(
-                        project, f"{run_id}_a{i}", limit):
+                        project, f"{run_id}_a{i}", limit,
+                        start_frame=win_start):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
