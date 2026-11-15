@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
-def build(run_dir: Path) -> dict:
+def build(run_dir: Path, *, elapsed_s: float = 0.0) -> dict:
     findings = []
     fp = run_dir / "findings.json"
     if fp.is_file():
@@ -42,6 +44,9 @@ def build(run_dir: Path) -> dict:
     improved = by_status.get("improved_partial", 0)
     remaining = max(0, n - verified - improved)
     coverage = round((n - remaining) / n, 4) if n else 0.0
+    from upi.core.outcome import compute as _outcome
+    outcome = _outcome(records, n_findings=len(findings),
+                       elapsed_s=elapsed_s)
     return {
         "run_id": run_dir.name,
         "exam_executed": True,
@@ -53,6 +58,7 @@ def build(run_dir: Path) -> dict:
         "improved_partial": improved,
         "remaining": remaining,
         "coverage": coverage,
+        "outcome": outcome,
         "records": records,
         "trees": trees,
     }
@@ -71,6 +77,18 @@ def markdown(doc: dict) -> str:
         f"improved_partial = {doc['improved_partial']}",
         f"remaining     = {doc['remaining']}",
         f"coverage      = {doc['coverage']}",
+        "```",
+        "",
+        "## outcome",
+        "",
+        "```text",
+    ]
+    for k in ("attempted", "measured", "verified", "improved_partial",
+              "semantic_risk", "unmeasured", "unstable", "metric_mismatch",
+              "no_plan", "new_regressions", "elapsed_s",
+              "cost_per_verified_s"):
+        lines.append(f"{k} = {doc['outcome'].get(k)}")
+    lines += [
         "```",
         "",
         "## 逐 unit",
@@ -96,9 +114,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--out", default="")
+    ap.add_argument("--elapsed-s", type=float, default=0.0)
     a = ap.parse_args()
     run_dir = ROOT / "runs" / a.run_id
-    doc = build(run_dir)
+    doc = build(run_dir, elapsed_s=a.elapsed_s)
     md = markdown(doc)
     out = Path(a.out) if a.out else run_dir / "exam_report.md"
     out.write_text(md, encoding="utf-8")

@@ -349,14 +349,8 @@ def main() -> int:
         if _site_cache["cap"] == cap:
             return _site_cache["card"]
         try:
-            from upi.core.trace_analysis import build_trace
-            doc = build_trace(cap, ROOT / "runs")
-            lines = []
-            for s in (doc.get("site_metrics") or [])[:10]:
-                lines.append(
-                    f"{s.get('symbol')} | {s.get('file')}:{s.get('line')} "
-                    f"| self_ms={s.get('self_ms')} calls={s.get('calls')}")
-            card = "\n".join(lines)
+            from upi.core.observation import site_card_for
+            card = site_card_for(cap, root=ROOT / "runs")
         except Exception:  # noqa: BLE001
             card = ""
         _site_cache.update(cap=cap, card=card)

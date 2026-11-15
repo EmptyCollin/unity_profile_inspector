@@ -397,7 +397,16 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 tried.add(top["root_cause"])
                 blacklisted += 1
                 continue
-            ep, meta = plan_issue(cfg, issue, top, root, history=hist)
+            _card = ""
+            _cap = str(st.get("capture_id") or "")
+            if _cap:
+                try:
+                    from upi.core.observation import site_card_for
+                    _card = site_card_for(_cap)
+                except Exception:  # noqa: BLE001
+                    _card = ""
+            ep, meta = plan_issue(cfg, issue, top, root, history=hist,
+                                  candidate_card=_card)
             E.write_json(run_dir / "plan_llm.json",
                          {"root_cause": top["root_cause"], "meta": meta},
                          what="plan_llm", strict=False)
