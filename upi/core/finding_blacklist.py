@@ -159,6 +159,13 @@ class BlacklistStore:
             c.commit()
         return cur.rowcount > 0
 
+    def audit(self, limit: int = 200) -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM blacklist_audit ORDER BY ts DESC LIMIT ?",
+                (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
     def expire_due(self, now: float | None = None) -> int:
         now = now or time.time()
         n = 0

@@ -5,8 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.agents.repair_ui import (REPAIR_HTML, blacklist_entries,  # noqa: E402
-                                  budget, trees)
+from upi.agents.repair_ui import (REPAIR_HTML, audit_entries,  # noqa: E402
+                                  blacklist_entries, budget, trees)
 
 PASS, FAIL = [], []
 
@@ -22,6 +22,8 @@ ok("页面含模式标记", "production" in REPAIR_HTML)
 ok("页面含 token 占位", "__UPI_TOKEN__" in REPAIR_HTML)
 ok("页面含黑名单写操作", "addBL" in REPAIR_HTML and "setBL" in REPAIR_HTML)
 ok("页面含预算保存", "saveBudget" in REPAIR_HTML)
+ok("页面含审计", "/api/repair/audit" in REPAIR_HTML and "audit" in REPAIR_HTML)
+ok("审计读取不炸", isinstance(audit_entries(), list))
 
 b = budget()
 ok("预算字段", b["max_attempts_per_finding"] == 6 and b["max_total_attempts"] == 12, b)

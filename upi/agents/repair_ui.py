@@ -38,6 +38,7 @@ button{background:#22314a;color:var(--tx);border:1px solid #36527a;border-radius
 <button onclick="addBL()">提交 proposed</button></div></div>
 <div class="card"><h2>预算</h2><textarea id="budgetEdit" rows="8"></textarea>
 <button onclick="saveBudget()">保存预算</button><span id="budgetMsg" class="mut"></span></div>
+<div class="card"><h2>审计</h2><div id="audit" class="mut">加载中…</div></div>
 </div>
 <script>
 const TOKEN="__UPI_TOKEN__";
@@ -100,6 +101,13 @@ async function saveBudget(){
       <button onclick="setBL('${esc(r.fingerprint_id)}','retired')">停用</button>
       <button onclick="delBL('${esc(r.fingerprint_id)}')">删除</button>`],
   ]);
+  const a=await get("/api/repair/audit");
+  document.getElementById("audit").innerHTML=table(a.entries||[], [
+    ["时间",r=>`<span class="mono mut">${esc(r.ts)}</span>`],
+    ["actor",r=>esc(r.actor||"")],
+    ["action",r=>esc(r.action||"")],
+    ["detail",r=>esc(r.detail||"")],
+  ]);
  }catch(e){document.getElementById("trees").innerHTML='<div class="bad">'+esc(e)+'</div>';}
 })();
 </script></body></html>"""
@@ -133,3 +141,26 @@ def blacklist_entries() -> list[dict]:
 def budget() -> dict:
     from upi.core.repair_tree import load_budget
     return load_budget().as_dict()
+
+
+def audit_entries(limit: int = 200) -> list[dict]:
+    out = []
+    p = ROOT / "runs" / "repair_ui_audit.jsonl"
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8").splitlines()[-limit:]:
+            try:
+                out.append(json.loads(line))
+            except Exception:  # noqa: BLE001
+                continue
+    bp = ROOT / "runs" / "blacklist.db"
+    if bp.is_file():
+        try:
+            from upi.core.finding_blacklist import BlacklistStore
+            for e in BlacklistStore(bp).audit(limit):
+                out.append({"ts": e.get("ts", ""), "actor": e.get("actor", ""),
+                            "action": e.get("action", ""),
+                            "detail": e.get("detail", ""),
+                            "fingerprint_id": e.get("fingerprint_id", "")})
+        except Exception:  # noqa: BLE001
+            pass
+    return sorted(out, key=lambda x: str(x.get("ts", "")), reverse=True)[:limit]

@@ -1253,6 +1253,10 @@ class _Handler(BaseHTTPRequestHandler):
             from upi.agents.repair_ui import blacklist_entries
             self._send_json(200, {"ok": True, "entries": blacklist_entries()})
             return
+        if parsed.path == "/api/repair/audit":
+            from upi.agents.repair_ui import audit_entries
+            self._send_json(200, {"ok": True, "entries": audit_entries()})
+            return
         if parsed.path == "/api/events":
             self._sse()
             return
