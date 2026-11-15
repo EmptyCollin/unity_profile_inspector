@@ -584,11 +584,14 @@ def main() -> int:
         from upi.core.repair_tree import RepairTree, save_tree
         for rec in cf_records:
             uid = str(rec.get("unit_id") or "unit")
+            target = run_dir / uid / "repair_tree.json"
+            if target.exists():
+                continue
             tree = RepairTree(finding_id=uid,
                               metric_before=rec.get("metric_status"))
             tree.record(str(rec.get("status") or "no_effect"),
                         delta=rec.get("gone"))
-            save_tree(tree, run_dir / uid / "repair_tree.json")
+            save_tree(tree, target)
     except OSError:
         pass
     run.stop_reason = f"batch:verified={len(all_verified)}"
