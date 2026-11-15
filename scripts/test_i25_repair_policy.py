@@ -8,8 +8,9 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core.finding_blacklist import BlacklistStore  # noqa: E402
 from upi.core.repair_policy import (blacklist_failure_callback,  # noqa: E402
-                                    fingerprint_of, propose_on_failure,
-                                    should_skip, signature_of)
+                                    fingerprint_of, propose_from_run_state,
+                                    propose_on_failure, should_skip,
+                                    signature_of)
 from upi.core.repair_serial import run_repair_loop  # noqa: E402
 from upi.core.repair_tree import Budget, RepairTree  # noqa: E402
 
@@ -67,6 +68,14 @@ fid3 = fingerprint_of(f3, window="resolve", metric="gc_alloc",
                       project_scope="proj").fingerprint_id()
 ok("根失败自动 propose", store.get(fid3).status == "proposed",
    store.get(fid3).status)
+
+state = {"issue": {"signature": {"mechanism": "m_state",
+                                 "metric": "frame_time"}},
+         "protocol_fingerprint": "p2", "attempts": 3, "project_id": "proj",
+         "verdict": {"status": "failed"}}
+fid4 = propose_from_run_state(store, state, window="resolve")
+ok("runner 失败 verdict propose", store.get(fid4).status == "proposed",
+   store.get(fid4).status)
 
 print(f"\n==== I25 生产 blacklist policy 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

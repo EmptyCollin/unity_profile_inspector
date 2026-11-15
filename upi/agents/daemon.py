@@ -875,6 +875,15 @@ class Daemon:
                     self.busy = False
                 return
             v = (st2 or {}).get("verdict") or {}
+            if str(v.get("status") or "") in ("failed", "not_significant",
+                                              "regressed"):
+                try:
+                    from upi.core.finding_blacklist import BlacklistStore
+                    from upi.core.repair_policy import propose_from_run_state
+                    propose_from_run_state(
+                        BlacklistStore(E.RUNS / "blacklist.db"), st2 or {})
+                except Exception:  # noqa: BLE001
+                    pass
             E.emit("resume_finished", run_id=run_id,
                    status=v.get("status"), route=(st2 or {}).get("route"),
                    error=str((st2 or {}).get("error"))[:180])

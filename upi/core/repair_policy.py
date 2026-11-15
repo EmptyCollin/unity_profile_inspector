@@ -61,3 +61,20 @@ def blacklist_failure_callback(store: BlacklistStore, finding: dict, *,
             reason=reason, attempts=int(getattr(tree, "finding_failures", 0)),
             project_scope=project_scope)
     return cb
+
+
+def propose_from_run_state(store: BlacklistStore, state: dict, *,
+                           window: str = "default") -> str | None:
+    """生产 runner 失败 verdict 后，从 state.issue 生成 proposed。"""
+    issue = state.get("issue")
+    if not isinstance(issue, dict):
+        return None
+    sig = issue.get("signature") or {}
+    if not isinstance(sig, dict) or not sig.get("metric"):
+        return None
+    return propose_on_failure(
+        store, issue, window=window, metric=str(sig.get("metric") or ""),
+        protocol_fingerprint=str(state.get("protocol_fingerprint") or ""),
+        reason=f"review_failed:{state.get('verdict', {}).get('status', '')}",
+        attempts=int(state.get("attempts") or 0),
+        project_scope=str(state.get("project_id") or ""))
