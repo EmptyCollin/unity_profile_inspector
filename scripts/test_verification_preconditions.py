@@ -5,11 +5,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.verification_contract import (Observation, PatchClaim,  # noqa: E402
-                                            SiteSpec, claim_from_diffs,
-                                            evaluate, freeze_claim,
-                                            load_contracts, patch_digest,
-                                            validate_claim)
+from upi.core.verification_contract import (ClaimSet, Observation,  # noqa: E402
+                                            PatchClaim, SiteSpec,
+                                            claim_from_diffs, evaluate,
+                                            freeze_claim, load_contracts,
+                                            patch_digest, validate_claim)
 
 PASS, FAIL = [], []
 
@@ -144,6 +144,20 @@ unfrozen = PatchClaim(claim1.sites, c01.mechanism, [18, 23], "gc_alloc",
                       invariants=["x"], evidence_refs=["e"])
 ok("未冻结拒绝", "claim_not_frozen" in validate_claim(
     unfrozen, c01, require_frozen=True))
+
+# ClaimSet：同一 patch 多机制 / 唯一 claim id
+set_claim = claim_from_diffs(
+    diffs, mechanism=c01.mechanism,
+    sites=[SiteSpec("Assets/DevSim/Runtime/BoardModel.cs", "FindMatchesBody", "")],
+    windows=[18, 23], metric="gc_alloc",
+    invariants=["match_result_same"], evidence_refs=["e1"],
+    case_id="c01", unit_id="unit-06")
+cs_set = ClaimSet([set_claim])
+ok("ClaimSet 通过", cs_set.validate(cs) == [], cs_set.validate(cs))
+ok("claim id 唯一", set_claim.claim_id.startswith("c01-"), set_claim.claim_id)
+dup = ClaimSet([set_claim, set_claim])
+ok("重复 claim id 拒绝", any("duplicate_claim_id" in e
+                             for e in dup.validate(cs)))
 
 print(f"\n==== 验证前置测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

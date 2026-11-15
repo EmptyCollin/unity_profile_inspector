@@ -114,6 +114,9 @@ class PatchClaim:
     provenance: str = ""
     created_at: str = ""
     frozen_at: str = ""
+    claim_id: str = ""
+    case_id: str = ""
+    unit_id: str = ""
 
     def __post_init__(self):
         if isinstance(self.sites, SiteSpec):
@@ -135,14 +138,17 @@ def claim_from_diffs(diffs: list[dict], *, mechanism: str,
                      metric: str, semantic_risk: bool = False,
                      invariants: list[str] | None = None,
                      evidence_refs: list[str] | None = None,
-                     provenance: str = "planner") -> PatchClaim:
+                     provenance: str = "planner",
+                     case_id: str = "", unit_id: str = "") -> PatchClaim:
+    digest = patch_digest(diffs)
     return PatchClaim(
         sites=sites, mechanism=mechanism, window_indices=list(windows),
         expected_metric=metric, semantic_risk=semantic_risk,
-        changed=bool(diffs), patch_digest=patch_digest(diffs),
+        changed=bool(diffs), patch_digest=digest,
         invariants=list(invariants or []),
         evidence_refs=list(evidence_refs or []), provenance=provenance,
-        frozen_at="pre_registered")
+        frozen_at="pre_registered", claim_id=f"{case_id or unit_id}-{mechanism}-{digest}",
+        case_id=case_id, unit_id=unit_id)
 
 
 def freeze_claim(claim: PatchClaim, at: str = "frozen") -> PatchClaim:
@@ -287,3 +293,34 @@ def evaluate(contract: CaseContract, claim: PatchClaim,
     if not obs.guards_ok:
         return "guard_regressed", ["guard_regressed"]
     return "verified", []
+
+
+@dataclass
+class ClaimSet:
+    claims: list[PatchClaim] = field(default_factory=list)
+
+    def validate(self, contracts: dict[str, CaseContract]) -> list[str]:
+        errs = []
+        seen = set()
+        for c in self.claims:
+            if c.claim_id in seen:
+                errs.append(f"duplicate_claim_id:{c.claim_id}")
+            seen.add(c.claim_id)
+            ct = contracts.get(c.case_id)
+            if ct is None:
+                errs.append(f"unknown_case:{c.case_id}")
+                continue
+            errs.extend(f"{c.claim_id}:{e}" for e in validate_claim(c, ct))
+        return errs
+
+    def evaluate(self, contracts: dict[str, CaseContract],
+                 obs_by_claim: dict[str, Observation]) -> dict[str, tuple]:
+        out = {}
+        for c in self.claims:
+            ct = contracts.get(c.case_id)
+            if ct is None:
+                out[c.claim_id] = ("unknown_case", ["unknown_case"])
+            else:
+                out[c.claim_id] = evaluate(
+                    ct, c, obs_by_claim.get(c.claim_id, Observation()))
+        return out

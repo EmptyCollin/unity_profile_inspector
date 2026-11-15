@@ -22,7 +22,8 @@ def claim_from_plan(plan, *, mechanism: str, window_indices: list[int],
                     metric: str = "", invariants: list[str] | None = None,
                     evidence_refs: list[str] | None = None,
                     provenance: str = "planner",
-                    method: str = "") -> PatchClaim:
+                    method: str = "", case_id: str = "",
+                    unit_id: str = "") -> PatchClaim:
     diffs = list(getattr(plan, "diffs", []) or [])
     return claim_from_diffs(
         diffs, mechanism=mechanism,
@@ -30,12 +31,12 @@ def claim_from_plan(plan, *, mechanism: str, window_indices: list[int],
         windows=list(window_indices), metric=metric or getattr(plan, "metric", ""),
         invariants=list(invariants or []),
         evidence_refs=list(evidence_refs or []),
-        provenance=provenance)
+        provenance=provenance, case_id=case_id, unit_id=unit_id)
 
 
 def build_and_validate(plan, contract, *, window_indices: list[int],
                        evidence_refs: list[str] | None = None,
-                       method: str = "") -> tuple[
+                       method: str = "", unit_id: str = "") -> tuple[
                            PatchClaim | None, list[str]]:
     metric = ""
     if contract.required_effect:
@@ -44,7 +45,8 @@ def build_and_validate(plan, contract, *, window_indices: list[int],
         plan, mechanism=contract.mechanism,
         window_indices=window_indices, metric=metric,
         invariants=contract.invariants,
-        evidence_refs=evidence_refs, method=method)
+        evidence_refs=evidence_refs, method=method,
+        case_id=contract.case_id, unit_id=unit_id)
     freeze_claim(claim)
     errs = validate_claim(claim, contract, getattr(plan, "diffs", None),
                           require_frozen=True)
@@ -72,7 +74,8 @@ def write_claims(path: Path | str, claims: list[PatchClaim]) -> Path:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps([
-        {"sites": [s.__dict__ for s in c.sites],
+        {"claim_id": c.claim_id, "case_id": c.case_id,
+         "unit_id": c.unit_id, "sites": [s.__dict__ for s in c.sites],
          "mechanism": c.mechanism, "window_indices": c.window_indices,
          "expected_metric": c.expected_metric,
          "patch_digest": c.patch_digest, "changed": c.changed,

@@ -36,7 +36,7 @@ def main() -> int:
         method = method_for_target(c, target)
         claim, errs = build_and_validate(
             plan, c, window_indices=c.expected_windows,
-            evidence_refs=[uid], method=method)
+            evidence_refs=[uid], method=method, unit_id=uid)
         if claim is None:
             failures.append({"unit_id": uid, "case": c.case_id,
                              "errors": errs})
