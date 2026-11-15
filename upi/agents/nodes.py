@@ -380,7 +380,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 _bl = BlacklistStore(ROOT / "runs" / "blacklist.db")
                 _hit = should_skip(
                     _bl, issue.model_dump(),
-                    window=str(st.get("window") or "default"),
+                    window=str(getattr(issue, "window", "")
+                              or st.get("window") or "default"),
                     metric=issue.signature.metric,
                     protocol_fingerprint=str(
                         st.get("protocol_fingerprint") or ""),

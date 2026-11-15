@@ -64,6 +64,7 @@ class Issue(BaseModel):
     low_confidence: bool = False     # n_samples < min_samples 时强制 True（§1.2）
     ptype: FindingType = "waterline"                   # §3A：waterline|episode|conflict|perception
     attribution_source: AttributionSource = "auto"     # G19：无自动归因源必须 human（finding 只给越线事实）
+    window: str = ""                                   # I25：目标动作窗口，如 open_shop
 
     @model_validator(mode="after")
     def _needs_evidence_for_confirmed(self):
