@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from upi.agents.repair_ui import (REPAIR_HTML, audit_entries,  # noqa: E402
                                   blacklist_entries, budget, rollback_tree,
-                                  trees)
+                                  skips, trees)
 from upi.core.repair_tree import Budget, RepairTree, save_tree  # noqa: E402
 
 PASS, FAIL = [], []
@@ -27,6 +27,8 @@ ok("页面含黑名单写操作", "addBL" in REPAIR_HTML and "setBL" in REPAIR_H
 ok("页面含预算保存", "saveBudget" in REPAIR_HTML)
 ok("页面含审计", "/api/repair/audit" in REPAIR_HTML and "audit" in REPAIR_HTML)
 ok("审计读取不炸", isinstance(audit_entries(), list))
+ok("命中读取不炸", isinstance(skips(), list))
+ok("页面含命中", "/api/repair/skips" in REPAIR_HTML)
 
 b = budget()
 ok("预算字段", b["max_attempts_per_finding"] == 6 and b["max_total_attempts"] == 12, b)

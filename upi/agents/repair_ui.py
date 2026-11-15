@@ -31,6 +31,7 @@ button{background:#22314a;color:var(--tx);border:1px solid #36527a;border-radius
 <div class="card"><h2>预算</h2><div id="budget" class="mono mut">加载中…</div></div>
 <div class="card"><h2>Checkpoint 状态树</h2><div id="trees" class="mut">加载中…</div></div>
 <div class="card"><h2>黑名单</h2><div id="blacklist" class="mut">加载中…</div></div>
+<div class="card"><h2>黑名单命中</h2><div id="skips" class="mut">加载中…</div></div>
 <div class="card"><h2>新增黑名单</h2>
 <div class="row"><input id="bl-sig" placeholder="signature"><input id="bl-win" placeholder="window">
 <input id="bl-metric" placeholder="metric"><input id="bl-proto" placeholder="protocol_fingerprint">
@@ -130,6 +131,13 @@ async function rollbackState(){
     ["action",r=>esc(r.action||"")],
     ["detail",r=>esc(r.detail||"")],
   ]);
+  const s=await get("/api/repair/skips");
+  document.getElementById("skips").innerHTML=table(s.skips||[], [
+    ["run",r=>`<span class="mono">${esc(r.run_id)}</span>`],
+    ["fingerprint",r=>`<span class="mono">${esc(r.fingerprint_id||"")}</span>`],
+    ["signature",r=>esc(r.signature||"")],
+    ["reason",r=>esc(r.reason||"")],
+  ]);
  }catch(e){document.getElementById("trees").innerHTML='<div class="bad">'+esc(e)+'</div>';}
 })();
 </script></body></html>"""
@@ -145,6 +153,19 @@ def trees(limit: int = 20) -> list[dict]:
             continue
         d["run_id"] = p.parent.parent.name
         d["unit_id"] = p.parent.name
+        out.append(d)
+    return out
+
+
+def skips(limit: int = 50) -> list[dict]:
+    out = []
+    for p in sorted((ROOT / "runs").rglob("blacklist_skip.json"),
+                    key=lambda x: x.stat().st_mtime, reverse=True)[:limit]:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        d["run_id"] = p.parent.name
         out.append(d)
     return out
 
