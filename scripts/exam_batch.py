@@ -89,6 +89,8 @@ def main() -> int:
                     help="把静态-only 候选也纳入修复（默认只作 potential）")
     ap.add_argument("--serial", action="store_true",
                     help="逐 finding 串行修复（RepairTree），默认批量")
+    ap.add_argument("--after-repeats", type=int, default=1,
+                    help="after 采集重复次数；>=3 才可判 measured")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -104,7 +106,8 @@ def main() -> int:
     baseline_metrics: dict = {}
     baseline_runs: list[dict] = []
     baseline_windows: list[dict[int, dict]] = []
-    after_windows: dict[int, dict] = {}
+    after_windows: list[dict[int, dict]] = []
+    after_n = 0
     from upi.core.window_metrics import action_indices, index_for_window
     from upi.core.window_metrics import window_counters
     action_idx = action_indices(a.replay)
@@ -346,15 +349,21 @@ def main() -> int:
         return ok
 
     def capture_fn():
-        nonlocal after_metrics, after_start, after_windows
+        nonlocal after_metrics, after_start, after_windows, after_n
         after_start = time.time()
-        ok, _ = capture_with_recovery("batch-after", two_pass=False,
-                                      light=True, fast=False,
-                                      target_windows=True)
-        if not ok:
-            raise RuntimeError("batch capture failed")
-        after_metrics = counters_since(0, last_cap["id"])
-        after_windows = window_counters(last_cap["id"])
+        runs = []
+        wins = []
+        for i in range(max(1, a.after_repeats)):
+            ok, _ = capture_with_recovery(
+                f"batch-after-{i + 1}", two_pass=False,
+                light=True, fast=False, target_windows=True)
+            if not ok:
+                raise RuntimeError(f"batch capture {i + 1} failed")
+            runs.append(counters_since(0, last_cap["id"]))
+            wins.append(window_counters(last_cap["id"]))
+        after_metrics = runs
+        after_windows = wins
+        after_n = len(runs)
         cands, _, _ = candidates_from_latest(p, limit=12)
         return {str(c.root_cause).split(":", 1)[-1] for c in cands}
 
@@ -409,7 +418,6 @@ def main() -> int:
         bmetrics, ametrics = baseline_metrics, after_metrics
         window_used = ""
         before_n = len(baseline_runs)
-        after_n = 1
         metric_delta = None
         metric_threshold = None
         _win = str((unit_contract.get(unit.unit_id) or {}).get("window") or "")
@@ -432,7 +440,7 @@ def main() -> int:
             _idx = index_for_window(action_idx, _win)
             if _idx is not None:
                 _b = [w.get(_idx) for w in baseline_windows if w.get(_idx)]
-                _a = after_windows.get(_idx)
+                _a = [w.get(_idx) for w in after_windows if w.get(_idx)]
                 if _b and _a:
                     bmetrics, ametrics = _b, _a
                     window_used = _win
