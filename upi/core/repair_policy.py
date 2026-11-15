@@ -46,3 +46,18 @@ def propose_on_failure(store: BlacklistStore, finding: dict, *, window: str,
     store.upsert(fp, status="proposed", reason=reason,
                  attempts=attempts, owner="system")
     return fp.fingerprint_id()
+
+
+def blacklist_failure_callback(store: BlacklistStore, finding: dict, *,
+                               window: str, metric: str,
+                               protocol_fingerprint: str,
+                               project_scope: str = "",
+                               reason: str = "root_failed"):
+    """给 run_repair_loop(on_failure=...) 用的生产回调。"""
+    def cb(tree) -> str:
+        return propose_on_failure(
+            store, finding, window=window, metric=metric,
+            protocol_fingerprint=protocol_fingerprint,
+            reason=reason, attempts=int(getattr(tree, "finding_failures", 0)),
+            project_scope=project_scope)
+    return cb

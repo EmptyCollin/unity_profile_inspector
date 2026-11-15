@@ -211,7 +211,9 @@ def rollback_tree(path: str | Path, state_id: str) -> dict:
         f.write(json.dumps({
             "ts": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"),
             "actor": "ui", "action": "rollback_pointer",
-            "detail": f"{from_state}->{state_id}",
+            "detail": (f"{from_state}->{state_id}; "
+                       f"pointer_only={result.get('pointer_only', True)}; "
+                       f"git_ref={result.get('git_ref', '')}"),
             "pointer_only": result.get("pointer_only", True),
             "path": str(p)}, ensure_ascii=False) + "\n")
     result["from"] = from_state

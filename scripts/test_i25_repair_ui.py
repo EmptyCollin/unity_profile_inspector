@@ -41,6 +41,8 @@ p = save_tree(t, Path(tempfile.mkdtemp()) / "repair_tree.json")
 r = rollback_tree(p, "root")
 ok("回滚指针", r["ok"] and r["pointer_only"] and r["to"] == "root", r)
 ok("回滚已落盘", '"current": "root"' in p.read_text(encoding="utf-8"))
+ok("审计含回滚结果", any("pointer_only=" in str(x.get("detail", ""))
+                       for x in audit_entries()))
 
 print(f"\n==== I25 UI 只读测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

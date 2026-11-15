@@ -7,8 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.finding_blacklist import BlacklistStore  # noqa: E402
-from upi.core.repair_policy import (fingerprint_of, propose_on_failure,  # noqa: E402
+from upi.core.repair_policy import (blacklist_failure_callback,  # noqa: E402
+                                    fingerprint_of, propose_on_failure,
                                     should_skip, signature_of)
+from upi.core.repair_serial import run_repair_loop  # noqa: E402
+from upi.core.repair_tree import Budget, RepairTree  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -47,6 +50,23 @@ ok("signature 机制级", signature_of(f2) == "hot_function:gc_alloc",
 nested = {"signature": {"mechanism": "per_frame_alloc", "metric": "gc_alloc"}}
 ok("Pydantic Issue 嵌套 signature",
    signature_of(nested) == "per_frame_alloc:gc_alloc", signature_of(nested))
+
+f3 = {"mechanism": "hot_function:ChromaGame.RefreshTiles", "metric": "gc_alloc"}
+tree = RepairTree(finding_id="f3", budget=Budget(
+    max_attempts_per_finding=1, max_attempts_per_state=1,
+    max_total_attempts=2, max_depth=1))
+cb = blacklist_failure_callback(store, f3, window="resolve",
+                                metric="gc_alloc", protocol_fingerprint="p1",
+                                project_scope="proj")
+run_repair_loop(tree, plan=lambda s: object(), apply=lambda p: True,
+                compile_fn=lambda: True, capture=lambda: {},
+                verify=lambda s, o: "no_effect", rollback=lambda p: True,
+                on_failure=cb, max_steps=1)
+fid3 = fingerprint_of(f3, window="resolve", metric="gc_alloc",
+                      protocol_fingerprint="p1",
+                      project_scope="proj").fingerprint_id()
+ok("根失败自动 propose", store.get(fid3).status == "proposed",
+   store.get(fid3).status)
 
 print(f"\n==== I25 生产 blacklist policy 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
