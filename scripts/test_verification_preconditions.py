@@ -6,8 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.verification_contract import (Observation, PatchClaim,  # noqa: E402
-                                            SiteSpec, evaluate,
-                                            load_contracts)
+                                            SiteSpec, claim_from_diffs,
+                                            evaluate, load_contracts,
+                                            patch_digest, validate_claim)
 
 PASS, FAIL = [], []
 
@@ -79,6 +80,42 @@ ok("c04 asset 小通过", evaluate(c04, PatchClaim(
     c04.mechanism, [28], "memory"), Observation(
         compile_ok=True, after_n=3, window_indices=[28], metric="memory",
         metric_delta=100.0, asset_size_bytes=1024))[0] == "verified")
+
+# claim 结构 / 绑定 / 白名单
+diffs = [{"file": "Assets/DevSim/Runtime/BoardModel.cs",
+          "find": "var hit = new bool[N, N];",
+          "replace": "var hit = _hitBuffer;"}]
+c01 = cs["c01"]
+claim1 = claim_from_diffs(
+    diffs, mechanism=c01.mechanism,
+    sites=[SiteSpec("Assets/DevSim/Runtime/BoardModel.cs",
+                    "FindMatchesBody", "")],
+    windows=[18, 23], metric="gc_alloc",
+    invariants=["match_result_same"], evidence_refs=["e1"])
+ok("claim_from_diffs digest",
+   claim1.patch_digest == patch_digest(diffs), claim1.patch_digest)
+ok("validate_claim 通过", validate_claim(claim1, c01, diffs) == [],
+   validate_claim(claim1, c01, diffs))
+ok("digest 不匹配",
+   "patch_digest_mismatch" in validate_claim(
+       claim1, c01, [{"find": "x", "replace": "y"}]))
+bad = PatchClaim(claim1.sites, "no_such_mechanism", [23],
+                 "frame_time", invariants=["x"], evidence_refs=["e"],
+                 patch_digest=claim1.patch_digest)
+ok("未知机制拒绝", "unknown_mechanism" in validate_claim(bad, c01))
+bad2 = PatchClaim(claim1.sites, c01.mechanism, [23], "drawcalls",
+                  invariants=["x"], evidence_refs=["e"])
+ok("metric 白名单拒绝",
+   "metric_not_allowed" in validate_claim(bad2, c01))
+ok("多 site 表达", len(claim1.sites) == 1)
+claim_multi = PatchClaim(
+    [SiteSpec("Assets/DevSim/Runtime/BoardModel.cs", "FindMatchesBody", ""),
+     SiteSpec("Assets/DevSim/Runtime/BoardModel.cs", "CountByColor", "")],
+    c01.mechanism, [18, 23], "gc_alloc", invariants=["x"],
+    evidence_refs=["e"])
+ok("多 site 接受", evaluate(c01, claim_multi, Observation(
+    compile_ok=True, after_n=3, window_indices=[18, 23], metric="gc_alloc",
+    metric_delta=10, source_text="var hit = _hitBuffer;"))[0] == "verified")
 
 print(f"\n==== 验证前置测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
