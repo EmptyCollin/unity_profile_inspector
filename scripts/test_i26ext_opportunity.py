@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.opportunity import scan  # noqa: E402
+from upi.core.asset_opportunity import scan  # noqa: E402
 
 PASS, FAIL = [], []
 

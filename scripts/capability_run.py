@@ -636,7 +636,7 @@ def main() -> int:
             attribution=AttributionInfo(confidence=0.0, factors={}),
             state="candidate",
         ))
-    from upi.core.opportunity import scan as _scan_opportunities
+    from upi.core.asset_opportunity import scan as _scan_opportunities
     opportunities = _scan_opportunities(project)
     try:
         (ROOT / "runs" / run_id).mkdir(parents=True, exist_ok=True)

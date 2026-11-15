@@ -243,7 +243,7 @@ def main() -> int:
     findings = [f for f in findings
                 if "oversized_resource_asset" not in str(f.mechanism)]
     try:
-        from upi.core.opportunity import scan as _scan_opps
+        from upi.core.asset_opportunity import scan as _scan_opps
         _opps = [o.as_dict() for o in _scan_opps(p)]
         (run_dir / "opportunities.json").write_text(
             json.dumps(_opps, ensure_ascii=False, indent=2),
