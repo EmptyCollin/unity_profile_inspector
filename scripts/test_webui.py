@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.agents.webui import WebUI                     # noqa: E402
+from upi.agents.approval import approval_code          # noqa: E402
 from upi.core import events as E                       # noqa: E402
 from upi.core.probe_events import EventLog, ProbeEvent  # noqa: E402
 from upi.tooling import probe_control as PC           # noqa: E402
@@ -28,6 +29,7 @@ E.isolate(TMP / "runs")
 os.environ["UPI_FINGERPRINT_DB"] = str(TMP / "fingerprints.db")
 os.environ["UPI_TICKET_DIR"] = str(TMP / "tickets")
 os.environ["UPI_REGRESSION_DIR"] = str(TMP / "regression")
+os.environ["UPI_BLACKLIST_DB"] = str(TMP / "blacklist.db")
 (E.RUNS / "_probe").mkdir(parents=True, exist_ok=True)
 (E.RUNS / "_probe" / "pb_hb.txt").write_text("1", encoding="utf-8")
 (E.RUNS / "daemon_status.json").write_text(json.dumps({
@@ -288,6 +290,22 @@ try:
                          "approval_code": "0000"})
     ok("坏审批码回滚 403", code == 403 and r.get("error") == "approval_code_invalid",
        f"code={code}")
+
+    good = approval_code("test-token", "add", "s|w|m|p")
+    code, r = post_json(base + "/api/blacklist?token=test-token",
+                        {"action": "add", "signature": "s", "window": "w",
+                         "metric": "m", "protocol_fingerprint": "p",
+                         "reason": "ui-test", "approval_code": good})
+    fid = (r.get("entry") or {}).get("fingerprint_id")
+    ok("正确审批码黑名单 200", code == 200 and bool(fid), f"code={code}")
+    code, _hdr, body = get(base + "/api/blacklist?token=test-token")
+    entries = json.loads(body.decode("utf-8")).get("entries") or []
+    ok("黑名单读到新增项", any(e.get("fingerprint_id") == fid for e in entries))
+    code, r = post_json(base + "/api/blacklist?token=test-token",
+                        {"action": "delete", "fingerprint_id": fid,
+                         "reason": "ui-test-cleanup",
+                         "approval_code": approval_code("test-token", "delete", fid)})
+    ok("正确审批码删除 200", code == 200 and r.get("ok") is True, f"code={code}")
 finally:
     ui.stop()
     th.join(timeout=2)

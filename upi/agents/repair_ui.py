@@ -173,9 +173,15 @@ def skips(limit: int = 50) -> list[dict]:
     return out
 
 
+def blacklist_db() -> Path:
+    import os
+    return Path(os.environ.get("UPI_BLACKLIST_DB")
+                or (ROOT / "runs" / "blacklist.db"))
+
+
 def blacklist_entries() -> list[dict]:
     from upi.core.finding_blacklist import BlacklistStore
-    path = ROOT / "runs" / "blacklist.db"
+    path = blacklist_db()
     if not path.is_file():
         return []
     try:
@@ -237,7 +243,7 @@ def audit_entries(limit: int = 200) -> list[dict]:
                 out.append(json.loads(line))
             except Exception:  # noqa: BLE001
                 continue
-    bp = ROOT / "runs" / "blacklist.db"
+    bp = blacklist_db()
     if bp.is_file():
         try:
             from upi.core.finding_blacklist import BlacklistStore

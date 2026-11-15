@@ -1387,8 +1387,8 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 from upi.core.finding_blacklist import (BlacklistFingerprint,
                                                         BlacklistStore)
-                from upi.agents.repair_ui import ROOT
-                store = BlacklistStore(ROOT / "runs" / "blacklist.db")
+                from upi.agents.repair_ui import ROOT, blacklist_db
+                store = BlacklistStore(blacklist_db())
                 action = str(body.get("action") or "add")
                 actor = str(body.get("actor") or "ui")
                 if action == "add":
