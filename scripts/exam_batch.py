@@ -278,29 +278,50 @@ def main() -> int:
                  or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
-    asset_attempts = []
-    if a.asset_attempt:
+    asset_records = []
+    asset_units = [u for u in units
+                   if "oversized_resource_asset" in u.mechanism]
+    if asset_units:
         from upi.core.asset_exam import attempt_asset_unit
-        from upi.core.fresh_memory import read_median
+        from upi.core.resource_policy import classify as _classify_asset
+        from upi.core.fresh_memory import read_median as _read_mem
 
         def _mem():
             try:
-                return read_median(p).get("total")
+                return _read_mem(p).get("total")
             except Exception:  # noqa: BLE001
                 return None
 
-        for _u in list(units):
-            if "oversized_resource_asset" not in _u.mechanism:
-                continue
-            _r = attempt_asset_unit(
-                p, _u, measure_before=_mem, measure_after=_mem)
-            asset_attempts.append({"unit_id": _u.unit_id,
-                                   "status": _r["status"],
-                                   "decision": _r.get("proposal").asset_path
-                                   if _r.get("proposal") else ""})
-            print("asset-attempt", _u.unit_id, _r["status"])
+        for _u in asset_units:
+            if a.asset_attempt:
+                try:
+                    _r = attempt_asset_unit(
+                        p, _u, measure_before=_mem, measure_after=_mem)
+                    _status = _r.get("status", "no_plan")
+                    _reason = _r.get("reason", "")
+                except Exception as e:  # noqa: BLE001
+                    _status = "no_plan"
+                    _reason = f"{type(e).__name__}: {str(e)[:120]}"
+            else:
+                _c = _classify_asset(p, _u)
+                _status = _c.get("status", "no_plan")
+                _reason = _c.get("reason", "")
+            asset_records.append({
+                "unit_id": _u.unit_id, "target": _u.mechanism,
+                "target_scope": "asset", "gone": None,
+                "new_clusters": [], "invariant_ok": None,
+                "metric_status": "", "metric_delta": None,
+                "metric_threshold": None, "window": "",
+                "before_n": 0, "after_n": 0,
+                "measurement_status": "unmeasured",
+                "semantic_risk": "", "patch_family": "asset",
+                "sites_remaining": 0, "status": _status,
+                "reason": _reason,
+            })
+            print("asset-unit", _u.unit_id, _status, _reason)
+        units = [u for u in units if u not in asset_units]
         (run_dir / "asset_attempts.json").write_text(
-            json.dumps(asset_attempts, ensure_ascii=False, indent=2),
+            json.dumps(asset_records, ensure_ascii=False, indent=2),
             encoding="utf-8")
     print("findings", len(findings), "units", len(units))
 
@@ -318,6 +339,7 @@ def main() -> int:
     after_metrics: dict = {}
     after_start = 0.0
     cf_records: list[dict] = []
+    cf_records.extend(asset_records)
     _site_cache = {"cap": "", "card": ""}
 
     def _site_card() -> str:
