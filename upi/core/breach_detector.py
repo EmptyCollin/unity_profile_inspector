@@ -81,7 +81,8 @@ def sample_to_finding(sample: BreachSample, det: Detector,
                   magnitude=round(sample.value - thr, 4),
                   deviation_ratio=round(sample.value / thr, 3),
                   state="confirmed", ptype="episode",
-                  attribution_source=det.attribution_source)
+                  attribution_source=det.attribution_source,
+                  window=sample.window)
     return Finding(kind="issue", issue=issue)
 
 

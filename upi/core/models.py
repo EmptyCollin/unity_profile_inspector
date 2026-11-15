@@ -207,6 +207,7 @@ class BreachSample(BaseModel):
     data_tier: Literal["A2", "A4"] = "A2"                    # 发作必须有逐帧源（G19）
     protocol_fingerprint: str = ""
     replay_seed: int = -1                                    # T2：可复现回放种子；-1=不可复现，禁进修复循环
+    window: str = ""                                         # I25：动作窗口，如 open_shop
 
     @model_validator(mode="after")
     def _after_depth_covers_a4(self):
