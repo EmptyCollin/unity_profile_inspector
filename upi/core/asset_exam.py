@@ -14,7 +14,11 @@ def attempt_asset_unit(project: Path | str, unit, *,
                        eval_fn=None) -> dict:
     p = propose_for_unit(project, unit)
     if p is None:
-        return {"status": "no_plan", "reason": "no_asset_proposal"}
+        from upi.core.resource_policy import classify
+        c = classify(project, unit)
+        return {"status": c.get("status", "no_plan"),
+                "reason": c.get("reason", "no_asset_proposal"),
+                "asset": c.get("asset", ""), "references": c.get("references") or []}
     before = measure_before() if measure_before else None
     done = apply_candidate(project, p, eval_fn=eval_fn)
     after = measure_after() if measure_after else None
