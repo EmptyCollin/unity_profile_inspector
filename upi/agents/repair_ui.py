@@ -51,25 +51,34 @@ function table(rows,cols){
     rows.map(r=>'<tr>'+cols.map(c=>`<td class="${c[2]||''}">${c[1](r)}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
 }
 async function post(u,b){const r=await fetch(q(u),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});return await r.json()}
+async function approval(action,target){
+ const r=await get("/api/repair/approval?action="+encodeURIComponent(action)+"&target="+encodeURIComponent(target));
+ return prompt("审批码（可核对后确认）",r.code||"");
+}
 async function addBL(){
  const v=(id)=>document.getElementById(id).value;
+ const target=[v("bl-sig"),v("bl-win"),v("bl-metric"),v("bl-proto")].join("|");
+ const code=await approval("add",target); if(code===null)return;
  const r=await post("/api/blacklist",{action:"add",signature:v("bl-sig"),window:v("bl-win"),
    metric:v("bl-metric"),protocol_fingerprint:v("bl-proto"),ttl:Number(v("bl-ttl")||0),
-   reason:v("bl-reason"),status:"proposed",actor:"ui"});
+   reason:v("bl-reason"),status:"proposed",actor:"ui",approval_code:code});
  if(!r.ok)alert(r.error||"失败");else location.reload();
 }
 async function setBL(id,status){
- const r=await post("/api/blacklist",{action:"status",fingerprint_id:id,status,reason:"ui",actor:"ui"});
+ const code=await approval("status",id+"|"+status); if(code===null)return;
+ const r=await post("/api/blacklist",{action:"status",fingerprint_id:id,status,reason:"ui",actor:"ui",approval_code:code});
  if(!r.ok)alert(r.error||"失败");else location.reload();
 }
 async function delBL(id){
  if(!confirm("确认删除？"))return;
- const r=await post("/api/blacklist",{action:"delete",fingerprint_id:id,reason:"ui",actor:"ui"});
+ const code=await approval("delete",id); if(code===null)return;
+ const r=await post("/api/blacklist",{action:"delete",fingerprint_id:id,reason:"ui",actor:"ui",approval_code:code});
  if(!r.ok)alert(r.error||"失败");else location.reload();
 }
 async function saveBudget(){
  let obj;try{obj=JSON.parse(document.getElementById("budgetEdit").value)}catch(e){alert("JSON 无效");return}
- const r=await post("/api/repair/budget",{budget:obj,actor:"ui"});
+ const code=await approval("budget","budget"); if(code===null)return;
+ const r=await post("/api/repair/budget",{budget:obj,actor:"ui",approval_code:code});
  document.getElementById("budgetMsg").textContent=r.ok?"已保存":"失败: "+(r.error||"");
  if(r.ok)location.reload();
 }

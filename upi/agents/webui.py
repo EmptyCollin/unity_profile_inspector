@@ -1257,6 +1257,14 @@ class _Handler(BaseHTTPRequestHandler):
             from upi.agents.repair_ui import audit_entries
             self._send_json(200, {"ok": True, "entries": audit_entries()})
             return
+        if parsed.path == "/api/repair/approval":
+            from upi.agents.approval import approval_code
+            action = (qs.get("action") or [""])[0]
+            target = (qs.get("target") or [""])[0]
+            self._send_json(200, {"ok": True,
+                                  "code": approval_code(self.ui.token,
+                                                        action, target)})
+            return
         if parsed.path == "/api/events":
             self._sse()
             return
@@ -1357,6 +1365,20 @@ class _Handler(BaseHTTPRequestHandler):
                 action = str(body.get("action") or "add")
                 actor = str(body.get("actor") or "ui")
                 if action == "add":
+                    target = "|".join(str(body.get(k) or "") for k in (
+                        "signature", "window", "metric",
+                        "protocol_fingerprint"))
+                elif action == "status":
+                    target = f"{body.get('fingerprint_id')}|{body.get('status')}"
+                else:
+                    target = str(body.get("fingerprint_id") or "")
+                from upi.agents.approval import verify as _verify_approval
+                if not _verify_approval(self.ui.token, action, target,
+                                        str(body.get("approval_code") or "")):
+                    self._send_json(403, {"ok": False,
+                                          "error": "approval_code_invalid"})
+                    return
+                if action == "add":
                     fp = BlacklistFingerprint(
                         signature=str(body.get("signature") or ""),
                         window=str(body.get("window") or ""),
@@ -1393,6 +1415,12 @@ class _Handler(BaseHTTPRequestHandler):
                 from upi.core.repair_tree import load_budget
                 import yaml
                 incoming = body.get("budget") or {}
+                from upi.agents.approval import verify as _verify_approval
+                if not _verify_approval(self.ui.token, "budget", "budget",
+                                        str(body.get("approval_code") or "")):
+                    self._send_json(403, {"ok": False,
+                                          "error": "approval_code_invalid"})
+                    return
                 cur = load_budget().as_dict()
                 for k in cur:
                     if k in incoming:
