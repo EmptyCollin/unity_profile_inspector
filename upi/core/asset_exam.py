@@ -18,7 +18,11 @@ def attempt_asset_unit(project: Path | str, unit, *,
     before = measure_before() if measure_before else None
     done = apply_candidate(project, p, eval_fn=eval_fn)
     after = measure_after() if measure_after else None
-    if before is not None and after is not None and after >= before:
+    if before is None or after is None:
+        rollback_candidate(project, done)
+        return {"status": "unmeasured", "proposal": p, "done": done,
+                "before": before, "after": after, "rolled_back": True}
+    if after >= before:
         rollback_candidate(project, done)
         return {"status": "no_effect", "proposal": p, "done": done,
                 "before": before, "after": after, "rolled_back": True}

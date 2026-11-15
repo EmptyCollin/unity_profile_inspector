@@ -50,6 +50,10 @@ class NoProposal:
 r3 = attempt_asset_unit(TMP, NoProposal())
 ok("无 proposal no_plan", r3["status"] == "no_plan", r3)
 
+r4 = attempt_asset_unit(TMP, U(), eval_fn=lambda path: None)
+ok("无测量 unmeasured", r4["status"] == "unmeasured"
+   and r4["rolled_back"] is True, r4)
+
 print(f"\n==== I26 资产 attempt 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))

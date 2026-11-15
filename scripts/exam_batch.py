@@ -91,6 +91,8 @@ def main() -> int:
                     help="逐 finding 串行修复（RepairTree），默认批量")
     ap.add_argument("--after-repeats", type=int, default=1,
                     help="after 采集重复次数；>=3 才可判 measured")
+    ap.add_argument("--asset-attempt", action="store_true",
+                    help="对 asset unit 走 proposal→apply→memory→rollback")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -220,6 +222,30 @@ def main() -> int:
                  or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
+    asset_attempts = []
+    if a.asset_attempt:
+        from upi.core.asset_exam import attempt_asset_unit
+        from upi.core.fresh_memory import read_median
+
+        def _mem():
+            try:
+                return read_median(p).get("total")
+            except Exception:  # noqa: BLE001
+                return None
+
+        for _u in list(units):
+            if "oversized_resource_asset" not in _u.mechanism:
+                continue
+            _r = attempt_asset_unit(
+                p, _u, measure_before=_mem, measure_after=_mem)
+            asset_attempts.append({"unit_id": _u.unit_id,
+                                   "status": _r["status"],
+                                   "decision": _r.get("proposal").asset_path
+                                   if _r.get("proposal") else ""})
+            print("asset-attempt", _u.unit_id, _r["status"])
+        (run_dir / "asset_attempts.json").write_text(
+            json.dumps(asset_attempts, ensure_ascii=False, indent=2),
+            encoding="utf-8")
     print("findings", len(findings), "units", len(units))
 
     cfg = N.load_config(ROOT / "llm_config.yaml")
