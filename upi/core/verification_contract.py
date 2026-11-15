@@ -64,7 +64,6 @@ class Predicate:
     pattern: str = ""
     max_count: int = 0
 
-
 @dataclass
 class RequiredEffect:
     metric: str
@@ -146,9 +145,18 @@ def claim_from_diffs(diffs: list[dict], *, mechanism: str,
         frozen_at="pre_registered")
 
 
+def freeze_claim(claim: PatchClaim, at: str = "frozen") -> PatchClaim:
+    if not claim.frozen_at:
+        claim.frozen_at = at
+    return claim
+
+
 def validate_claim(claim: PatchClaim, contract: CaseContract,
-                   diffs: list[dict] | None = None) -> list[str]:
+                   diffs: list[dict] | None = None,
+                   *, require_frozen: bool = False) -> list[str]:
     errs = []
+    if require_frozen and not claim.frozen_at:
+        errs.append("claim_not_frozen")
     if not claim.changed:
         errs.append("identity_noop")
     if not claim.sites:
@@ -188,7 +196,12 @@ class Observation:
     guards_ok: bool = True
     source_text: str = ""
     call_counts: dict[str, int] = field(default_factory=dict)
+    alloc_counts: dict[str, int] = field(default_factory=dict)
     asset_size_bytes: int | None = None
+    invariant_results: dict[str, bool] = field(default_factory=dict)
+    forbidden_hits: list[str] = field(default_factory=list)
+    metric_sigma: float = 0.0
+    k_sigma: float = 3.0
 
 
 def load_contracts(path: Path | str) -> dict[str, CaseContract]:
@@ -203,6 +216,8 @@ def _predicate_ok(p: Predicate, obs: Observation) -> bool:
         return bool(p.pattern) and p.pattern in obs.source_text
     if p.kind == "call_count_max":
         return obs.call_counts.get(p.pattern, 0) <= p.max_count
+    if p.kind == "alloc_count_max":
+        return obs.alloc_counts.get(p.pattern, 0) <= p.max_count
     if p.kind == "asset_size_max":
         return (obs.asset_size_bytes is not None
                 and obs.asset_size_bytes <= p.max_count)
@@ -255,6 +270,18 @@ def evaluate(contract: CaseContract, claim: PatchClaim,
             return "no_effect", ["delta_below_min"]
         if e.direction == "up" and -obs.metric_delta < e.min_delta:
             return "no_effect", ["delta_below_min"]
+        if obs.metric_sigma > 0 and abs(obs.metric_delta) < \
+                obs.k_sigma * obs.metric_sigma:
+            return "no_effect", ["delta_below_k_sigma"]
+    if contract.invariants and obs.invariant_results:
+        missing = [x for x in contract.invariants
+                   if not obs.invariant_results.get(x, False)]
+        if missing:
+            return "invariant_failed", missing
+    if contract.forbidden and obs.forbidden_hits:
+        hit = [x for x in obs.forbidden_hits if x in contract.forbidden]
+        if hit:
+            return "forbidden_behavior", hit
     if not obs.invariants_ok:
         return "invariant_failed", ["invariant_failed"]
     if not obs.guards_ok:

@@ -7,8 +7,9 @@ sys.path.insert(0, str(ROOT))
 
 from upi.core.verification_contract import (Observation, PatchClaim,  # noqa: E402
                                             SiteSpec, claim_from_diffs,
-                                            evaluate, load_contracts,
-                                            patch_digest, validate_claim)
+                                            evaluate, freeze_claim,
+                                            load_contracts, patch_digest,
+                                            validate_claim)
 
 PASS, FAIL = [], []
 
@@ -116,6 +117,33 @@ claim_multi = PatchClaim(
 ok("多 site 接受", evaluate(c01, claim_multi, Observation(
     compile_ok=True, after_n=3, window_indices=[18, 23], metric="gc_alloc",
     metric_delta=10, source_text="var hit = _hitBuffer;"))[0] == "verified")
+
+# P1: 噪声 / invariant 结果 / forbidden / runtime count
+ok("低于 3σ 拒绝", evaluate(c07, claim, Observation(
+    compile_ok=True, after_n=3, window_indices=[23], metric="frame_time",
+    metric_delta=10.0, metric_sigma=10.0,
+    source_text=obs.source_text))[0] == "no_effect")
+ok("invariant 结果缺失拒绝", evaluate(c07, claim, Observation(
+    compile_ok=True, after_n=3, window_indices=[23], metric="frame_time",
+    metric_delta=100.0, source_text=obs.source_text,
+    invariant_results={"hud_layout_same": False}))[0]
+   == "invariant_failed")
+ok("forbidden 行为拒绝", evaluate(c07, claim, Observation(
+    compile_ok=True, after_n=3, window_indices=[23], metric="frame_time",
+    metric_delta=100.0, source_text=obs.source_text,
+    forbidden_hits=["remove_update"]))[0] == "forbidden_behavior")
+ok("runtime alloc count 谓词", evaluate(c01, claim1, Observation(
+    compile_ok=True, after_n=3, window_indices=[18, 23], metric="gc_alloc",
+    metric_delta=100.0, source_text="still uses new",
+    alloc_counts={"per_match_bool": 0}))[0] in
+   ("mechanism_unchanged", "verified"))
+freeze_claim(claim1)
+ok("claim 冻结", claim1.frozen is True and validate_claim(
+    claim1, c01, diffs, require_frozen=True) == [], claim1.frozen_at)
+unfrozen = PatchClaim(claim1.sites, c01.mechanism, [18, 23], "gc_alloc",
+                      invariants=["x"], evidence_refs=["e"])
+ok("未冻结拒绝", "claim_not_frozen" in validate_claim(
+    unfrozen, c01, require_frozen=True))
 
 print(f"\n==== 验证前置测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
