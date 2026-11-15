@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.repair_candidate import (RepairCandidate,  # noqa: E402
-                                       rank_candidates,
+                                       metric_allowed, rank_candidates,
                                        semantic_risk_for_diffs)
 
 PASS, FAIL = [], []
@@ -44,6 +44,11 @@ low = RepairCandidate("a", "s1", "m", "w", expected_saved_ms=1,
 high = RepairCandidate("a", "s2", "m", "w", expected_saved_ms=5,
                        evidence_refs=["e"])
 ok("按收益排序", rank_candidates([low, high])[0] is high)
+ok("allocation 允许 gc_alloc",
+   metric_allowed("allocation", "gc_alloc") is True)
+ok("allocation 拒绝 drawcalls",
+   metric_allowed("allocation", "drawcalls") is False)
+ok("sync 允许 drawcalls", metric_allowed("sync", "drawcalls") is True)
 
 print(f"\n==== I26 候选测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

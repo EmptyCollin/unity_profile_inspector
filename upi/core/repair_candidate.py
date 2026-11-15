@@ -54,3 +54,15 @@ def semantic_risk_for_diffs(diffs: list[dict]) -> str:
 
 def rank_candidates(items: list[RepairCandidate]) -> list[RepairCandidate]:
     return sorted(items, key=lambda c: c.score(), reverse=True)
+
+
+_ALLOWED = {
+    "allocation": {"gc_alloc", "memory", "frame_time"},
+    "sync": {"frame_time", "drawcalls"},
+    "dirty_check": {"frame_time"},
+    "": {"frame_time", "gc_alloc", "memory", "drawcalls"},
+}
+
+
+def metric_allowed(patch_family: str, metric: str) -> bool:
+    return metric in _ALLOWED.get(patch_family, _ALLOWED[""])

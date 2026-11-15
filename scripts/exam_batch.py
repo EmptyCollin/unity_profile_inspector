@@ -72,7 +72,7 @@ def main() -> int:
     ap.add_argument("--replay", default="runs/i8_lab/paper_replay.json")
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--project-id", default="test_project")
-    ap.add_argument("--baselines", type=int, default=3)
+    ap.add_argument("--baselines", type=int, default=5)
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-units", type=int, default=0)
     ap.add_argument("--targets", default="",
@@ -89,7 +89,7 @@ def main() -> int:
                     help="把静态-only 候选也纳入修复（默认只作 potential）")
     ap.add_argument("--serial", action="store_true",
                     help="逐 finding 串行修复（RepairTree），默认批量")
-    ap.add_argument("--after-repeats", type=int, default=1,
+    ap.add_argument("--after-repeats", type=int, default=3,
                     help="after 采集重复次数；>=3 才可判 measured")
     ap.add_argument("--asset-attempt", action="store_true",
                     help="对 asset unit 走 proposal→apply→memory→rollback")
@@ -484,6 +484,11 @@ def main() -> int:
                 patch_family = "sync"
             elif "Update" in _find and "if (" in _repl:
                 patch_family = "dirty_check"
+        from upi.core.repair_candidate import metric_allowed
+        _m = unit_metric.get(unit.unit_id, "")
+        if _m and not metric_allowed(patch_family, _m):
+            return finish("metric_mismatch", metric_status="metric_mismatch",
+                          sites=0)
         if _win:
             _idx = index_for_window(action_idx, _win)
             if _idx is not None:
