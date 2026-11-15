@@ -122,6 +122,7 @@ def main() -> int:
          Path(a.replay).read_text(encoding="utf-8")).encode("utf-8")
     ).hexdigest()
     cache_hit = False
+    cached_site_card = ""
     if a.baseline_cache:
         from upi.core.baseline_cache import get as _cache_get
         _cached = _cache_get(cache_key)
@@ -133,6 +134,7 @@ def main() -> int:
                 {int(k): v for k, v in (w or {}).items()}
                 for w in (_d.get("windows") or [])]
             cache_hit = True
+            cached_site_card = str(_d.get("site_card") or "")
             print("baseline cache hit", len(baseline_runs))
 
     def capture_with_recovery(label: str, *, two_pass: bool,
@@ -178,11 +180,24 @@ def main() -> int:
             print("baseline", i + 1, "roots", len(baseline_roots))
     if a.baseline_cache and not cache_hit:
         from upi.core.baseline_cache import put as _cache_put
+        _card = ""
+        if last_cap.get("id"):
+            try:
+                from upi.core.trace_analysis import build_trace as _bt
+                _td = _bt(last_cap["id"], ROOT / "runs")
+                _card = "\n".join(
+                    f"{s.get('symbol')} | {s.get('file')}:{s.get('line')} "
+                    f"| self_ms={s.get('self_ms')} calls={s.get('calls')}"
+                    for s in (_td.get("site_metrics") or [])[:10])
+            except Exception:  # noqa: BLE001
+                _card = ""
         _cache_put(cache_key, {
             "roots": sorted(baseline_roots),
             "runs": baseline_runs,
             "windows": baseline_windows,
+            "site_card": _card,
         })
+        cached_site_card = _card
 
     baseline_metrics = baseline_runs
     flow.enter("diagnose")
@@ -295,7 +310,7 @@ def main() -> int:
     def _site_card() -> str:
         cap = str(last_cap.get("id") or "")
         if not cap:
-            return ""
+            return cached_site_card
         if _site_cache["cap"] == cap:
             return _site_cache["card"]
         try:

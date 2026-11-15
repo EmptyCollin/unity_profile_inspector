@@ -18,8 +18,12 @@ def ok(name, cond, detail=""):
 
 TMP = Path(tempfile.mkdtemp())
 ok("miss", get("proto", TMP) is None)
-p = put("proto", {"roots": ["A"], "runs": 5}, TMP)
+p = put("proto", {"roots": ["A"], "runs": 5,
+                  "site_card": "ChromaGame.Update | A.cs:10 | self_ms=1"},
+        TMP)
 ok("hit", get("proto", TMP)["data"]["runs"] == 5, get("proto", TMP))
+ok("hit site_card", "ChromaGame.Update" in
+   get("proto", TMP)["data"]["site_card"])
 ok("不同协议 miss", get("other", TMP) is None)
 ok("key 稳定", key("proto") == key("proto"))
 
