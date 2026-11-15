@@ -364,6 +364,10 @@ def main() -> int:
             print("verify blocked: baselines<3 (smoke only)", a.baselines)
             cf_records.append({"unit_id": unit.unit_id,
                                "status": "needs_recheck",
+                               "measurement_status": "unmeasured",
+                               "window": "",
+                               "before_n": a.baselines,
+                               "after_n": 0,
                                "reason": "baselines<3"})
             return "needs_recheck"
         target = unit.targets[0].split(":", 1)[-1] if unit.targets else unit.mechanism
@@ -374,6 +378,12 @@ def main() -> int:
 
         def finish(status: str, *, inv_ok=None, metric_status="",
                    sites=0, scope="function") -> str:
+            from upi.core.repair_verify import (
+                measurement_status as _measurement)
+            gate = _measurement(window=window_used, after_n=after_n,
+                                before_n=before_n)
+            if gate != "measured":
+                status = gate
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,
@@ -382,12 +392,42 @@ def main() -> int:
                 "new_clusters": new,
                 "invariant_ok": inv_ok,
                 "metric_status": metric_status,
+                "metric_delta": metric_delta,
+                "metric_threshold": metric_threshold,
+                "window": window_used,
+                "before_n": before_n,
+                "after_n": after_n,
+                "measurement_status": gate,
+                "semantic_risk": semantic_risk,
+                "patch_family": patch_family,
                 "sites_remaining": sites,
                 "status": status,
             })
             return status
         bmetrics, ametrics = baseline_metrics, after_metrics
+        window_used = ""
+        before_n = len(baseline_runs)
+        after_n = 1
+        metric_delta = None
+        metric_threshold = None
         _win = str((unit_contract.get(unit.unit_id) or {}).get("window") or "")
+        semantic_risk = ""
+        patch_family = ""
+        _diffs = (plans.get(unit.unit_id).diffs
+                  if plans.get(unit.unit_id) else [])
+        for _d in _diffs:
+            _find = str(_d.get("find") or "")
+            _repl = str(_d.get("replace") or "")
+            if not _repl.strip():
+                semantic_risk = "empty_replace"
+            elif len(_find) - len(_repl) > 400:
+                semantic_risk = "block_delete"
+            if "new " in _find and "new " not in _repl:
+                patch_family = "allocation"
+            elif "ForceUpdate" in _find:
+                patch_family = "sync"
+            elif "Update" in _find and "if (" in _repl:
+                patch_family = "dirty_check"
         if _win:
             _idx = index_for_window(action_idx, _win)
             if _idx is not None:
@@ -395,6 +435,7 @@ def main() -> int:
                 _a = after_windows.get(_idx)
                 if _b and _a:
                     bmetrics, ametrics = _b, _a
+                    window_used = _win
                     print("metric-window", unit.unit_id, _win, _idx)
         pl = plans[unit.unit_id]
         sa = sites_remaining(p, [{"file": d.get("file", ""),
@@ -430,6 +471,8 @@ def main() -> int:
                     invariant_ok=True, sites_remaining=0)
                 metric_status = _tv.status
                 delta_val = _tv.delta
+                metric_delta = _tv.delta
+                metric_threshold = _tv.threshold
                 print("invariant+metric", unit.unit_id, metric_status,
                       _tv.delta, _tv.threshold)
             _status = _decide_verify(
@@ -506,6 +549,8 @@ def main() -> int:
                 sites_remaining=sum(len(x) for x in sa.values()))
             print("metric-verify", unit.unit_id, _tv.status,
                   _tv.delta, _tv.threshold)
+            metric_delta = _tv.delta
+            metric_threshold = _tv.threshold
             if _tv.status != "unmeasured":
                 _status = ("partial" if _tv.status == "verified"
                            and (not gone or new) else _tv.status)
