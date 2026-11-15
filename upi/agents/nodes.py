@@ -594,13 +594,12 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 {**st, "project": str(_ctx(st)[0])})
             delta = getattr(getattr(v, "target", None), "delta", None)
             status = str(getattr(v, "status", "unknown"))
-            mapped = {"resolved": "verified", "regressed": "regressed",
-                      "not_significant": ("improved_partial"
-                                          if (delta or 0) > 0 else "no_effect")
-                      }.get(status, "no_effect")
-            tree.record(mapped,
-                        patch_id=str((st.get("edit_plan") or {}).get("playbook_id", "")),
-                        git_ref=str((st.get("snapshot") or {}).get("git_ref", "")))
+            from upi.core.repair_engine import SerialEngine
+            SerialEngine(tree).record_verdict(
+                status,
+                patch_id=str((st.get("edit_plan") or {}).get("playbook_id", "")),
+                git_ref=str((st.get("snapshot") or {}).get("git_ref", "")),
+                improved=(delta or 0) > 0)
             save_tree(tree, run_dir / "repair_tree.json")
             tree_dict = tree.to_dict()
             st = dict(st)

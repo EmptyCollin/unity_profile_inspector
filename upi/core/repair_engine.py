@@ -47,6 +47,14 @@ class SerialEngine:
     def rollback_to(self, state_id: str) -> dict:
         return restore_checkpoint(self.tree, state_id)
 
+    def record_verdict(self, status: str, *, patch_id: str = "",
+                       git_ref: str = "", improved: bool = True) -> str:
+        mapped = {"resolved": "verified", "regressed": "regressed",
+                  "not_significant": ("improved_partial" if improved
+                                      else "no_effect"),
+                  "insufficient": "no_effect"}.get(status, status)
+        return self.tree.record(mapped, patch_id=patch_id, git_ref=git_ref)
+
     def tree_dict(self) -> dict:
         return self.tree.to_dict()
 
