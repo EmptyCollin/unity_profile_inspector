@@ -173,3 +173,4 @@ runs/<run_id>/exam_report.json
 - 检测稳定性仍不足，单次 root 数会波动
 - 11case 当前 3 verified，不能当“全部修好”
 ```
+阶段复盘：[docs/I25-ext-复盘.md](docs/I25-ext-复盘.md)
