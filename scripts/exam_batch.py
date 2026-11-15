@@ -554,6 +554,14 @@ def main() -> int:
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
             encoding="utf-8")
+        from upi.core.repair_tree import RepairTree, save_tree
+        for rec in cf_records:
+            uid = str(rec.get("unit_id") or "unit")
+            tree = RepairTree(finding_id=uid,
+                              metric_before=rec.get("metric_status"))
+            tree.record(str(rec.get("status") or "no_effect"),
+                        delta=rec.get("gone"))
+            save_tree(tree, run_dir / uid / "repair_tree.json")
     except OSError:
         pass
     run.stop_reason = f"batch:verified={len(all_verified)}"

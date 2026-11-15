@@ -403,6 +403,7 @@ _INDEX_HTML = r"""<!doctype html>
     <a href="#" data-page="reports"><span class="k">▥</span>报告</a>
     <a href="#" data-page="projects"><span class="k">▦</span>工程</a>
     <a href="#" data-page="settings"><span class="k">⚙</span>设置</a>
+    <a href="/repair?token=__UPI_TOKEN__"><span class="k">⑃</span>修复状态</a>
   </nav>
   <main class="main">
     <section id="page-home">
@@ -1233,6 +1234,24 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/status":
             self._send(200, _json_bytes(build_status()), "application/json; charset=utf-8")
+            return
+        if parsed.path == "/repair":
+            from upi.agents.repair_ui import REPAIR_HTML
+            html = REPAIR_HTML.replace("__UPI_TOKEN__", self.ui.token).encode("utf-8")
+            self._send(200, html, "text/html; charset=utf-8",
+                       {"Set-Cookie": f"upi_token={self.ui.token}; Path=/; HttpOnly; SameSite=Strict"})
+            return
+        if parsed.path == "/api/repair/trees":
+            from upi.agents.repair_ui import trees
+            self._send_json(200, {"ok": True, "trees": trees()})
+            return
+        if parsed.path == "/api/repair/budget":
+            from upi.agents.repair_ui import budget
+            self._send_json(200, {"ok": True, "budget": budget()})
+            return
+        if parsed.path == "/api/blacklist":
+            from upi.agents.repair_ui import blacklist_entries
+            self._send_json(200, {"ok": True, "entries": blacklist_entries()})
             return
         if parsed.path == "/api/events":
             self._sse()
