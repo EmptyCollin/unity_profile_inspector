@@ -47,8 +47,19 @@ def latest_counters() -> dict:
         return {}
 
 
+def _merge_counters(parts: list[dict]) -> dict:
+    merged: dict[str, dict] = {}
+    for d in parts:
+        for name, node in (d.get("counters") or {}).items():
+            series = node.get("series") if isinstance(node, dict) else None
+            if not isinstance(series, list):
+                continue
+            slot = merged.setdefault(name, {"series": []})
+            slot["series"].extend(float(x) for x in series)
+    return {"counters": merged}
+
+
 def counters_since(start_ts: float, prefix: str = "") -> dict:
-    """合并 start_ts 之后、指定项目前缀的 capture counters series。"""
     merged: dict[str, dict] = {}
     for p in (ROOT / "runs").glob("*/counters.json"):
         if prefix and not p.parent.name.startswith(prefix):
@@ -469,6 +480,7 @@ def main() -> int:
             if not _check_claim(_pl, unit):
                 return None
             plans[unit.unit_id] = _pl
+            unit_metric[unit.unit_id] = _pl.metric or ""
             unit_contract[unit.unit_id] = dict(_pl.repair_contract)
             print("plan", unit.unit_id, "ORACLE CLEAN")
             return PatchRef(unit.unit_id,
@@ -617,6 +629,8 @@ def main() -> int:
         gone = target not in now
         new = sorted(now - baseline_roots - {target})
         from upi.core.site_audit import sites_remaining
+        _claim = None
+        window_indices_obs: list[int] = []
 
         def finish(status: str, *, inv_ok=None, metric_status="",
                    sites=0, scope="function") -> str:
@@ -633,6 +647,25 @@ def main() -> int:
                 status = "not_structural"
             elif status == "verified" and not _prof.can_verify:
                 status = "candidate_only"
+            if a.claim_gate and _claim is not None:
+                _ct = next((c for c in _claim_contracts.values()
+                            if c.case_id == _claim.case_id), None)
+                if _ct is not None:
+                    from upi.core.verification_contract import (
+                        Observation, evaluate as _eval_claim)
+                    _src = "\n".join(
+                        (p / s.file).read_text(encoding="utf-8")
+                        for s in _claim.sites if (p / s.file).is_file())
+                    _obs = Observation(
+                        compile_ok=True, after_n=after_n,
+                        window_indices=list(window_indices_obs),
+                        metric=unit_metric.get(unit.unit_id, ""),
+                        metric_delta=float(metric_delta or 0.0),
+                        invariants_ok=True, guards_ok=True,
+                        source_text=_src)
+                    _cst, _creasons = _eval_claim(_ct, _claim, _obs)
+                    print("claim-verify", unit.unit_id, _cst, _creasons)
+                    status = _cst
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,
@@ -687,7 +720,19 @@ def main() -> int:
         if patch_class == "identity":
             return finish("identity_noop", metric_status="identity_noop",
                           sites=0)
-        if _win:
+        _claim = _claims.get(unit.unit_id) if a.claim_gate else None
+        if _claim and _claim.window_indices:
+            _wins = list(_claim.window_indices)
+            _b = [_merge_counters([w[i] for i in _wins if i in w])
+                  for w in baseline_windows]
+            _a = [_merge_counters([w[i] for i in _wins if i in w])
+                  for w in after_windows]
+            if all(_b) and all(_a):
+                bmetrics, ametrics = _b, _a
+                window_used = ",".join(str(i) for i in _wins)
+                window_indices_obs = _wins
+                print("claim-window", unit.unit_id, window_used)
+        if _win and not window_used:
             _idx = index_for_window(action_idx, _win)
             if _idx is not None:
                 _b = [w.get(_idx) for w in baseline_windows if w.get(_idx)]
