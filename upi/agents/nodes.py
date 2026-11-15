@@ -369,8 +369,32 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 for r in rows)
         except Exception:  # noqa: BLE001
             hist = ""
+        blacklisted = 0
         for top in st["hypotheses"]:
             if top["root_cause"] in tried:
+                continue
+            # I25：生产侧黑名单只在这里查；考试路径不 import
+            try:
+                from upi.core.finding_blacklist import BlacklistStore
+                from upi.core.repair_policy import should_skip
+                _bl = BlacklistStore(ROOT / "runs" / "blacklist.db")
+                _hit = should_skip(
+                    _bl, issue.model_dump(),
+                    window=str(st.get("window") or "default"),
+                    metric=issue.signature.metric,
+                    protocol_fingerprint=str(
+                        st.get("protocol_fingerprint") or ""),
+                    project_scope=str(getattr(_prof(), "profile_id", "") or ""))
+            except Exception:  # noqa: BLE001
+                _hit = None
+            if _hit is not None:
+                E.write_json(run_dir / "blacklist_skip.json",
+                             {"fingerprint_id": _hit.fingerprint_id,
+                              "signature": _hit.signature,
+                              "reason": _hit.reason},
+                             what="blacklist_skip", strict=False)
+                tried.add(top["root_cause"])
+                blacklisted += 1
                 continue
             ep, meta = plan_issue(cfg, issue, top, root, history=hist)
             E.write_json(run_dir / "plan_llm.json",
@@ -379,6 +403,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             if ep is not None:
                 return {"edit_plan": ep.model_dump(), "route": "proceed",
                         "llm_plan": meta}
+        if blacklisted:
+            return {"route": "no_plan", "exit_code": "no_plan",
+                    "error": f"黑名单命中 {blacklisted} 条，未规划"}
         return {"route": "no_plan", "exit_code": "no_plan",
                 "error": f"LLM 未给出可执行方案（试过 {len(tried)} 条）"}
 

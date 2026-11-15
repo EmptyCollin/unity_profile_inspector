@@ -6,7 +6,10 @@ from upi.core.finding_blacklist import (BlacklistFingerprint,
 
 
 def signature_of(finding: dict) -> str:
-    sig = str(finding.get("signature") or "")
+    sig = finding.get("signature")
+    if isinstance(sig, dict) and sig.get("mechanism"):
+        return f"{sig.get('mechanism')}:{sig.get('metric') or ''}"
+    sig = str(sig or "")
     if sig:
         return sig
     mech = str(finding.get("mechanism") or "")

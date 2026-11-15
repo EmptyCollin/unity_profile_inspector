@@ -44,6 +44,9 @@ ok("proposed 不命中", should_skip(store, f2, window="open_shop",
 ok("proposed 已记录", store.get(fid).status == "proposed")
 ok("signature 机制级", signature_of(f2) == "hot_function:gc_alloc",
    signature_of(f2))
+nested = {"signature": {"mechanism": "per_frame_alloc", "metric": "gc_alloc"}}
+ok("Pydantic Issue 嵌套 signature",
+   signature_of(nested) == "per_frame_alloc:gc_alloc", signature_of(nested))
 
 print(f"\n==== I25 生产 blacklist policy 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
