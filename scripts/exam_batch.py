@@ -114,8 +114,6 @@ def main() -> int:
                     help="oracle clean plans JSON（绕过 LLM planner）")
     ap.add_argument("--claim-gate", action="store_true",
                     help="plan 阶段生成/校验/冻结 PatchClaim")
-    ap.add_argument("--claim-contracts",
-                    default="sim/cases/verification_contracts.json")
     a = ap.parse_args()
     from upi.core.measure_profile import get as _mp
     _prof = _mp(a.measure_profile)
@@ -127,11 +125,9 @@ def main() -> int:
     if a.oracle_plans:
         _oracle_plans = json.loads(
             Path(a.oracle_plans).read_text(encoding="utf-8"))
-    _claim_contracts = {}
     _claims = {}
     if a.claim_gate:
-        from upi.core.verification_contract import load_contracts
-        _claim_contracts = load_contracts(a.claim_contracts)
+        pass
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
     run_dir = ROOT / "runs" / run_id
@@ -415,20 +411,20 @@ def main() -> int:
     def _check_claim(pl, unit) -> bool:
         if not a.claim_gate or pl is None:
             return True
-        from upi.core.claim_builder import (build_and_validate,
-                                            contract_for_target,
-                                            method_for_target, write_claims)
+        from upi.core.claim_builder import claim_from_plan, write_claims
+        from upi.core.verification_contract import (freeze_claim,
+                                                    validate_claim_self)
         target = str((unit.targets or [unit.mechanism])[0])
-        contract = contract_for_target(_claim_contracts, target)
-        if contract is None:
-            print("claim-gate: no contract", unit.unit_id, target)
-            return False
-        claim, errs = build_and_validate(
-            pl, contract, window_indices=contract.expected_windows,
-            evidence_refs=[unit.unit_id],
-            method=method_for_target(contract, target),
-            unit_id=unit.unit_id)
-        if claim is None:
+        method = target.split(":")[-1].split(".")[-1]
+        win = (pl.repair_contract or {}).get("window_indices") or []
+        claim = claim_from_plan(
+            pl, mechanism=str(getattr(pl, "mechanism", "") or ""),
+            window_indices=[int(x) for x in win], metric=pl.metric or "",
+            invariants=list(getattr(pl, "invariants_assert", []) or []),
+            evidence_refs=[unit.unit_id], method=method, unit_id=unit.unit_id)
+        freeze_claim(claim)
+        errs = validate_claim_self(claim, pl.diffs)
+        if errs:
             print("claim-gate: rejected", unit.unit_id, errs)
             return False
         _claims[unit.unit_id] = claim
@@ -460,8 +456,10 @@ def main() -> int:
         if _op is not None:
             from upi.core.models import EditPlan
             _pl = EditPlan(playbook_id=_op.get("playbook_id", "oracle-clean"),
+                           mechanism=_op.get("mechanism", ""),
                            diffs=_op.get("diffs") or [],
                            metric=_op.get("metric", ""),
+                           invariants_assert=_op.get("invariants_assert") or [],
                            invariant=_op.get("invariant") or {},
                            repair_contract=_op.get("repair_contract") or {},
                            side_effect="none", permission_tier="auto")
@@ -647,25 +645,6 @@ def main() -> int:
                 status = "not_structural"
             elif status == "verified" and not _prof.can_verify:
                 status = "candidate_only"
-            if a.claim_gate and _claim is not None:
-                _ct = next((c for c in _claim_contracts.values()
-                            if c.case_id == _claim.case_id), None)
-                if _ct is not None:
-                    from upi.core.verification_contract import (
-                        Observation, evaluate as _eval_claim)
-                    _src = "\n".join(
-                        (p / s.file).read_text(encoding="utf-8")
-                        for s in _claim.sites if (p / s.file).is_file())
-                    _obs = Observation(
-                        compile_ok=True, after_n=after_n,
-                        window_indices=list(window_indices_obs),
-                        metric=unit_metric.get(unit.unit_id, ""),
-                        metric_delta=float(metric_delta or 0.0),
-                        invariants_ok=True, guards_ok=True,
-                        source_text=_src)
-                    _cst, _creasons = _eval_claim(_ct, _claim, _obs)
-                    print("claim-verify", unit.unit_id, _cst, _creasons)
-                    status = _cst
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,

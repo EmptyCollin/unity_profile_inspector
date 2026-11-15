@@ -157,6 +157,36 @@ def freeze_claim(claim: PatchClaim, at: str = "frozen") -> PatchClaim:
     return claim
 
 
+def validate_claim_self(claim: PatchClaim,
+                        diffs: list[dict] | None = None,
+                        *, require_frozen: bool = True) -> list[str]:
+    """产品侧 claim 自校验：不读 CaseContract/标准答案。"""
+    errs = []
+    if require_frozen and not claim.frozen_at:
+        errs.append("claim_not_frozen")
+    if not claim.changed:
+        errs.append("identity_noop")
+    if claim.semantic_risk:
+        errs.append("semantic_risk")
+    if not claim.sites:
+        errs.append("missing_site")
+    if claim.mechanism not in MECHANISMS:
+        errs.append("unknown_mechanism")
+    if claim.expected_metric and claim.expected_metric not in \
+            MECHANISM_METRICS.get(claim.mechanism, set()):
+        errs.append("metric_not_allowed")
+    if not claim.window_indices:
+        errs.append("missing_window")
+    if not claim.invariants:
+        errs.append("missing_invariants")
+    if not claim.evidence_refs:
+        errs.append("missing_evidence")
+    if diffs is not None and claim.patch_digest and \
+            claim.patch_digest != patch_digest(diffs):
+        errs.append("patch_digest_mismatch")
+    return errs
+
+
 def validate_claim(claim: PatchClaim, contract: CaseContract,
                    diffs: list[dict] | None = None,
                    *, require_frozen: bool = False) -> list[str]:

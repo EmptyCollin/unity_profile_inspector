@@ -101,6 +101,46 @@ def _why_not_auto(plan: EditPlan) -> str:
                 "§3 维度一硬规则：无论置信度多高一律 semi")
     return ("不在语义保持白名单内（§3 维度二），auto 档必要条件不满足")
 
+def _cost_context(bundle, cand) -> str:
+    """给归因卡补 total 分母和目标占比（只用实测 counters/functions）。"""
+    if bundle is None:
+        return ""
+    cap = str(getattr(bundle, "run_id", "") or "")
+    p = ROOT / "runs" / cap / "counters.json"
+    if not p.is_file():
+        cands = sorted((ROOT / "runs").glob(f"{cap}_a*/counters.json"))
+        p = cands[0] if cands else p
+    if not p.is_file():
+        return ""
+    try:
+        counters = json.loads(p.read_text(encoding="utf-8")).get("counters") or {}
+        def _median(name):
+            node = counters.get(name) or {}
+            vals = node.get("series") if isinstance(node, dict) else None
+            if not isinstance(vals, list) or not vals:
+                return None
+            vals = sorted(float(x) for x in vals)
+            return vals[len(vals) // 2]
+        total_frame = _median("CPU Main Thread Frame Time")
+        total_alloc = _median("GC Allocated In Frame")
+        method = str(getattr(cand, "root_cause", "")).split(":")[-1].split(".")[-1]
+        funcs = getattr(bundle, "functions", []) or []
+        target_ms = 0.0
+        for f in funcs:
+            sym = str(getattr(f, "symbol", "") or "")
+            if method and method in sym:
+                target_ms += float(getattr(f, "self_ms", 0) or 0)
+        parts = []
+        if total_frame:
+            parts.append(f"target_self_ms={target_ms:.3f}; total_frame_ms={total_frame:.3f}; "
+                         f"share={target_ms / total_frame:.3f}")
+        if total_alloc:
+            parts.append(f"total_alloc={total_alloc:.0f}")
+        return "; ".join(parts)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None,
@@ -253,7 +293,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 f"mechanism={c.mechanism}; kind={c.kind}; "
                 f"score={c.score:.2f} (CI {c.score_interval_low:.2f}-"
                 f"{c.score_interval_high:.2f}); evidence_n={c.evidence_n}; "
-                f"spans={span_text}")
+                f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}")
         archive: dict = {}
         ev_rounds = 0
         while True:
