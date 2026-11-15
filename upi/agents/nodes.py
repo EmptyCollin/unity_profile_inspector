@@ -690,6 +690,14 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
              "isolation": adj_meta.get("isolation",
                                        "rule-only（未启用模型或未到期）")},
             ensure_ascii=False)
+        if status in ("failed", "not_significant", "regressed"):
+            try:
+                from upi.core.finding_blacklist import BlacklistStore
+                from upi.core.repair_policy import propose_from_run_state
+                propose_from_run_state(
+                    BlacklistStore(ROOT / "runs" / "blacklist.db"), st)
+            except Exception:  # noqa: BLE001
+                pass
         return {"review_decision": decision,
                 "review_reason": reason,
                 "records": st.get("records", []) + [rec], "route": "proceed",
