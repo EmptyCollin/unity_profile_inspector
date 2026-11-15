@@ -174,3 +174,4 @@ runs/<run_id>/exam_report.json
 - 11case 当前 3 verified，不能当“全部修好”
 ```
 阶段复盘：[docs/I25-ext-复盘.md](docs/I25-ext-复盘.md)
+测量优先复盘：[docs/I25-ext-复盘-测量优先.md](docs/I25-ext-复盘-测量优先.md)
