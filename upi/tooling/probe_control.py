@@ -75,7 +75,7 @@ def legacy_stop() -> None:
 
 def set_window(window: str, *, wait: bool = False) -> str:
     """设置当前动作窗口；探针会写入 breach JSON 的 window 字段。"""
-    return send_cmd("window " + str(window or ""), wait=wait, timeout_s=2.0)
+    return send_cmd("window:" + str(window or ""), wait=wait, timeout_s=2.0)
 
 
 def install(project: Optional[Path | str] = None, *, timeout_s: int = 180) -> dict:
