@@ -1176,3 +1176,57 @@ python -m upi dev devsim-replay --project sim/project --case c04
 10. 评测报告能区分“漏报/误报/正确机会”，不把 0 机会 case 当失败。
 
 ---
+
+## 15. I25-ext：修复引擎、状态树与黑名单
+
+### 15.1 边界
+
+```text
+orchestrator：finding 生命周期、plan、工单、全局预算、最终 verdict、报告
+repair_serial：单 finding 的 attempt 循环、checkpoint、patch 回滚、partial 保留
+repair_loop(I17)：只保留 Observation/decide_next 决策函数
+```
+
+### 15.2 状态
+
+```text
+verified            目标消失 + metric 达标 + invariant/守护
+improved_partial    delta > 0 但未达目标，保留
+partial / needs_recheck
+regressed
+no_effect
+```
+
+### 15.3 预算与回滚
+
+```text
+orchestrator 剩余预算 → tree_for_run_state
+tree 子预算：per_state / per_finding / max_total / max_depth
+git_ref checkpoint；restore_checkpoint 可真实恢复
+```
+
+### 15.4 黑名单
+
+```text
+signature + window + metric + protocol_fingerprint + project_scope
+proposed → active（人工）
+TTL / retired / audit
+只用于 production，不进 exam
+```
+
+### 15.5 考试
+
+```text
+完整考试 = 端到端执行 + 产物齐全 + 判定可复现
+通过 = verified 达到阈值
+11case --serial 首次完整跑通：3/11 verified
+```
+
+### 15.6 已知限制
+
+```text
+engine 控制 attempt 未完成
+orchestrator 与 engine 回滚尚未完全统一
+检测稳定性不足
+sample.window 已真机验证，但同类型多动作未区分 cmd_index
+```

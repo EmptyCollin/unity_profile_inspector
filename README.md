@@ -106,3 +106,70 @@ python scripts/e2e_replay.py            # 夹具自动 replay 3 次基线（真�
 python scripts/release_check.py         # 发布前审计，落 runs/release_*.json
 python -m upi ui --check                # Web 状态自检（ASCII JSON）
 ```
+
+## 2026-11-15：I25-ext 阶段成果
+
+本阶段把“修复—验证—再修复”从线性重来推进到 **checkpoint 树 + 单 finding 串行尝试 + 黑名单 + UI**。
+
+### 已跑通
+
+```text
+11case --serial 真机完整考试
+run test_project_20261115_123247
+baseline 11 roots
+verified 3 / improved_partial 1 / needs_recheck 6 / no_plan 1
+exam_executed=true
+exam_passed=false
+```
+
+这不是“全部通过”，是完整考试可执行、结果可追溯。
+
+### 新增能力
+
+```text
+upi/core/repair_tree.py        checkpoint 状态树、预算、git_ref 回滚
+upi/core/repair_engine.py      RepairEngine / SerialEngine
+upi/core/repair_serial.py      逐 finding 串行循环
+upi/core/finding_blacklist.py  黑名单指纹库（proposed/active/TTL/audit）
+upi/core/repair_policy.py      生产查询/提议/失败回调
+upi/agents/repair_ui.py        修复状态页面
+```
+
+### 新增页面
+
+```text
+/repair
+  状态树、attempt 轨迹、预算、黑名单、命中、审计、回滚、模式
+```
+
+### 关键命令
+
+```powershell
+# 完整考试（压缩 replay、3 基线、串行）
+python scripts/exam_batch.py --replay runs/i8_lab/paper_replay.json \
+  --baselines 3 --rounds 1 --plan-repeat 3 --plan-min-votes 2 --serial
+
+# 考试报告
+python bench/exam_report.py --run-id <run_id>
+
+# UI
+python -m upi ui
+```
+
+### 产物
+
+```text
+runs/<run_id>/repair_tree.json（每 unit 一份）
+runs/<run_id>/counterfactual.jsonl
+runs/<run_id>/exam_report.md
+runs/<run_id>/exam_report.json
+```
+
+### 边界
+
+```text
+- engine 尚未完全接管 orchestrator 的 attempt 执行
+- 回滚所有权尚未完全收敛
+- 检测稳定性仍不足，单次 root 数会波动
+- 11case 当前 3 verified，不能当“全部修好”
+```
