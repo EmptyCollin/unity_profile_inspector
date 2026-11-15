@@ -21,7 +21,7 @@ from upi.adapters.loader import load_adapter  # noqa: E402
 from upi.agents.flow_run import FlowRun  # noqa: E402
 from upi.agents.llm_planner import plan_issue  # noqa: E402
 from upi.core import events as E  # noqa: E402
-from upi.core.batch_round import run_batch  # noqa: E402
+from upi.core.batch_round import BatchResult, run_batch  # noqa: E402
 from upi.core.evidence_diagnosis import candidates_from_latest  # noqa: E402
 from upi.core.findings import (RepairRecord, RunFindings, new_run_id,  # noqa: E402
                                save_run)
@@ -87,6 +87,8 @@ def main() -> int:
                     help="项目适配器 module:Class")
     ap.add_argument("--static-repair", action="store_true",
                     help="把静态-only 候选也纳入修复（默认只作 potential）")
+    ap.add_argument("--serial", action="store_true",
+                    help="逐 finding 串行修复（RepairTree），默认批量")
     a = ap.parse_args()
     p = Path(a.project).resolve()
     run_id = new_run_id(a.project_id)
@@ -514,10 +516,29 @@ def main() -> int:
         return X._git_reset(p, bases.get(patch.unit_id, ""))
 
     def batch_fn(active_units, round_no):
-        return run_batch(active_units, plan=plan, apply=apply,
-                         compile_fn=compile_fn, capture=capture_fn,
-                         verify=verify, rollback=rollback,
-                         round_no=round_no)
+        if not a.serial:
+            return run_batch(active_units, plan=plan, apply=apply,
+                             compile_fn=compile_fn, capture=capture_fn,
+                             verify=verify, rollback=rollback,
+                             round_no=round_no)
+        from upi.core.repair_tree import RepairTree, load_budget, save_tree
+        combined = BatchResult(round=round_no)
+        for u in active_units:
+            tree = RepairTree(finding_id=u.unit_id, project_root=p,
+                              budget=load_budget())
+            r = run_batch([u], plan=plan, apply=apply,
+                          compile_fn=compile_fn, capture=capture_fn,
+                          verify=verify, rollback=rollback,
+                          round_no=round_no, tree=tree)
+            save_tree(tree, run_dir / u.unit_id / "repair_tree.json")
+            combined.applied += r.applied
+            combined.verified += r.verified
+            combined.partial += r.partial
+            combined.failed.update(r.failed)
+            combined.rolled_back += r.rolled_back
+            combined.compile_ok &= r.compile_ok
+            combined.capture_ok &= r.capture_ok
+        return combined
 
     active = list(units)
     flow.enter("plan", active=[u.unit_id for u in active])
