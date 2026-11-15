@@ -537,6 +537,8 @@ def main() -> int:
                 status = "semantic_risk"
             elif gate != "measured":
                 status = gate
+            elif status == "verified" and patch_class == "micro":
+                status = "not_structural"
             elif status == "verified" and not _prof.can_verify:
                 status = "candidate_only"
             cf_records.append({
@@ -555,6 +557,7 @@ def main() -> int:
                 "measurement_status": gate,
                 "semantic_risk": semantic_risk,
                 "patch_family": patch_family,
+                "patch_class": patch_class,
                 "sites_remaining": sites,
                 "status": status,
             })
@@ -573,6 +576,8 @@ def main() -> int:
                   if plans.get(unit.unit_id) else [])
         from upi.core.repair_candidate import semantic_risk_for_diffs
         semantic_risk = semantic_risk_for_diffs(_diffs)
+        from upi.core.patch_shape import classify as _patch_shape
+        patch_class = _patch_shape(_diffs)
         for _d in _diffs:
             _find = str(_d.get("find") or "")
             _repl = str(_d.get("replace") or "")
