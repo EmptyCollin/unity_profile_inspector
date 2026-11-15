@@ -67,6 +67,7 @@ class State:
     status: str = "active"
     metric_before: Optional[float] = None
     accepted_patch: str = ""
+    git_ref: str = ""
     attempts_at_state: int = 0
     children: list[str] = field(default_factory=list)
 
@@ -78,9 +79,11 @@ class RepairTree:
     """DFS 修复树：保留改善，失败回退父 checkpoint。"""
 
     def __init__(self, *, finding_id: str, budget: Budget | None = None,
-                 metric_before: float | None = None):
+                 metric_before: float | None = None,
+                 project_root: str | Path = ""):
         self.finding_id = finding_id
         self.budget = budget or Budget()
+        self.project_root = str(project_root or "")
         self.states: dict[str, State] = {}
         self.attempts: list[Attempt] = []
         self.current_id = "root"
@@ -95,11 +98,27 @@ class RepairTree:
     def current(self) -> State:
         return self.states[self.current_id]
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "RepairTree":
+        t = cls(finding_id=str(d.get("finding_id") or ""),
+                budget=Budget(**(d.get("budget") or {})),
+                project_root=str(d.get("project_root") or ""))
+        for raw in d.get("states") or []:
+            s = State(**raw)
+            t.states[s.state_id] = s
+        t.current_id = str(d.get("current") or "root")
+        t.finished = bool(d.get("finished"))
+        t.reason = str(d.get("reason") or "")
+        t.total_attempts = int(d.get("total_attempts") or 0)
+        t.finding_failures = int(d.get("finding_failures") or 0)
+        return t
+
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}{len(self.states)}"
 
     def record(self, status: str, *, patch_id: str = "",
-               delta: float | None = None, reason: str = "") -> str:
+               delta: float | None = None, reason: str = "",
+               git_ref: str = "") -> str:
         """记录一次 attempt，返回 keep / retry / backtrack / finding_failed /
         budget_exhausted / infra_retry / depth_exhausted。"""
         if self.finished:
@@ -125,7 +144,7 @@ class RepairTree:
             child = State(child_id, parent_id=self.current_id,
                           depth=self.current.depth + 1,
                           metric_before=self.current.metric_before,
-                          accepted_patch=patch_id)
+                          accepted_patch=patch_id, git_ref=git_ref)
             self.states[child_id] = child
             self.current.status = "best"
             self.current.children.append(child_id)
@@ -171,12 +190,14 @@ class RepairTree:
     def to_dict(self) -> dict:
         return {
             "finding_id": self.finding_id,
+            "project_root": self.project_root,
             "budget": self.budget.as_dict(),
             "current": self.current_id,
             "root_failed": self.root_failed(),
             "finished": self.finished,
             "reason": self.reason,
             "total_attempts": self.total_attempts,
+            "finding_failures": self.finding_failures,
             "states": [s.as_dict() for s in self.states.values()],
             "attempts": [a.__dict__ for a in self.attempts],
         }
@@ -189,3 +210,24 @@ def save_tree(tree: RepairTree, path: str | Path) -> Path:
     p.write_text(json.dumps(tree.to_dict(), ensure_ascii=False, indent=2),
                  encoding="utf-8")
     return p
+
+
+def restore_checkpoint(tree: RepairTree, state_id: str) -> dict:
+    """回滚到 state；有 git_ref 时真正恢复工程文件。"""
+    state = tree.states.get(state_id)
+    if state is None:
+        raise ValueError(f"state not found: {state_id}")
+    if not state.git_ref:
+        tree.rollback_to(state_id)
+        return {"ok": True, "pointer_only": True, "to": state_id}
+    if not tree.project_root:
+        raise ValueError("project_root missing")
+    import subprocess
+    p = subprocess.run(
+        ["git", "-C", tree.project_root, "reset", "--hard", state.git_ref],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr[-400:] or p.stdout[-400:])
+    tree.rollback_to(state_id)
+    return {"ok": True, "pointer_only": False, "to": state_id,
+            "git_ref": state.git_ref}

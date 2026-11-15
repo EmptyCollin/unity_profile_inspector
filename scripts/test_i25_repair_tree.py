@@ -1,4 +1,5 @@
 """I25：checkpoint 状态树与预算。"""
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -7,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.repair_tree import (Budget, RepairTree, load_budget,  # noqa: E402
-                                  save_tree)
+                                  restore_checkpoint, save_tree)
 
 PASS, FAIL = [], []
 
@@ -61,6 +62,23 @@ ok("读取 max_tokens", b.max_tokens == 200000, b)
 
 p = save_tree(t, Path(tempfile.mkdtemp()) / "tree.json")
 ok("状态树落盘", p.is_file() and '"states"' in p.read_text(encoding="utf-8"))
+
+# 8. git_ref 真实回滚
+repo = Path(tempfile.mkdtemp())
+subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], check=True)
+subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+(repo / "a.txt").write_text("v1", encoding="utf-8")
+subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+subprocess.run(["git", "-C", str(repo), "commit", "-qm", "v1"], check=True)
+ref = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                     capture_output=True, text=True).stdout.strip()
+tg = RepairTree(finding_id="f", project_root=repo)
+tg.record("improved_partial", patch_id="p1", git_ref=ref)
+(repo / "a.txt").write_text("v2", encoding="utf-8")
+r = restore_checkpoint(tg, "s1")
+ok("git_ref 回滚", r["pointer_only"] is False and r["git_ref"] == ref, r)
+ok("文件恢复 v1", (repo / "a.txt").read_text(encoding="utf-8") == "v1")
 
 print(f"\n==== I25 状态树测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

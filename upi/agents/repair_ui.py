@@ -176,6 +176,11 @@ def rollback_tree(path: str | Path, state_id: str) -> dict:
     if state_id not in ids:
         raise ValueError(f"state not found: {state_id}")
     from_state = d.get("current")
+    from upi.core.repair_tree import RepairTree, restore_checkpoint, save_tree
+    tree = RepairTree.from_dict(d)
+    result = restore_checkpoint(tree, state_id)
+    save_tree(tree, p)
+    d = json.loads(p.read_text(encoding="utf-8"))
     d["current"] = state_id
     p.write_text(json.dumps(d, ensure_ascii=False, indent=2),
                  encoding="utf-8")
@@ -186,9 +191,10 @@ def rollback_tree(path: str | Path, state_id: str) -> dict:
             "ts": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"),
             "actor": "ui", "action": "rollback_pointer",
             "detail": f"{from_state}->{state_id}",
+            "pointer_only": result.get("pointer_only", True),
             "path": str(p)}, ensure_ascii=False) + "\n")
-    return {"ok": True, "from": from_state, "to": state_id,
-            "pointer_only": True}
+    result["from"] = from_state
+    return result
 
 
 def audit_entries(limit: int = 200) -> list[dict]:
