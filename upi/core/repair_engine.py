@@ -21,17 +21,21 @@ class SerialEngine:
 
     def __init__(self, tree: RepairTree):
         self.tree = tree
+        self.last_status = ""
 
     def attempt(self, patch, *, apply: Callable, compile_fn: Callable,
                 capture: Callable, verify: Callable, rollback: Callable,
                 git_head: Callable[[], str] = lambda: "") -> str:
         if not apply(patch):
+            self.last_status = "infra_failure"
             return self.tree.record("infra_failure", reason="apply_failed")
         if not compile_fn():
             rollback(patch)
+            self.last_status = "no_effect"
             return self.tree.record("no_effect", reason="compile_failed")
         obs = capture()
         status = str(verify(obs) or "no_effect")
+        self.last_status = status
         action = self.tree.record(
             status, patch_id=str(getattr(patch, "unit_id", "")),
             git_ref=(git_head() if status in

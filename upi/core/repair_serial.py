@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from upi.core.repair_engine import SerialEngine
 from upi.core.repair_tree import RepairTree
 
 
@@ -30,6 +31,7 @@ def run_repair_loop(
 ) -> LoopResult:
     """一次只修一个 finding；keep 写 git_ref，失败只回滚当前 patch。"""
     out = LoopResult()
+    engine = SerialEngine(tree)
     for step in range(max_steps):
         if tree.finished:
             out.stopped = tree.reason or "finished"
@@ -44,28 +46,13 @@ def run_repair_loop(
                 out.stopped = action
                 break
             continue
-        if not apply(patch):
-            action = tree.record("infra_failure", reason="apply_failed")
-            out.actions.append(action)
-            out.attempts += 1
-            continue
-        if not compile_fn():
-            rollback(patch)
-            action = tree.record("no_effect", reason="compile_failed")
-            out.actions.append(action)
-            out.attempts += 1
-            continue
-        obs = capture()
-        status = str(verify(tree.current, obs) or "no_effect")
-        out.statuses.append(status)
-        action = tree.record(
-            status, patch_id=str(getattr(patch, "unit_id", "")),
-            git_ref=(git_head() if status in
-                     ("improved_partial", "verified") else ""))
-        out.attempts += 1
-        if status not in ("improved_partial", "verified"):
-            rollback(patch)
+        action = engine.attempt(
+            patch, apply=apply, compile_fn=compile_fn, capture=capture,
+            verify=lambda obs: verify(tree.current, obs),
+            rollback=rollback, git_head=git_head)
+        out.statuses.append(engine.last_status)
         out.actions.append(action)
+        out.attempts += 1
         if tree.finished:
             out.stopped = tree.reason or "finished"
             break
