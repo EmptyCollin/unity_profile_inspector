@@ -345,6 +345,15 @@ def main() -> int:
             json.dumps(asset_records, ensure_ascii=False, indent=2),
             encoding="utf-8")
     print("findings", len(findings), "units", len(units))
+    if _prof.name == "screen":
+        (run_dir / "screen.json").write_text(json.dumps({
+            "profile": "screen",
+            "findings": len(findings),
+            "units": [{"unit_id": u.unit_id, "mechanism": u.mechanism}
+                      for u in units],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("screen only: baseline+diagnose, no repair/after")
+        return 0
 
     cfg = N.load_config(ROOT / "llm_config.yaml")
     decide_policy = None
@@ -512,14 +521,15 @@ def main() -> int:
         # G21：回归形态 verified 至少需要 3 次基线；1 次只能算流程冒烟
         if a.baselines < 3:
             print("verify blocked: baselines<3 (smoke only)", a.baselines)
+            _blocked = "screen_only" if _prof.name == "screen" else "needs_recheck"
             cf_records.append({"unit_id": unit.unit_id,
-                               "status": "needs_recheck",
+                               "status": _blocked,
                                "measurement_status": "unmeasured",
                                "window": "",
                                "before_n": a.baselines,
-                               "after_n": 0,
+                               "after_n": after_n,
                                "reason": "baselines<3"})
-            return "needs_recheck"
+            return _blocked
         target = unit.targets[0].split(":", 1)[-1] if unit.targets else unit.mechanism
         now = set(obs or [])
         gone = target not in now
