@@ -24,6 +24,7 @@ class BatchResult:
     round: int = 1
     applied: list[str] = field(default_factory=list)
     verified: list[str] = field(default_factory=list)
+    partial: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
     rolled_back: list[str] = field(default_factory=list)
     compile_ok: bool = True
@@ -59,7 +60,7 @@ def _isolate_compile(patches: dict[str, PatchRef], apply: ApplyFn,
 def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
               compile_fn: CompileFn, capture: CaptureFn,
               verify: VerifyFn, rollback: RollbackFn,
-              round_no: int = 1) -> BatchResult:
+              round_no: int = 1, tree=None) -> BatchResult:
     """LangGraph 版：plan → apply → compile → capture → verify。"""
     class S(TypedDict, total=False):
         units: list
@@ -131,6 +132,18 @@ def run_batch(units: list, *, plan: PlanFn, apply: ApplyFn,
             if uid not in good or uid not in st["patches"]:
                 continue
             verdict = str(verify(u, st.get("obs")) or "failed")
+            if tree is not None and len(units) == 1:
+                action = tree.record(verdict, patch_id=uid)
+                if action == "keep":
+                    if verdict == "verified":
+                        res.verified.append(uid)
+                    else:
+                        res.partial.append(uid)
+                    continue
+                res.failed[uid] = verdict
+                if action not in ("infra_retry",) and rollback(st["patches"][uid]):
+                    res.rolled_back.append(uid)
+                continue
             if verdict == "verified":
                 res.verified.append(uid)
             else:
