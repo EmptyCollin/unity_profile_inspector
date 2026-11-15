@@ -236,6 +236,27 @@ def main() -> int:
     after_metrics: dict = {}
     after_start = 0.0
     cf_records: list[dict] = []
+    _site_cache = {"cap": "", "card": ""}
+
+    def _site_card() -> str:
+        cap = str(last_cap.get("id") or "")
+        if not cap:
+            return ""
+        if _site_cache["cap"] == cap:
+            return _site_cache["card"]
+        try:
+            from upi.core.trace_analysis import build_trace
+            doc = build_trace(cap, ROOT / "runs")
+            lines = []
+            for s in (doc.get("site_metrics") or [])[:10]:
+                lines.append(
+                    f"{s.get('symbol')} | {s.get('file')}:{s.get('line')} "
+                    f"| self_ms={s.get('self_ms')} calls={s.get('calls')}")
+            card = "\n".join(lines)
+        except Exception:  # noqa: BLE001
+            card = ""
+        _site_cache.update(cap=cap, card=card)
+        return card
 
     def plan(unit):
         h = next((x for x in hs
@@ -257,6 +278,7 @@ def main() -> int:
                 strategy=f"round{round_no}",
                 required_sites=unit.sites,
                 remaining_sites=_hints or None,
+                candidate_card=_site_card(),
                 mechanism_class="unknown")
             seen_plans.append(_pl)
             variants.append({
