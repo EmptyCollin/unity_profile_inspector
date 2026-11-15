@@ -449,14 +449,14 @@ def main() -> int:
             return None
         _op = None
         if _oracle_plans:
-            _op = _oracle_plans.get(unit.unit_id)
+            for _cand in _oracle_plans.values():
+                _t = str(_cand.get("target") or "")
+                if _t and any(x.endswith(_t) or _t in x
+                              for x in (unit.targets or [])):
+                    _op = _cand
+                    break
             if _op is None:
-                for _cand in _oracle_plans.values():
-                    _t = str(_cand.get("target") or "")
-                    if _t and any(x.endswith(_t) or _t in x
-                                  for x in (unit.targets or [])):
-                        _op = _cand
-                        break
+                _op = _oracle_plans.get(unit.unit_id)
         if _op is not None:
             from upi.core.models import EditPlan
             _pl = EditPlan(playbook_id=_op.get("playbook_id", "oracle-clean"),
