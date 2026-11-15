@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
-from upi.core.repair_tree import RepairTree, restore_checkpoint
+from upi.core.repair_tree import Budget, RepairTree, restore_checkpoint
 
 
 class RepairEngine(Protocol):
@@ -49,3 +49,21 @@ class SerialEngine:
 
     def tree_dict(self) -> dict:
         return self.tree.to_dict()
+
+
+def tree_for_run_state(state: dict) -> RepairTree:
+    """把 orchestrator 的剩余预算映射成单 finding 子预算。"""
+    b = state.get("budget") or {}
+    spent = state.get("spent") or {}
+    total = max(0, int(b.get("max_attempts_per_issue", 3)))
+    used = max(0, int(spent.get("attempts", state.get("attempts", 0))))
+    remaining = max(0, total - used)
+    return RepairTree(
+        finding_id=str(state.get("issue_id") or state.get("run_id") or "issue"),
+        project_root=str(state.get("project") or ""),
+        budget=Budget(
+            max_attempts_per_finding=remaining,
+            max_attempts_per_state=max(1, min(2, remaining)),
+            max_total_attempts=remaining,
+            max_depth=int(b.get("max_depth", 2)),
+        ))

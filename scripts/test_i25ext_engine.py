@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.repair_engine import SerialEngine  # noqa: E402
+from upi.core.repair_engine import SerialEngine, tree_for_run_state  # noqa: E402
 from upi.core.repair_tree import Budget, RepairTree  # noqa: E402
 
 PASS, FAIL = [], []
@@ -46,6 +46,14 @@ ok("no_effect → retry", a2 == "retry", a2)
 ok("失败回滚一次", rolled == ["y"], rolled)
 
 ok("tree_dict 可序列化", "states" in engine.tree_dict())
+
+t2 = tree_for_run_state({"run_id": "r1", "project": "P",
+                         "budget": {"max_attempts_per_issue": 3},
+                         "spent": {"attempts": 1}})
+ok("预算剩余 = 2", t2.budget.max_attempts_per_finding == 2,
+   t2.budget.max_attempts_per_finding)
+ok("total 预算 = 2", t2.budget.max_total_attempts == 2)
+ok("project_root 传递", t2.project_root == "P")
 
 print(f"\n==== I25-ext Engine 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

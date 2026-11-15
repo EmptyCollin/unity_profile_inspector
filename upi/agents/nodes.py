@@ -587,11 +587,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         # I25-ext：主流程也要有 repair_tree，先记录 verdict，不改变旧判定
         tree_dict = st.get("repair_tree")
         try:
+            from upi.core.repair_engine import tree_for_run_state
             from upi.core.repair_tree import RepairTree, save_tree
             raw = st.get("repair_tree") or {}
-            tree = RepairTree.from_dict(raw) if raw else RepairTree(
-                finding_id=str(st.get("issue_id") or run_dir.name),
-                project_root=str(_ctx(st)[0]))
+            tree = RepairTree.from_dict(raw) if raw else tree_for_run_state(
+                {**st, "project": str(_ctx(st)[0])})
             delta = getattr(getattr(v, "target", None), "delta", None)
             status = str(getattr(v, "status", "unknown"))
             mapped = {"resolved": "verified", "regressed": "regressed",
