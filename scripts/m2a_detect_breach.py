@@ -53,12 +53,13 @@ def latest_good_archive() -> Path:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default=None, help="pb_breach.jsonl 路径（默认取最新完整归档）")
+    ap.add_argument("--window", default="", help="动作窗口标签，如 open_shop")
     args = ap.parse_args()
 
     src = Path(args.input) if args.input else latest_good_archive()
     print(f"输入: {src}")
 
-    samples, stats = load_breach_samples(src)
+    samples, stats = load_breach_samples(src, window=args.window)
     print(f"解析: 行数={stats['lines']} 入账={len(samples)} "
           f"JSON坏={stats['json_bad']} 契约拒={stats['contract_reject']}")
     for r in stats["reject_reasons"][:6]:

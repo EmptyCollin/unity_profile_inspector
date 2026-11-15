@@ -23,7 +23,8 @@ from upi.core.models import (A4Frame, BreachSample, Evidence, Finding,
                              Issue, IssueSignature)
 
 
-def load_breach_samples(jsonl_path: str | Path) -> tuple[list[BreachSample], dict]:
+def load_breach_samples(jsonl_path: str | Path,
+                        window: str = "") -> tuple[list[BreachSample], dict]:
     """解析探针 jsonl 归档。返回 (可入账样本, 拒收统计)。
 
     单行非法/构造拒收 = 计数不崩（数据格式问题不拖垮整批），
@@ -49,6 +50,8 @@ def load_breach_samples(jsonl_path: str | Path) -> tuple[list[BreachSample], dic
             continue
         try:
             row = dict(row)
+            if window and not row.get("window"):
+                row["window"] = window
             row["a4_window"] = [A4Frame(**x) for x in row.get("a4_window", [])]
             kept.append(BreachSample(**row))
         except Exception as e:  # noqa: BLE001 — 构造期拒收（D17/G19/哨兵），必须留痕
