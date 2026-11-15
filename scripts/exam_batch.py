@@ -382,7 +382,9 @@ def main() -> int:
                 measurement_status as _measurement)
             gate = _measurement(window=window_used, after_n=after_n,
                                 before_n=before_n)
-            if gate != "measured":
+            if semantic_risk:
+                status = "semantic_risk"
+            elif gate != "measured":
                 status = gate
             cf_records.append({
                 "unit_id": unit.unit_id,
@@ -415,13 +417,11 @@ def main() -> int:
         patch_family = ""
         _diffs = (plans.get(unit.unit_id).diffs
                   if plans.get(unit.unit_id) else [])
+        from upi.core.repair_candidate import semantic_risk_for_diffs
+        semantic_risk = semantic_risk_for_diffs(_diffs)
         for _d in _diffs:
             _find = str(_d.get("find") or "")
             _repl = str(_d.get("replace") or "")
-            if not _repl.strip():
-                semantic_risk = "empty_replace"
-            elif len(_find) - len(_repl) > 400:
-                semantic_risk = "block_delete"
             if "new " in _find and "new " not in _repl:
                 patch_family = "allocation"
             elif "ForceUpdate" in _find:
