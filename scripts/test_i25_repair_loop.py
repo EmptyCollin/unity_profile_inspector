@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.repair_loop import run_repair_loop  # noqa: E402
+from upi.core.repair_serial import run_repair_loop  # noqa: E402
 from upi.core.repair_tree import Budget, RepairTree  # noqa: E402
 
 PASS, FAIL = [], []

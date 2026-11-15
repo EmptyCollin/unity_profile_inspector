@@ -1,71 +1,44 @@
-"""I25：逐 finding 串行修复循环（DFS + checkpoint）。"""
+"""I17：两级修复循环的决策层。
+
+内层不换目标；根据观测选择：
+  refine_same_root / alternative_patch / fix_remaining_sites /
+  request_evidence / rollback_and_next / stop
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Literal, Optional
 
-from upi.core.repair_tree import RepairTree
+Action = Literal["verified", "refine_same_root", "alternative_patch",
+                 "fix_remaining_sites", "request_evidence",
+                 "rollback_and_next", "stop"]
 
 
 @dataclass
-class LoopResult:
-    statuses: list[str] = field(default_factory=list)
-    actions: list[str] = field(default_factory=list)
-    attempts: int = 0
-    stopped: str = ""
+class Observation:
+    verdict: str
+    target_gone: bool = False
+    metric_delta: Optional[float] = None
+    new_clusters: list[str] = field(default_factory=list)
+    sites_remaining: int = 0
+    reason: str = ""
+    diff_hash: str = ""
 
 
-def run_repair_loop(
-    tree: RepairTree,
-    *,
-    plan: Callable[[object], object],
-    apply: Callable[[object], bool],
-    compile_fn: Callable[[], bool],
-    capture: Callable[[], object],
-    verify: Callable[[object, object], str],
-    rollback: Callable[[object], bool],
-    git_head: Callable[[], str] = lambda: "",
-    max_steps: int = 32,
-) -> LoopResult:
-    """一次只修一个 finding；keep 写 git_ref，失败只回滚当前 patch。"""
-    out = LoopResult()
-    for step in range(max_steps):
-        if tree.finished:
-            out.stopped = tree.reason or "finished"
-            break
-        patch = plan(tree.current)
-        if patch is None:
-            action = tree.record("no_effect", reason="no_plan")
-            out.actions.append(action)
-            out.attempts += 1
-            if action in ("finding_failed", "budget_exhausted",
-                          "depth_exhausted"):
-                out.stopped = action
-                break
-            continue
-        if not apply(patch):
-            action = tree.record("infra_failure", reason="apply_failed")
-            out.actions.append(action)
-            out.attempts += 1
-            continue
-        if not compile_fn():
-            rollback(patch)
-            action = tree.record("no_effect", reason="compile_failed")
-            out.actions.append(action)
-            out.attempts += 1
-            continue
-        obs = capture()
-        status = str(verify(tree.current, obs) or "no_effect")
-        out.statuses.append(status)
-        action = tree.record(
-            status, patch_id=str(getattr(patch, "unit_id", "")),
-            git_ref=(git_head() if status in
-                     ("improved_partial", "verified") else ""))
-        out.attempts += 1
-        if status not in ("improved_partial", "verified"):
-            rollback(patch)
-        out.actions.append(action)
-        if tree.finished:
-            out.stopped = tree.reason or "finished"
-            break
-    return out
+def decide_next(obs: Observation, *, attempts: int, max_attempts: int,
+                seen_hashes: set[str] | None = None) -> Action:
+    seen = seen_hashes or set()
+    if obs.verdict == "verified":
+        return "verified"
+    if "evidence" in (obs.reason or "").lower() or "no_source" in obs.reason:
+        return "request_evidence"
+    if obs.sites_remaining > 0:
+        return "fix_remaining_sites"
+    if obs.diff_hash and obs.diff_hash in seen:
+        return "alternative_patch"
+    if attempts >= max_attempts:
+        return "rollback_and_next"
+    if obs.verdict in ("needs_recheck", "pseudo_fix", "partial_fix"):
+        # 有改善但目标仍在：优先同根因换方案；无改善也换方案，不换题
+        return "refine_same_root" if obs.metric_delta else "alternative_patch"
+    return "stop"
