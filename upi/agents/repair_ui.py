@@ -21,6 +21,8 @@ th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #222c3a;white-spac
 th{color:var(--mut);font-weight:500}.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
 .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.mut{color:var(--mut)}
 a{color:var(--acc)}.empty{color:var(--mut);padding:12px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row input,textarea{background:#0d1219;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:12px ui-monospace,monospace}
+button{background:#22314a;color:var(--tx);border:1px solid #36527a;border-radius:8px;padding:7px 12px;cursor:pointer}
 </style></head><body>
 <header><h1>修复状态</h1><span class="badge" id="mode">production</span>
 <span class="mut" id="hint">只读视图；写操作后续开放</span>
@@ -29,6 +31,13 @@ a{color:var(--acc)}.empty{color:var(--mut);padding:12px 0}
 <div class="card"><h2>预算</h2><div id="budget" class="mono mut">加载中…</div></div>
 <div class="card"><h2>Checkpoint 状态树</h2><div id="trees" class="mut">加载中…</div></div>
 <div class="card"><h2>黑名单</h2><div id="blacklist" class="mut">加载中…</div></div>
+<div class="card"><h2>新增黑名单</h2>
+<div class="row"><input id="bl-sig" placeholder="signature"><input id="bl-win" placeholder="window">
+<input id="bl-metric" placeholder="metric"><input id="bl-proto" placeholder="protocol_fingerprint">
+<input id="bl-ttl" placeholder="ttl 秒" type="number"><input id="bl-reason" placeholder="reason">
+<button onclick="addBL()">提交 proposed</button></div></div>
+<div class="card"><h2>预算</h2><textarea id="budgetEdit" rows="8"></textarea>
+<button onclick="saveBudget()">保存预算</button><span id="budgetMsg" class="mut"></span></div>
 </div>
 <script>
 const TOKEN="__UPI_TOKEN__";
@@ -40,10 +49,34 @@ function table(rows,cols){
   return '<table><thead><tr>'+cols.map(c=>`<th>${esc(c[0])}</th>`).join('')+'</tr></thead><tbody>'+
     rows.map(r=>'<tr>'+cols.map(c=>`<td class="${c[2]||''}">${c[1](r)}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
 }
+async function post(u,b){const r=await fetch(q(u),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});return await r.json()}
+async function addBL(){
+ const v=(id)=>document.getElementById(id).value;
+ const r=await post("/api/blacklist",{action:"add",signature:v("bl-sig"),window:v("bl-win"),
+   metric:v("bl-metric"),protocol_fingerprint:v("bl-proto"),ttl:Number(v("bl-ttl")||0),
+   reason:v("bl-reason"),status:"proposed",actor:"ui"});
+ if(!r.ok)alert(r.error||"失败");else location.reload();
+}
+async function setBL(id,status){
+ const r=await post("/api/blacklist",{action:"status",fingerprint_id:id,status,reason:"ui",actor:"ui"});
+ if(!r.ok)alert(r.error||"失败");else location.reload();
+}
+async function delBL(id){
+ if(!confirm("确认删除？"))return;
+ const r=await post("/api/blacklist",{action:"delete",fingerprint_id:id,reason:"ui",actor:"ui"});
+ if(!r.ok)alert(r.error||"失败");else location.reload();
+}
+async function saveBudget(){
+ let obj;try{obj=JSON.parse(document.getElementById("budgetEdit").value)}catch(e){alert("JSON 无效");return}
+ const r=await post("/api/repair/budget",{budget:obj,actor:"ui"});
+ document.getElementById("budgetMsg").textContent=r.ok?"已保存":"失败: "+(r.error||"");
+ if(r.ok)location.reload();
+}
 (async()=>{
  try{
   const b=await get("/api/repair/budget");
   document.getElementById("budget").textContent=JSON.stringify(b.budget||b,null,2);
+  document.getElementById("budgetEdit").value=JSON.stringify(b.budget||b,null,2);
   const t=await get("/api/repair/trees");
   document.getElementById("trees").innerHTML=table(t.trees||[], [
     ["finding",r=>`<span class="mono">${esc(r.finding_id)}</span>`],
@@ -63,6 +96,9 @@ function table(rows,cols){
     ["attempts",r=>esc(r.attempts)],
     ["ttl",r=>esc(r.ttl)],
     ["reason",r=>esc(r.reason||"")],
+    ["操作",r=>`<button onclick="setBL('${esc(r.fingerprint_id)}','active')">启用</button>
+      <button onclick="setBL('${esc(r.fingerprint_id)}','retired')">停用</button>
+      <button onclick="delBL('${esc(r.fingerprint_id)}')">删除</button>`],
   ]);
  }catch(e){document.getElementById("trees").innerHTML='<div class="bad">'+esc(e)+'</div>';}
 })();

@@ -20,6 +20,8 @@ ok("页面含状态树接口", "/api/repair/trees" in REPAIR_HTML)
 ok("页面含黑名单接口", "/api/blacklist" in REPAIR_HTML)
 ok("页面含模式标记", "production" in REPAIR_HTML)
 ok("页面含 token 占位", "__UPI_TOKEN__" in REPAIR_HTML)
+ok("页面含黑名单写操作", "addBL" in REPAIR_HTML and "setBL" in REPAIR_HTML)
+ok("页面含预算保存", "saveBudget" in REPAIR_HTML)
 
 b = budget()
 ok("预算字段", b["max_attempts_per_finding"] == 6 and b["max_total_attempts"] == 12, b)

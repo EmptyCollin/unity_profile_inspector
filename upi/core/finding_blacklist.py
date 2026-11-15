@@ -148,6 +148,17 @@ class BlacklistStore:
             c.commit()
         return self.get(fid)
 
+    def delete(self, fid: str, *, actor: str = "", reason: str = "") -> bool:
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM blacklist WHERE fingerprint_id=?", (fid,))
+            c.execute("""INSERT INTO blacklist_audit
+                         (fingerprint_id, ts, actor, action, detail)
+                         VALUES (?,?,?,?,?)""",
+                      (fid, now, actor, "delete", reason))
+            c.commit()
+        return cur.rowcount > 0
+
     def expire_due(self, now: float | None = None) -> int:
         now = now or time.time()
         n = 0

@@ -1344,6 +1344,69 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": f"bad json: {e}"})
             return
 
+        if parsed.path == "/api/blacklist":
+            try:
+                from upi.core.finding_blacklist import (BlacklistFingerprint,
+                                                        BlacklistStore)
+                from upi.agents.repair_ui import ROOT
+                store = BlacklistStore(ROOT / "runs" / "blacklist.db")
+                action = str(body.get("action") or "add")
+                actor = str(body.get("actor") or "ui")
+                if action == "add":
+                    fp = BlacklistFingerprint(
+                        signature=str(body.get("signature") or ""),
+                        window=str(body.get("window") or ""),
+                        metric=str(body.get("metric") or ""),
+                        protocol_fingerprint=str(body.get("protocol_fingerprint") or ""),
+                        project_scope=str(body.get("project_scope") or ""))
+                    e = store.upsert(
+                        fp, status=str(body.get("status") or "proposed"),
+                        reason=str(body.get("reason") or ""),
+                        attempts=int(body.get("attempts") or 0),
+                        owner=actor, ttl=int(body.get("ttl") or 0), actor=actor)
+                elif action == "status":
+                    e = store.set_status(str(body.get("fingerprint_id") or ""),
+                                         str(body.get("status") or "retired"),
+                                         actor=actor,
+                                         reason=str(body.get("reason") or ""))
+                elif action == "delete":
+                    ok = store.delete(str(body.get("fingerprint_id") or ""),
+                                      actor=actor,
+                                      reason=str(body.get("reason") or ""))
+                    self._send_json(200, {"ok": bool(ok)})
+                    return
+                else:
+                    raise ValueError(f"unknown action: {action}")
+                self._send_json(200, {"ok": True,
+                                      "entry": e.__dict__ if e else None})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(400, {"ok": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/repair/budget":
+            try:
+                from upi.agents.repair_ui import ROOT
+                from upi.core.repair_tree import load_budget
+                import yaml
+                incoming = body.get("budget") or {}
+                cur = load_budget().as_dict()
+                for k in cur:
+                    if k in incoming:
+                        cur[k] = max(0, int(incoming[k]))
+                p = ROOT / "config" / "repair_budget.yaml"
+                p.write_text(yaml.safe_dump({"budget": cur}, sort_keys=False),
+                             encoding="utf-8")
+                with (ROOT / "runs" / "repair_ui_audit.jsonl").open(
+                        "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                        "actor": str(body.get("actor") or "ui"),
+                                        "action": "budget", "budget": cur},
+                                       ensure_ascii=False) + "\n")
+                self._send_json(200, {"ok": True, "budget": cur})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(400, {"ok": False, "error": str(e)})
+            return
+
         if parsed.path == "/api/projects":
             try:
                 from upi.config.project_registry import ProjectRegistry
