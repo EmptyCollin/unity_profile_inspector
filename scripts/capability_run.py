@@ -429,6 +429,11 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             json.dumps(timeline, ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "pass1_windows.json").write_text(
             json.dumps(wins, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            from upi.core.trace_analysis import write_trace
+            write_trace(run_id, ROOT / "runs")
+        except Exception:  # noqa: BLE001 — trace 生成失败不阻断采集
+            pass
         if not enable_deep:
             (run_dir / "merged_candidates.json").write_text(
                 json.dumps(list(merged.values()), ensure_ascii=False, indent=2),
