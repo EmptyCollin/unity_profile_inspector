@@ -15,6 +15,17 @@ def propose_for(project: Path | str,
     return None
 
 
+def propose_for_unit(project: Path | str, unit) -> AssetEditProposal | None:
+    """从 exam unit 的 targets/sites 里找可执行的资产 proposal。"""
+    refs = [str(x) for x in (getattr(unit, "targets", []) or [])]
+    refs += [str(x) for x in (getattr(unit, "sites", []) or [])]
+    for p in propose(project):
+        for r in refs:
+            if p.asset_path in r:
+                return p
+    return None
+
+
 def to_edit(p: AssetEditProposal) -> AssetEdit:
     return AssetEdit(p.asset_path, p.field, p.before, p.after)
 

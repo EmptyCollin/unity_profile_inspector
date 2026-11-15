@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.asset_candidate import (apply_candidate, propose_for,  # noqa: E402
-                                      rollback_candidate, to_edit)
+                                      propose_for_unit, rollback_candidate,
+                                      to_edit)
 
 PASS, FAIL = [], []
 
@@ -40,6 +41,14 @@ if p:
        a.with_name("big.png.meta").read_text(encoding="utf-8"))
 
 ok("未知资产无 proposal", propose_for(TMP, "Assets/none.png") is None)
+
+class U:
+    targets = ["oversized_resource_asset:Assets/big.png", "hot_function:X"]
+    sites = ["Assets/big.png"]
+
+u = propose_for_unit(TMP, U())
+ok("unit target 找到 proposal", u is not None and u.asset_path == "Assets/big.png",
+   u)
 
 print(f"\n==== I26 资产候选测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
