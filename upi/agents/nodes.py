@@ -111,6 +111,12 @@ def _cost_context(bundle, cand) -> str:
         cands = sorted((ROOT / "runs").glob(f"{cap}_a*/counters.json"))
         p = cands[0] if cands else p
     if not p.is_file():
+        pid = str(getattr(bundle, "project_id", "") or "")
+        cands = sorted(
+            (ROOT / "runs").glob(f"{pid}*_a*/counters.json"),
+            key=lambda x: x.stat().st_mtime) if pid else []
+        p = cands[-1] if cands else p
+    if not p.is_file():
         return ""
     try:
         counters = json.loads(p.read_text(encoding="utf-8")).get("counters") or {}
@@ -122,13 +128,18 @@ def _cost_context(bundle, cand) -> str:
             vals = sorted(float(x) for x in vals)
             return vals[len(vals) // 2]
         total_frame = _median("CPU Main Thread Frame Time")
+        if total_frame is not None and total_frame > 10000:
+            total_frame = total_frame / 1e6
         total_alloc = _median("GC Allocated In Frame")
         method = str(getattr(cand, "root_cause", "")).split(":")[-1].split(".")[-1]
+        methods = {method}
+        if method.endswith("Body"):
+            methods.add(method[:-4])
         funcs = getattr(bundle, "functions", []) or []
         target_ms = 0.0
         for f in funcs:
             sym = str(getattr(f, "symbol", "") or "")
-            if method and method in sym:
+            if any(m and m in sym for m in methods):
                 target_ms += float(getattr(f, "self_ms", 0) or 0)
         parts = []
         if total_frame:
