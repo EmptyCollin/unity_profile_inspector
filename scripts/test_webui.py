@@ -259,6 +259,35 @@ try:
     ok("POST 生成回归报告", code == 200 and r.get("ok") is True)
     code, _hdr, body = get(base + f"/api/regression/suites/{sid2}/report?token=test-token")
     ok("GET 回归报告 HTML", code == 200 and "回归报告" in body.decode("utf-8", "replace"))
+
+    # I25-ext E5：修复状态页与写接口错误码
+    code, _hdr, body = get(base + "/repair?token=test-token")
+    ok("GET /repair 200", code == 200 and "修复状态" in body.decode("utf-8", "replace"))
+    for path, key in (("/api/repair/trees", "trees"),
+                      ("/api/repair/budget", "budget"),
+                      ("/api/blacklist", "entries"),
+                      ("/api/repair/audit", "entries"),
+                      ("/api/repair/skips", "skips"),
+                      ("/api/repair/mode", "mode")):
+        code, _hdr, body = get(base + path + "?token=test-token")
+        doc = json.loads(body.decode("utf-8")) if code == 200 else {}
+        ok(f"GET {path}", code == 200 and key in doc, f"code={code}")
+
+    code, r = post_json(base + "/api/blacklist?token=test-token",
+                        {"action": "add", "signature": "s", "window": "w",
+                         "metric": "m", "protocol_fingerprint": "p",
+                         "approval_code": "0000"})
+    ok("坏审批码黑名单 403", code == 403 and r.get("error") == "approval_code_invalid",
+       f"code={code}")
+    code, r = post_json(base + "/api/repair/budget?token=test-token",
+                        {"budget": {}, "approval_code": "0000"})
+    ok("坏审批码预算 403", code == 403 and r.get("error") == "approval_code_invalid",
+       f"code={code}")
+    code, r = post_json(base + "/api/repair/rollback?token=test-token",
+                        {"run_id": "x", "unit_id": "u", "state_id": "s",
+                         "approval_code": "0000"})
+    ok("坏审批码回滚 403", code == 403 and r.get("error") == "approval_code_invalid",
+       f"code={code}")
 finally:
     ui.stop()
     th.join(timeout=2)
