@@ -62,11 +62,19 @@ public static class UpiUnifiedProbe
             catch (Exception) { }
         }
         _startFrame = ProfilerDriver.lastFrameIndex;
+        int cfgStart = (int)ReadNum(ReadCfg(), "start_frame", -1);
+        if (cfgStart >= 0) _startFrame = cfgStart;
         _lastFrame = _startFrame - 1;
         _startUtc = DateTime.UtcNow;
         _done = false;
         EditorApplication.update += Tick;
         return "installed:" + _mode + ":rec=" + _rec.Count;
+    }
+
+    static string ReadCfg()
+    {
+        try { return File.Exists(CfgPath) ? File.ReadAllText(CfgPath) : ""; }
+        catch (Exception) { return ""; }
     }
 
     static void LoadCfg()

@@ -47,6 +47,10 @@ def _render_probe(src: Path, name: str) -> Path:
 
 PROBE = _render_probe(ROOT / "probe" / "upi_marker_evidence.cs",
                       "generated_marker_evidence.cs")
+UNIFIED_PROBE = _render_probe(ROOT / "probe" / "upi_unified_probe.cs",
+                              "generated_unified_probe.cs")
+UNIFIED_CFG = ROOT / "runs" / "_probe" / "unified_cfg.json"
+UNIFIED_OUT = ROOT / "runs" / "_probe" / "unified_probe.json"
 EVIDENCE_PROBE = _render_probe(ROOT / "probe" / "upi_evidence_v1.cs",
                                "generated_evidence_v1.cs")
 COUNTERS_PROBE = _render_probe(ROOT / "probe" / "upi_counters_v1.cs",
@@ -113,29 +117,63 @@ def ensure_play(project: Path) -> dict:
     raise RuntimeError("进入 Play Mode 超时")
 
 
+def _write_unified(doc: dict, run_id: str) -> None:
+    """把统一探针输出落成 evidence 输入 + counters 输入。"""
+    rows = doc.get("counters") or []
+    frames = [int(x.get("frame_idx") or 0) for x in rows]
+    funcs = doc.get("functions") or []
+    ev_doc = {"run_id": run_id, "project_id": "", "scene": "",
+              "protocol_fingerprint": "",
+              "frames": frames, "functions": funcs, "callstacks": [],
+              "allocations": [], "render_objects": [], "blindspots": [],
+              "raw_refs": [], "meta": {"probe": "unified",
+                                       "mode": doc.get("mode", "")}}
+    EV.write_text(json.dumps(ev_doc, ensure_ascii=False), encoding="utf-8")
+    names = set()
+    for x in rows:
+        names.update((x.get("counters") or {}).keys())
+    counters = {}
+    for k in names:
+        counters[k] = {"series": [x.get("counters", {}).get(k)
+                                  for x in rows
+                                  if x.get("counters", {}).get(k) is not None]}
+    out = ROOT / "runs" / run_id
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "counters.json").write_text(json.dumps(
+        {"captured_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+         "frame_last": doc.get("last_frame"), "counters": counters},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    (out / "unified_probe.json").write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def capture_window(project: Path, run_id: str, limit: int,
                    since: str | None = None,
-                   start_frame: int = -1) -> list[dict]:
-    """采一窗（不跑 replay）：只收动作开始后的 marker。"""
-    CFG.parent.mkdir(parents=True, exist_ok=True)
-    CFG.write_text(json.dumps({"marker_frames": 300, "board_threads": 8,
-                               "marker_start_frame": start_frame,
-                               "marker_budget_ms": 15000}), encoding="utf-8")
+                   start_frame: int = -1,
+                   mode: str = "shallow") -> list[dict]:
+    """采一窗：统一探针同时写 counters/functions。"""
+    UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
+    UNIFIED_CFG.write_text(json.dumps({
+        "mode": mode, "frames": 300,
+        "start_frame": start_frame,
+        "budget_ms": 15000}), encoding="utf-8")
     try:
-        EV.unlink(missing_ok=True)
+        UNIFIED_OUT.unlink(missing_ok=True)
     except OSError:
         pass
     since = since or time.strftime("%Y-%m-%dT%H:%M:%S")
-    d = unity("script eval", "--file", str(PROBE), "--project-path", str(project),
-              "--timeout", "120")
+    d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
+              "--project-path", str(project), "--timeout", "120")
     if not d.get("success"):
-        raise RuntimeError("marker 取证 eval 失败：" +
+        raise RuntimeError("unified probe eval 失败：" +
                            json.dumps(d.get("errors"), ensure_ascii=False)[:300])
     deadline = time.time() + 60
-    while time.time() < deadline and not EV.exists():
+    while time.time() < deadline and not UNIFIED_OUT.exists():
         time.sleep(0.3)
-    if not EV.exists():
-        raise RuntimeError("marker 取证文件未落盘")
+    if not UNIFIED_OUT.exists():
+        raise RuntimeError("unified probe 文件未落盘")
+    doc = json.loads(UNIFIED_OUT.read_text(encoding="utf-8"))
+    _write_unified(doc, run_id)
     subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                     "--project", str(project), "--evidence", str(EV),
                     "--run-id", run_id, "--scene",
@@ -195,44 +233,10 @@ def collect_counters(project: Path, run_id: str) -> dict:
 
 
 def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
-    """一次 bounded 深档采集（8 帧/8 线程），补分配点与调用栈候选。"""
-    CFG.write_text(json.dumps({"evidence_threads": 8, "evidence_frames": 8,
-                               "evidence_budget_ms": 6000}), encoding="utf-8")
-    try:
-        EV_DEEP.unlink(missing_ok=True)
-    except OSError:
-        pass
+    """一次 bounded 深档采集：统一探针，同一帧写 counters/functions。"""
     _eval(project, PROFILER_OFF, timeout=30)
-    _eval(project, DEEP_ON, timeout=30)
-    since = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
-        time.sleep(1.2)
-        d = unity("script eval", "--file", str(EVIDENCE_PROBE),
-                  "--project-path", str(project), "--timeout", "120")
-        if not d.get("success"):
-            return []
-        deadline = time.time() + 45
-        while time.time() < deadline and not EV_DEEP.exists():
-            time.sleep(0.3)
-        if not EV_DEEP.exists():
-            return []
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
-                        "--project", str(project), "--evidence", str(EV_DEEP),
-                        "--run-id", run_id, "--scene",
-                        "Assets/Scenes/00_Bootstrap.unity",
-                        "--events-since", since],
-                       cwd=str(ROOT), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=60)
-        bundle = ROOT / "runs" / run_id / "evidence" / "evidence_v2.json"
-        out = ROOT / "runs" / run_id / "evidence" / "candidates.json"
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
-                        "--project", str(project), "--evidence", str(bundle),
-                        "--out", str(out), "--limit", str(limit)],
-                       cwd=str(ROOT), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=60)
-        if not out.exists():
-            return []
-        return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+        return capture_window(project, run_id, limit, mode="deep")
     finally:
         _eval(project, PROFILER_OFF, timeout=30)
 
@@ -353,7 +357,6 @@ def capture_window_with_counters(project: Path, tag: str, limit: int,
         (d / "window_meta.json").write_text(
             json.dumps(meta or {}, ensure_ascii=False, indent=2),
             encoding="utf-8")
-        collect_counters(project, tag)
     except Exception as e:  # noqa: BLE001
         print("counters skipped:", type(e).__name__, e)
     return cands
