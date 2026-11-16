@@ -38,6 +38,11 @@ public static class UpiUnifiedProbe
     static DateTime _startUtc;
     static bool _done;
     static string _mode = "shallow";
+    static string _triggerPath = @"D:/unity_profile_inspector/runs/_probe/unified_trigger.txt";
+    static int _preN = 8;
+    static int _postN = 8;
+    static bool _triggered;
+    static int _triggerFrame = -1;
 
     public static string Main()
     {
@@ -71,6 +76,9 @@ public static class UpiUnifiedProbe
             if (!File.Exists(CfgPath)) return;
             string j = File.ReadAllText(CfgPath);
             _mode = ReadStr(j, "mode", "shallow");
+            _triggerPath = ReadStr(j, "trigger_file", _triggerPath);
+            _preN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "pre_frames", 8)));
+            _postN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "post_frames", 8)));
             _frames = (int)Math.Min(600, Math.Max(1, ReadNum(j, "frames", 30)));
             _budgetMs = (long)Math.Min(30000, Math.Max(500, ReadNum(j, "budget_ms", 5000)));
         }
@@ -86,12 +94,29 @@ public static class UpiUnifiedProbe
             _lastFrame = now;
             _counterRows.Add(CounterRow(now));
         }
-        bool enough = now - _startFrame >= _frames;
+        if (_mode == "resident" && !_triggered && File.Exists(_triggerPath))
+        {
+            _triggered = true;
+            _triggerFrame = now;
+            ProfilerDriver.deepProfiling = true;
+            Profiler.enableAllocationCallstacks = true;
+            return;
+        }
+        bool enough = _mode == "resident"
+            ? (_triggered && now - _triggerFrame >= _postN)
+            : (now - _startFrame >= _frames);
         bool timeout = (DateTime.UtcNow - _startUtc).TotalMilliseconds > _budgetMs;
         if (!enough && !timeout) return;
         _done = true;
         EditorApplication.update -= Tick;
-        try { CaptureFunctions(); Write(); }
+        try
+        {
+            int first = _mode == "resident" && _triggered
+                ? Math.Max(_startFrame, _triggerFrame - _preN)
+                : _startFrame;
+            CaptureFunctions(first, now);
+            Write();
+        }
         catch (Exception e)
         {
             try { File.WriteAllText(Out + ".err", e.ToString()); } catch (Exception) { }
@@ -120,10 +145,10 @@ public static class UpiUnifiedProbe
         return sb.ToString();
     }
 
-    static void CaptureFunctions()
+    static void CaptureFunctions(int firstArg, int lastArg)
     {
-        int last = ProfilerDriver.lastFrameIndex;
-        int first = Math.Max(ProfilerDriver.firstFrameIndex, _startFrame);
+        int last = lastArg;
+        int first = Math.Max(ProfilerDriver.firstFrameIndex, firstArg);
         for (int frame = first; frame <= last; frame++)
         {
             for (int ti = 0; ti < 8; ti++)
@@ -154,6 +179,9 @@ public static class UpiUnifiedProbe
         var sb = new StringBuilder();
         sb.Append("{\"mode\":\"").Append(Esc(_mode))
           .Append("\",\"start_frame\":").Append(_startFrame)
+          .Append(",\"trigger_frame\":").Append(_triggerFrame)
+          .Append(",\"pre_frames\":").Append(_preN)
+          .Append(",\"post_frames\":").Append(_postN)
           .Append(",\"last_frame\":").Append(ProfilerDriver.lastFrameIndex)
           .Append(",\"counters\":[").Append(string.Join(",", _counterRows.ToArray())).Append("]")
           .Append(",\"functions\":[");
