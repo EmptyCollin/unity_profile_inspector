@@ -246,20 +246,42 @@ def main() -> int:
     baseline_metrics = baseline_runs
     flow.enter("diagnose")
     collector = X._make_collector(p, a.project_id, a.replay)
-    from upi.core.project_store import knowledge_db as _knowledge_db
-    nd = N.make_nodes(run_dir, live_llm=True,
-                      knowledge_db=_knowledge_db(a.project_id),
-                      mode="regression", evidence_collector=collector)
-    d = nd["detect"]({"project": str(p)})
-    if d.get("route") != "proceed":
-        print("detect failed", d)
-        return 1
-    g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
-    if g.get("route") != "proceed":
-        print("diagnose failed", g)
-        return 1
-    hs = g.get("hypotheses") or []
-    findings = X.findings_from_hypotheses(run_id, hs, {})
+    if _prof.name == "screen":
+        _mp = run_dir / "merged_candidates.json"
+        if _mp.is_file():
+            _raw = json.loads(_mp.read_text(encoding="utf-8"))
+        else:
+            from upi.core.evidence_diagnosis import candidates_from_latest
+            _cands, _b, _p = candidates_from_latest(p, limit=12)
+            _raw = [{"root_cause": c.root_cause,
+                     "sources": [{"file": s.file, "start_line": s.start_line}
+                                 for s in (getattr(c, "sources", None) or [])]}
+                    for c in _cands]
+        _hs = []
+        for _c in _raw[:12]:
+            _anchors = []
+            for _s in (_c.get("sources") or [])[:4]:
+                if isinstance(_s, dict):
+                    _anchors.append(f"{_s.get('file','')}:{_s.get('start_line',0)}")
+            if _anchors:
+                _hs.append({"root_cause": _c.get("root_cause", ""),
+                            "code_anchors": _anchors, "confidence": 0.5})
+        findings = X.findings_from_hypotheses(run_id, _hs, {})
+    else:
+        from upi.core.project_store import knowledge_db as _knowledge_db
+        nd = N.make_nodes(run_dir, live_llm=True,
+                          knowledge_db=_knowledge_db(a.project_id),
+                          mode="regression", evidence_collector=collector)
+        d = nd["detect"]({"project": str(p)})
+        if d.get("route") != "proceed":
+            print("detect failed", d)
+            return 1
+        g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
+        if g.get("route") != "proceed":
+            print("diagnose failed", g)
+            return 1
+        hs = g.get("hypotheses") or []
+        findings = X.findings_from_hypotheses(run_id, hs, {})
     _asset_findings = [f for f in findings
                        if "oversized_resource_asset" in str(f.mechanism)]
     findings = [f for f in findings

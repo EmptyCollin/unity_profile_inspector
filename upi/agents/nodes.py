@@ -341,8 +341,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
         ev_rounds = 0
         _seen_roots: set[tuple] = set()
         while True:
+            _tuples = tuples if ev_rounds == 0 else tuples[:3]
             hs, judged = build_hypotheses_for_issue(
-                cfg, issue, tuples, history=hist, cards=cards)
+                cfg, issue, _tuples, history=hist, cards=cards)
             archive.update(judged)
             from upi.core.attribution import route as _route
             if (_route(hs, group_ok=_group_ok) != "needs_human"
