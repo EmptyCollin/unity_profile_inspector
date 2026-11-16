@@ -231,6 +231,34 @@ def _issue_from_run_counters(run_dir: Path) -> dict | None:
         return None
 
 
+def _path_context(bundle, cand) -> str:
+    """从统一证据的 paths/allocations 取候选的调用路径和分配路径。"""
+    meta = getattr(bundle, "meta", None) or {}
+    method = str(getattr(cand, "root_cause", "")).split(":")[-1].split(".")[-1]
+    if not method:
+        return ""
+    paths = meta.get("paths") or []
+    hit = []
+    for p in paths:
+        sym = str(p.get("symbol") or "")
+        path = str(p.get("path") or "")
+        if method in sym.split(".")[-1] or method in path.split(">")[-1]:
+            hit.append(path)
+    if not hit:
+        return ""
+    # 取最短路径（最接近入口的稳定路），并压成末 6 段
+    path = sorted(hit, key=len)[0]
+    tail = ">".join(path.split(">")[-6:])
+    allocs = meta.get("allocations") or []
+    alloc_hit = [a for a in allocs
+                 if any(method in seg for seg in
+                        str(a.get("path") or "").split(">")[-2:])]
+    out = f"path={tail}"
+    if alloc_hit:
+        out += f"; alloc_path={' > '.join(str(alloc_hit[0].get('path')).split('>')[-3:])}"
+    return out
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None,
@@ -398,7 +426,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 f"score={c.score:.2f}; metric_value={getattr(c,'metric_value',0):.3f}"
                 f"{getattr(c,'metric_unit','')}; "
                 f"evidence_n={c.evidence_n}; "
-                f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}")
+                f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}; "
+                f"counter_lag_frames={getattr(_bundle,'meta',{}).get('counter_lag_frames','?')}; "
+                f"{_path_context(_bundle, c)}")
         archive: dict = {}
         from upi.core.contribution import (Contribution,
                                            group_decision as _group)
