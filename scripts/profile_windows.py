@@ -48,6 +48,7 @@ def main() -> int:
             info = C.save_profile(project, p)
             info["window_id"] = tag
             info["size"] = p.stat().st_size if p.is_file() else 0
+            info["raw_status"] = "ok" if info.get("exists") and info["size"] > 4096 else "raw_missing"
             windows.append(info)
             C._eval(project, "UnityEditorInternal.ProfilerDriver.ClearAllFrames();return 1;",
                     timeout=30)

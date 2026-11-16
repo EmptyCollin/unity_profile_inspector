@@ -802,7 +802,9 @@ def run_two_pass_capture(project: Path, run_id: str, limit: int,
             profiles = []
     (run_dir / "two_pass.json").write_text(json.dumps(
         {"status": "done", "light": len(light), "windows": selected,
-         "profiles": len(profiles), "profile_ok": p.returncode == 0},
+         "profiles": len(profiles), "profile_ok": p.returncode == 0,
+         "raw_missing": [x.get("window_id") for x in profiles
+                         if x.get("raw_status") != "ok"]},
         ensure_ascii=False, indent=2), encoding="utf-8")
     return light
 
