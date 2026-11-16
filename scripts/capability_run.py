@@ -157,8 +157,9 @@ def _write_unified(doc: dict, run_id: str) -> None:
     funcs = doc.get("functions") or []
     alloc_rows = doc.get("allocations") or []
     ev_allocs = [{
-        "frame_idx": int(x.get("frame") or 0),
-        "bytes": int(x.get("bytes") or 0), "count": 1,
+        "frame_idx": int(x.get("first_frame", x.get("frame", 0)) or 0),
+        "bytes": int(x.get("bytes") or 0),
+        "count": int(x.get("count") or 1),
         "stack": [{"symbol": str(x.get("path") or ""),
                    "source": None, "native": False, "address": ""}],
         "data_tier": "A2"} for x in alloc_rows]
