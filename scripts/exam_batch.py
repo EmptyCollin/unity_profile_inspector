@@ -292,6 +292,19 @@ def main() -> int:
                        if "oversized_resource_asset" in str(f.mechanism)]
     findings = [f for f in findings
                 if "oversized_resource_asset" not in str(f.mechanism)]
+    _win_map = {}
+    _mp = run_dir / "merged_candidates.json"
+    if _mp.is_file():
+        try:
+            for _c in json.loads(_mp.read_text(encoding="utf-8")):
+                _win_map[str(_c.get("root_cause") or "")] = str(
+                    _c.get("window_id") or "")
+        except Exception:  # noqa: BLE001
+            _win_map = {}
+    for _f in findings:
+        _root = str((_f.attribution.factors or {}).get("root_cause") or "")
+        if _win_map.get(_root):
+            _f.attribution.factors["window_id"] = _win_map[_root]
     try:
         from upi.core.asset_opportunity import scan as _scan_opps
         _opps = [o.as_dict() for o in _scan_opps(p)]
