@@ -262,7 +262,7 @@ def main() -> int:
                                  for s in (getattr(c, "sources", None) or [])]}
                     for c in _cands]
         _hs = []
-        for _c in _raw[:12]:
+        for _c in _raw[:30]:
             _anchors = []
             for _s in (_c.get("sources") or [])[:4]:
                 if isinstance(_s, dict):

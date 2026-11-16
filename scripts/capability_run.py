@@ -193,7 +193,7 @@ def run_full_capture(project: Path, run_id: str, limit: int,
     ex = ReplayExecutor(project)
     for cmd in spec.commands:
         ex._one(cmd)  # noqa: SLF001
-    cands = finish_full_probe(project, run_id, limit, since=started)
+    cands = finish_full_probe(project, run_id, max(30, limit), since=started)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "merged_candidates.json").write_text(
