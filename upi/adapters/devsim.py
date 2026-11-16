@@ -164,10 +164,10 @@ class DevSimAdapter:
         if two_pass:
             cmd.append("--two-pass")
         if light:
-            cmd.append("--light")
+            cmd.append("--full-shallow")
         if fast:
             cmd.append("--fast")
-        if target_windows:
+        if target_windows and not light:
             cmd.append("--target-windows")
         out = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=2400)

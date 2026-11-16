@@ -45,7 +45,9 @@ public static class UpiUnifiedProbe
     static string _ackDir = @"D:/unity_profile_inspector/runs/_probe/acks";
     static string _heartbeatPath = @"D:/unity_profile_inspector/runs/_probe/heartbeat.json";
     static string _leasePath = @"D:/unity_profile_inspector/runs/_probe/lease.txt";
+    static string _finishPath = @"D:/unity_profile_inspector/runs/_probe/finish.txt";
     static long _leaseMs = 10000;
+    static bool _finishRequested;
     static int _preN = 8;
     static int _postN = 8;
     static bool _triggered;
@@ -114,6 +116,7 @@ public static class UpiUnifiedProbe
             _ackDir = ReadStr(j, "ack_dir", _ackDir);
             _heartbeatPath = ReadStr(j, "heartbeat", _heartbeatPath);
             _leasePath = ReadStr(j, "lease", _leasePath);
+            _finishPath = ReadStr(j, "finish_file", _finishPath);
             _leaseMs = (long)Math.Min(60000, Math.Max(1000, ReadNum(j, "lease_ms", 10000)));
             _preN = (int)Math.Min(600, Math.Max(1, ReadNum(j, "pre_frames", 8)));
             _postN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "post_frames", 8)));
@@ -180,9 +183,11 @@ public static class UpiUnifiedProbe
                 return;
             }
         }
+        if (_mode != "resident" && File.Exists(_finishPath))
+            _finishRequested = true;
         bool capture = _mode == "resident"
             ? (_triggered && now - _triggerFrame >= _postN)
-            : (now - _startFrame >= _frames);
+            : ((now - _startFrame >= _frames) || _finishRequested);
         bool timeout = (DateTime.UtcNow - _startUtc).TotalMilliseconds > _budgetMs;
         if (!capture && !timeout) return;
         if (_mode == "resident" && !_triggered && timeout)

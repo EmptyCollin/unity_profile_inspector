@@ -148,9 +148,62 @@ SESSION_WINDOW_DIR = ROOT / "runs" / "_probe" / "windows"
 SESSION_ACK_DIR = ROOT / "runs" / "_probe" / "acks"
 SESSION_HEARTBEAT = ROOT / "runs" / "_probe" / "heartbeat.json"
 SESSION_LEASE = ROOT / "runs" / "_probe" / "lease.txt"
+SESSION_FINISH = ROOT / "runs" / "_probe" / "finish.txt"
 _SESSION_STARTED = False
 _LEASE_THREAD = None
 _LEASE_STOP = False
+
+
+def start_full_probe(project: Path, mode: str) -> None:
+    UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
+    UNIFIED_OUT.unlink(missing_ok=True)
+    SESSION_FINISH.unlink(missing_ok=True)
+    UNIFIED_CFG.write_text(json.dumps({
+        "mode": mode, "frames": 100000, "budget_ms": 600000,
+        "finish_file": str(SESSION_FINISH)}), encoding="utf-8")
+    d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
+              "--project-path", str(project), "--timeout", "120")
+    if not d.get("success"):
+        raise RuntimeError("unified full probe install 失败：" +
+                           json.dumps(d.get("errors"), ensure_ascii=False)[:300])
+
+
+def finish_full_probe(project: Path, run_id: str, limit: int,
+                      since: str | None = None) -> list[dict]:
+    SESSION_FINISH.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FINISH.write_text("finish", encoding="utf-8")
+    deadline = time.time() + 120
+    while time.time() < deadline and not UNIFIED_OUT.exists():
+        time.sleep(0.3)
+    if not UNIFIED_OUT.exists():
+        raise RuntimeError("unified full probe 文件未落盘")
+    doc = json.loads(UNIFIED_OUT.read_text(encoding="utf-8"))
+    _write_unified(doc, run_id)
+    return _collect_run(project, run_id, limit, since, UNIFIED_OUT)
+
+
+def run_full_capture(project: Path, run_id: str, limit: int,
+                     replay_path: Path, mode: str) -> list[dict]:
+    _clear_console(project)
+    start_full_probe(project, mode)
+    started = time.strftime("%Y-%m-%dT%H:%M:%S")
+    spec = load_replay(replay_path) if replay_path.exists() else None
+    if spec is None:
+        return []
+    ex = ReplayExecutor(project)
+    for cmd in spec.commands:
+        ex._one(cmd)  # noqa: SLF001
+    cands = finish_full_probe(project, run_id, limit, since=started)
+    run_dir = ROOT / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "merged_candidates.json").write_text(
+        json.dumps(cands, ensure_ascii=False, indent=2), encoding="utf-8")
+    errs = _console_errors(project)
+    (run_dir / "console_errors.json").write_text(
+        json.dumps(errs, ensure_ascii=False, indent=2), encoding="utf-8")
+    if errs:
+        raise RuntimeError(f"控制台有 {len(errs)} 条 error，拒绝使用该轮采样")
+    return cands
 
 
 def _lease_loop() -> None:
@@ -569,36 +622,22 @@ def run_and_capture(project: Path, run_id: str, limit: int,
 
 def run_two_pass_capture(project: Path, run_id: str, limit: int,
                          replay_path: Path) -> list[dict]:
-    """r 轻采 → 选 ≤3 窗 → r′ 完整重放、窗口内深采。"""
-    from upi.core.two_pass import plan_deep_windows
-    light = run_and_capture(project, run_id, limit, replay_path,
-                            enable_deep=False)
-    run_dir = ROOT / "runs" / run_id
-    wins = json.loads((run_dir / "pass1_windows.json").read_text(encoding="utf-8"))
-    timeline = json.loads((run_dir / "pass1_timeline.json").read_text(encoding="utf-8"))
-    planned = plan_deep_windows(wins, max_n=3, margin=12)
-    if not planned:
-        (run_dir / "merged_candidates.json").write_text(
-            json.dumps(light, ensure_ascii=False, indent=2), encoding="utf-8")
-        (run_dir / "two_pass.json").write_text(json.dumps(
-            {"status": "no_window", "windows": [],
-             "reason": "r 未产生异常窗口"}, ensure_ascii=False, indent=2),
-            encoding="utf-8")
-        return light
-    deep = deep_windows_capture(project, run_id, replay_path,
-                                [w.model_dump() for w in planned],
-                                timeline, limit)
+    """r 浅采全程 → r′ 深采全程；深采只用于定因。"""
+    light = run_full_capture(project, run_id, limit, replay_path, "shallow")
+    deep = run_full_capture(project, f"{run_id}_deep", limit,
+                            replay_path, "deep")
     merged = {str(c.get("root_cause") or ""): c for c in light}
     for c in deep:
         merged.setdefault(str(c.get("root_cause") or ""), c)
-    merged_list = list(merged.values())
+    out = list(merged.values())
+    run_dir = ROOT / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "merged_candidates.json").write_text(
-        json.dumps(merged_list, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "two_pass.json").write_text(json.dumps(
-        {"status": "done", "windows": [w.model_dump() for w in planned],
-         "light": len(light), "deep": len(deep)},
-        ensure_ascii=False, indent=2), encoding="utf-8")
-    return merged_list
+        {"status": "done", "light": len(light), "deep": len(deep),
+         "mode": "full"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
 
 
 def _anchor_of(c: dict) -> list[Anchor]:
@@ -694,6 +733,10 @@ def main() -> int:
                     help="r 轻采→选≤3窗→r′ 完整重放、窗口内深采")
     ap.add_argument("--light", action="store_true",
                     help="只做一次轻采，不做 deep（验证/快速基线）")
+    ap.add_argument("--full-shallow", action="store_true",
+                    help="一次 replay 浅采全程（回放基线）")
+    ap.add_argument("--full-deep", action="store_true",
+                    help="一次 replay 深采全程（回放定因）")
     ap.add_argument("--fast", action="store_true",
                     help="整轮 replay 只在末尾采一窗，不逐 action 采")
     ap.add_argument("--target-windows", action="store_true",
@@ -711,7 +754,11 @@ def main() -> int:
 
     ensure_play(project)
     run_id = a.run_id or new_run_id(project_id)
-    cands = ((run_two_pass_capture(project, run_id, a.limit, replay_path))
+    cands = ((run_full_capture(project, run_id, a.limit, replay_path, "shallow"))
+             if a.full_shallow else
+             (run_full_capture(project, run_id, a.limit, replay_path, "deep"))
+             if a.full_deep else
+             (run_two_pass_capture(project, run_id, a.limit, replay_path))
              if a.two_pass else
              run_and_capture(project, run_id, a.limit, replay_path,
                              enable_deep=not a.light, fast=a.fast,
