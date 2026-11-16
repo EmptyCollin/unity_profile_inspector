@@ -136,11 +136,14 @@ def _cost_context(bundle, cand) -> str:
         if method.endswith("Body"):
             methods.add(method[:-4])
         funcs = getattr(bundle, "functions", []) or []
-        target_ms = 0.0
+        target_sum = 0.0
         for f in funcs:
             sym = str(getattr(f, "symbol", "") or "")
-            if any(m and m in sym for m in methods):
-                target_ms += float(getattr(f, "self_ms", 0) or 0)
+            name = sym.split(".")[-1].split("::")[-1].split("(")[0].strip()
+            if name in methods:
+                target_sum += float(getattr(f, "self_ms", 0) or 0)
+        nframes = max(1, len(getattr(bundle, "frames", []) or []))
+        target_ms = target_sum / nframes
         parts = []
         if total_frame:
             parts.append(f"target_self_ms={target_ms:.3f}; total_frame_ms={total_frame:.3f}; "
@@ -150,6 +153,17 @@ def _cost_context(bundle, cand) -> str:
         return "; ".join(parts)
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _cost_values(bundle, cand) -> dict:
+    import re
+    text = _cost_context(bundle, cand)
+    m = re.search(r"target_self_ms=([\d.]+); total_frame_ms=([\d.]+); "
+                  r"share=([\d.]+)", text)
+    if not m:
+        return {}
+    return {"abs_ms": float(m.group(1)), "total_ms": float(m.group(2)),
+            "share": float(m.group(3))}
 
 
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
@@ -306,13 +320,31 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 f"{c.score_interval_high:.2f}); evidence_n={c.evidence_n}; "
                 f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}")
         archive: dict = {}
+        from upi.core.contribution import (Contribution,
+                                           group_decision as _group)
+        _contribs = []
+        for _c in ev_cands[:12]:
+            _v = _cost_values(_bundle, _c)
+            if _v:
+                _contribs.append(Contribution(
+                    candidate_id=str(_c.root_cause),
+                    abs_cost=float(_v.get("abs_ms") or 0.0),
+                    share=float(_v.get("share") or 0.0)))
+        _gd = _group(_contribs, min_abs=0.01, min_share=0.3,
+                     major_abs=1.0, group_share=0.2)
+        print("contribution-group", len(_contribs), _gd)
+        E.write_json(run_dir / "contribution_group.json",
+                     {"decision": _gd, "contributions":
+                      [c.__dict__ for c in _contribs]},
+                     what="contribution_group", strict=False)
+        _group_ok = bool(_gd.get("eligible"))
         ev_rounds = 0
         while True:
             hs, judged = build_hypotheses_for_issue(
                 cfg, issue, tuples, history=hist, cards=cards)
             archive.update(judged)
             from upi.core.attribution import route as _route
-            if (_route(hs) != "needs_human"
+            if (_route(hs, group_ok=_group_ok) != "needs_human"
                     or ev_rounds >= mcaps.max_evidence_rounds
                     or evidence_collector is None):
                 break
@@ -372,7 +404,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 run_dir / "hypotheses_error.txt",
                 f"假设台账写入失败：{type(e).__name__}: {e}\n")
         from upi.core.attribution import route as attr_route
-        decision = attr_route(hs)
+        decision = attr_route(hs, group_ok=_group_ok)
         if decision == "needs_human":
             return {"hypotheses": [h.model_dump() for h in hs],
                     "route": "insufficient_evidence",

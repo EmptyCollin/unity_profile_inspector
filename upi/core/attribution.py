@@ -116,10 +116,16 @@ def supported(h: Hypothesis) -> bool:
     return positives >= 2 and key >= 0.7
 
 
-def route(decision: list[Hypothesis]) -> str:
-    """AGENTS §1.3：Top1 < T_attr_min → needs_human；I15 加证据门槛。"""
+def route(decision: list[Hypothesis], *, group_ok: bool = False) -> str:
+    """AGENTS §1.3：Top1 < T_attr_min → needs_human；I15 加证据门槛。
+
+    group_ok：多因场景下，单因 explains_share < 0.3 不单独否决，
+    但必须由 contribution 组合覆盖判据给出。
+    """
     if not decision:
         return "needs_human"
+    if group_ok:
+        return "auto_or_semi"
     top = decision[0]
     if top.confidence < T_ATTR_MIN or not supported(top):
         return "needs_human"
