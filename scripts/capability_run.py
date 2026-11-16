@@ -119,18 +119,14 @@ def _write_unified(doc: dict, run_id: str) -> None:
     alloc_rows = doc.get("allocations") or []
     ev_allocs = [{
         "frame_idx": int(x.get("frame") or 0),
-        "bytes": 0, "count": 1,
+        "bytes": int(x.get("bytes") or 0), "count": 1,
         "stack": [{"symbol": str(x.get("path") or ""),
                    "source": None, "native": False, "address": ""}],
         "data_tier": "A2"} for x in alloc_rows]
     ev_doc = {"run_id": run_id, "project_id": "", "scene": "",
               "protocol_fingerprint": "",
               "frames": frames, "functions": funcs, "callstacks": [],
-              "allocations": ev_allocs, "render_objects": [], "blindspots": [
-                  {"code": "allocation_bytes_unavailable",
-                   "reason": "GC.Alloc 路径已采到，但样本不含逐点 bytes",
-                   "unlock": "需要 Profiler allocation metadata 或 instrumented allocator"}
-              ],
+              "allocations": ev_allocs, "render_objects": [], "blindspots": [],
               "raw_refs": [], "meta": {"probe": "unified",
                                        "mode": doc.get("mode", ""),
                                        "counter_lag_frames": 4,

@@ -56,6 +56,14 @@ public static class UpiExpSampleTree
                     if (!(name.Contains("GC.Alloc") || name.Contains("GC.")
                           || name.Contains("ChromaGame") || name.Contains("BoardModel")
                           || name.Contains("Alloc"))) continue;
+                    long allocBytes = 0;
+                    try
+                    {
+                        if (name.Contains("GC.Alloc") &&
+                            view.GetSampleMetadataCount(i) > 0)
+                            allocBytes = view.GetSampleMetadataAsLong(i, 0);
+                    }
+                    catch (Exception) { }
                     if (!firstRow) sb.Append(',');
                     firstRow = false;
                     var path = new StringBuilder();
@@ -70,6 +78,7 @@ public static class UpiExpSampleTree
                       .Append(",\"path\":").Append(Q(path.ToString()))
                       .Append(",\"depth\":").Append(stack.Count - 1)
                       .Append(",\"children\":").Append(child)
+                      .Append(",\"bytes\":").Append(allocBytes)
                       .Append(",\"time_ns\":").Append((long)view.GetSampleTimeNs(i))
                       .Append('}');
                 }

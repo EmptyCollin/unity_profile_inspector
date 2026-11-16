@@ -309,10 +309,20 @@ public static class UpiUnifiedProbe
                              || samplePath.Contains("DevSim")))
                         {
                             if (_allocRows.Count < 500)
+                            {
+                                long allocBytes = 0;
+                                try
+                                {
+                                    if (view.GetSampleMetadataCount(i) > 0)
+                                        allocBytes = view.GetSampleMetadataAsLong(i, 0);
+                                }
+                                catch (Exception) { }
                                 _allocRows.Add("{\"frame\":" + frame +
                                     ",\"path\":" + Q(samplePath) +
                                     ",\"parent\":" + Q(parent) +
+                                    ",\"bytes\":" + allocBytes +
                                     ",\"time_ns\":" + (long)view.GetSampleTimeNs(i) + "}");
+                            }
                         }
                         bool isGame = name.Contains("ChromaGame")
                             || name.Contains("BoardModel") || name.Contains("DevSim");

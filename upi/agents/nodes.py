@@ -255,7 +255,9 @@ def _path_context(bundle, cand) -> str:
                         str(a.get("path") or "").split(">")[-2:])]
     out = f"path={tail}"
     if alloc_hit:
-        out += f"; alloc_path={' > '.join(str(alloc_hit[0].get('path')).split('>')[-3:])}"
+        alloc_bytes = sum(int(a.get("bytes") or 0) for a in alloc_hit)
+        out += (f"; alloc_path={' > '.join(str(alloc_hit[0].get('path')).split('>')[-3:])}"
+                f"; alloc_bytes={alloc_bytes}")
     return out
 
 
