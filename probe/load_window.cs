@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEditorInternal;
 using UnityEditor.Profiling;
+using UnityEngine.Profiling;
 
 var cfg = @"D:/unity_profile_inspector/runs/_probe/profile_window_cfg.txt";
 var path = File.ReadAllText(cfg).Trim();

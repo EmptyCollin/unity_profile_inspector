@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,10 @@ import capability_run as C  # noqa: E402
 CFG = ROOT / "runs" / "_probe" / "profile_window_cfg.txt"
 OUT = ROOT / "runs" / "_probe" / "loaded_window.json"
 PROBE = ROOT / "probe" / "load_window.cs"
+REC_OFF = ROOT / "probe" / "record_off.cs"
+REC_ON = ROOT / "probe" / "record_on.cs"
+CLEAR = ROOT / "probe" / "clear_profile.cs"
+ENABLE = ROOT / "probe" / "enable_c.cs"
 
 
 def main() -> int:
@@ -35,6 +40,19 @@ def main() -> int:
     if not r.get("success"):
         raise SystemExit(json.dumps(r.get("errors"), ensure_ascii=False))
     doc = json.loads(OUT.read_text(encoding="utf-8"))
+    # 解包结束：切录制 2 次 → Clear → enable，恢复主采集，不重启 Editor。
+    for _ in range(2):
+        C.unity("script.eval_file", "--file", str(REC_OFF),
+                "--project-path", str(Path(a.project).resolve()), timeout=60)
+        time.sleep(0.4)
+        C.unity("script.eval_file", "--file", str(REC_ON),
+                "--project-path", str(Path(a.project).resolve()), timeout=60)
+        time.sleep(0.4)
+    C.unity("script.eval_file", "--file", str(CLEAR),
+            "--project-path", str(Path(a.project).resolve()), timeout=60)
+    time.sleep(0.3)
+    C.unity("script.eval_file", "--file", str(ENABLE),
+            "--project-path", str(Path(a.project).resolve()), timeout=60)
     dest = run / "windows" / f"{a.window_id}.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
