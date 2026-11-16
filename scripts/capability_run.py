@@ -116,13 +116,27 @@ def _write_unified(doc: dict, run_id: str) -> None:
     rows = doc.get("counters") or []
     frames = [int(x.get("frame_idx") or 0) for x in rows]
     funcs = doc.get("functions") or []
+    alloc_rows = doc.get("allocations") or []
+    ev_allocs = [{
+        "frame_idx": int(x.get("frame") or 0),
+        "bytes": 0, "count": 1,
+        "stack": [{"symbol": str(x.get("path") or ""),
+                   "source": None, "native": False, "address": ""}],
+        "data_tier": "A2"} for x in alloc_rows]
     ev_doc = {"run_id": run_id, "project_id": "", "scene": "",
               "protocol_fingerprint": "",
               "frames": frames, "functions": funcs, "callstacks": [],
-              "allocations": [], "render_objects": [], "blindspots": [],
+              "allocations": ev_allocs, "render_objects": [], "blindspots": [
+                  {"code": "allocation_bytes_unavailable",
+                   "reason": "GC.Alloc 路径已采到，但样本不含逐点 bytes",
+                   "unlock": "需要 Profiler allocation metadata 或 instrumented allocator"}
+              ],
               "raw_refs": [], "meta": {"probe": "unified",
                                        "mode": doc.get("mode", ""),
-                                       "edges": doc.get("edges") or []}}
+                                       "counter_lag_frames": 4,
+                                       "edges": doc.get("edges") or [],
+                                       "paths": doc.get("paths") or [],
+                                       "allocations": alloc_rows}}
     EV.write_text(json.dumps(ev_doc, ensure_ascii=False), encoding="utf-8")
     names = set()
     for x in rows:
@@ -136,7 +150,9 @@ def _write_unified(doc: dict, run_id: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "counters.json").write_text(json.dumps(
         {"captured_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-         "frame_last": doc.get("last_frame"), "counters": counters},
+         "frame_last": doc.get("last_frame"),
+         "counter_lag_frames": 4,
+         "counters": counters},
         ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "unified_probe.json").write_text(
         json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")

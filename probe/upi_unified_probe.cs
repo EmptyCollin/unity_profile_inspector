@@ -33,6 +33,8 @@ public static class UpiUnifiedProbe
     static readonly List<string> _counterRows = new List<string>();
     static readonly Dictionary<string, long[]> _funcs = new Dictionary<string, long[]>();
     static readonly Dictionary<string, long[]> _edges = new Dictionary<string, long[]>();
+    static readonly Dictionary<string, long[]> _paths = new Dictionary<string, long[]>();
+    static readonly List<string> _allocRows = new List<string>();
     static int _startFrame;
     static int _lastFrame;
     static int _frames = 30;
@@ -295,9 +297,31 @@ public static class UpiUnifiedProbe
                         int childCount = view.GetSampleChildrenCountRecursive(i);
                         stack.Add(new KeyValuePair<int, string>(i + childCount, name));
                         if (string.IsNullOrEmpty(name)) continue;
+                        var pathSb = new StringBuilder();
+                        for (int s = 0; s < stack.Count; s++)
+                        {
+                            if (s > 0) pathSb.Append(">");
+                            pathSb.Append(stack[s].Value);
+                        }
+                        string samplePath = pathSb.ToString();
+                        if (name.Contains("GC.Alloc") &&
+                            (samplePath.Contains("ChromaGame") || samplePath.Contains("BoardModel")
+                             || samplePath.Contains("DevSim")))
+                        {
+                            if (_allocRows.Count < 500)
+                                _allocRows.Add("{\"frame\":" + frame +
+                                    ",\"path\":" + Q(samplePath) +
+                                    ",\"parent\":" + Q(parent) +
+                                    ",\"time_ns\":" + (long)view.GetSampleTimeNs(i) + "}");
+                        }
                         bool isGame = name.Contains("ChromaGame")
                             || name.Contains("BoardModel") || name.Contains("DevSim");
                         if (!isGame) continue;
+                        string pk = name + "|" + samplePath;
+                        long[] pv;
+                        if (!_paths.TryGetValue(pk, out pv)) { pv = new long[2]; _paths[pk] = pv; }
+                        pv[0]++;
+                        pv[1] += (long)view.GetSampleTimeNs(i);
                         if (!string.IsNullOrEmpty(parent) &&
                             (parent.Contains("ChromaGame") || parent.Contains("BoardModel")
                              || parent.Contains("DevSim")))
@@ -361,7 +385,20 @@ public static class UpiUnifiedProbe
               .Append(",\"total_ms\":").Append((kv.Value[1] / 1e6).ToString("0.000"))
               .Append('}');
         }
-        sb.Append("]}");
+        sb.Append("],\"paths\":[");
+        bool pf = true;
+        foreach (var kv in _paths)
+        {
+            if (!pf) sb.Append(',');
+            pf = false;
+            int sep3 = kv.Key.IndexOf('|');
+            sb.Append("{\"symbol\":").Append(Q(kv.Key.Substring(0, sep3)))
+              .Append(",\"path\":").Append(Q(kv.Key.Substring(sep3 + 1)))
+              .Append(",\"calls\":").Append(kv.Value[0])
+              .Append(",\"total_ms\":").Append((kv.Value[1] / 1e6).ToString("0.000"))
+              .Append('}');
+        }
+        sb.Append("],\"allocations\":[").Append(string.Join(",", _allocRows.ToArray())).Append("]}");
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
