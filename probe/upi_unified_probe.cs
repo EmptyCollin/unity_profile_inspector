@@ -39,16 +39,37 @@ public static class UpiUnifiedProbe
     static bool _done;
     static string _mode = "shallow";
     static string _triggerPath = @"D:/unity_profile_inspector/runs/_probe/unified_trigger.txt";
+    static string _stopPath = @"D:/unity_profile_inspector/runs/_probe/unified_stop.txt";
+    static string _triggerDir = @"D:/unity_profile_inspector/runs/_probe/triggers";
+    static string _windowDir = @"D:/unity_profile_inspector/runs/_probe/windows";
+    static string _ackDir = @"D:/unity_profile_inspector/runs/_probe/acks";
+    static string _heartbeatPath = @"D:/unity_profile_inspector/runs/_probe/heartbeat.json";
+    static string _leasePath = @"D:/unity_profile_inspector/runs/_probe/lease.txt";
+    static long _leaseMs = 10000;
     static int _preN = 8;
     static int _postN = 8;
     static bool _triggered;
     static int _triggerFrame = -1;
     static string _triggerTag = "";
     static int _seq;
+    static int _lastLeaseCheck;
+    static int _hbFrame = -1;
 
     public static string Main()
     {
         LoadCfg();
+        if (_mode == "resident")
+        {
+            try
+            {
+                Directory.CreateDirectory(_triggerDir);
+                Directory.CreateDirectory(_windowDir);
+                Directory.CreateDirectory(_ackDir);
+                File.WriteAllText(_heartbeatPath,
+                    "{\"frame\":" + ProfilerDriver.lastFrameIndex + "}");
+            }
+            catch (Exception) { }
+        }
         Profiler.enabled = true;
         ProfilerDriver.enabled = true;
         ProfilerDriver.profileEditor = true;
@@ -87,6 +108,13 @@ public static class UpiUnifiedProbe
             string j = File.ReadAllText(CfgPath);
             _mode = ReadStr(j, "mode", "shallow");
             _triggerPath = ReadStr(j, "trigger_file", _triggerPath);
+            _stopPath = ReadStr(j, "stop_file", _stopPath);
+            _triggerDir = ReadStr(j, "trigger_dir", _triggerDir);
+            _windowDir = ReadStr(j, "window_dir", _windowDir);
+            _ackDir = ReadStr(j, "ack_dir", _ackDir);
+            _heartbeatPath = ReadStr(j, "heartbeat", _heartbeatPath);
+            _leasePath = ReadStr(j, "lease", _leasePath);
+            _leaseMs = (long)Math.Min(60000, Math.Max(1000, ReadNum(j, "lease_ms", 10000)));
             _preN = (int)Math.Min(600, Math.Max(1, ReadNum(j, "pre_frames", 8)));
             _postN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "post_frames", 8)));
             _frames = (int)Math.Min(600, Math.Max(1, ReadNum(j, "frames", 30)));
@@ -99,22 +127,58 @@ public static class UpiUnifiedProbe
     {
         if (_done) return;
         int now = ProfilerDriver.lastFrameIndex;
+        if (_mode == "resident")
+        {
+            if (now != _hbFrame)
+            {
+                _hbFrame = now;
+                try { File.WriteAllText(_heartbeatPath,
+                    "{\"frame\":" + now + ",\"utc\":\"" +
+                    DateTime.UtcNow.ToString("o") + "\"}"); } catch (Exception) { }
+            }
+            if (now - _lastLeaseCheck >= 30)
+            {
+                _lastLeaseCheck = now;
+                try
+                {
+                    if (File.Exists(_leasePath) &&
+                        (DateTime.UtcNow - File.GetLastWriteTimeUtc(_leasePath)).TotalMilliseconds > _leaseMs)
+                    {
+                        StopSelf();
+                        return;
+                    }
+                }
+                catch (Exception) { }
+            }
+        }
+        if (File.Exists(_stopPath))
+        {
+            StopSelf();
+            return;
+        }
         if (now != _lastFrame)
         {
             _lastFrame = now;
             _counterRows.Add(CounterRow(now));
         }
-        if (_mode == "resident" && !_triggered && File.Exists(_triggerPath))
+        if (_mode == "resident" && !_triggered)
         {
-            try { _triggerTag = File.ReadAllText(_triggerPath).Trim(); } catch (Exception) { }
-            if (string.IsNullOrEmpty(_triggerTag)) _triggerTag = "w" + (++_seq);
-            try { File.Delete(_triggerPath); } catch (Exception) { }
-            _triggered = true;
-            _triggerFrame = now;
-            _funcs.Clear();
-            ProfilerDriver.deepProfiling = true;
-            Profiler.enableAllocationCallstacks = true;
-            return;
+            string[] pending = new string[0];
+            try { pending = Directory.GetFiles(_triggerDir, "*.json"); } catch (Exception) { }
+            Array.Sort(pending, StringComparer.Ordinal);
+            if (pending.Length > 0)
+            {
+                string tf = pending[0];
+                try { _triggerTag = Path.GetFileNameWithoutExtension(tf); } catch (Exception) { }
+                if (string.IsNullOrEmpty(_triggerTag)) _triggerTag = "w" + (++_seq);
+                try { File.Delete(tf); } catch (Exception) { }
+                _triggered = true;
+                _triggerFrame = now;
+                _funcs.Clear();
+                ProfilerDriver.deepProfiling = true;
+                Profiler.enableAllocationCallstacks = true;
+                return;
+            }
         }
         bool capture = _mode == "resident"
             ? (_triggered && now - _triggerFrame >= _postN)
@@ -138,8 +202,22 @@ public static class UpiUnifiedProbe
             CaptureFunctions(first, now);
             string path = Out;
             if (_mode == "resident" && !string.IsNullOrEmpty(_triggerTag))
-                path = Out.Replace(".json", "_" + _triggerTag + ".json");
+            {
+                try
+                {
+                    Directory.CreateDirectory(_windowDir);
+                    Directory.CreateDirectory(_ackDir);
+                }
+                catch (Exception) { }
+                path = Path.Combine(_windowDir, _triggerTag + ".json");
+            }
             Write(path);
+            if (_mode == "resident" && !string.IsNullOrEmpty(_triggerTag))
+            {
+                try { File.WriteAllText(Path.Combine(_ackDir, _triggerTag + ".json"),
+                    "{\"tag\":\"" + Esc(_triggerTag) + "\",\"frame\":" + now + "}"); }
+                catch (Exception) { }
+            }
         }
         catch (Exception e)
         {
@@ -160,6 +238,17 @@ public static class UpiUnifiedProbe
         _rec.Clear(); _names.Clear();
         ProfilerDriver.deepProfiling = false;
         Profiler.enableAllocationCallstacks = false;
+    }
+
+    static void StopSelf()
+    {
+        _done = true;
+        EditorApplication.update -= Tick;
+        foreach (var r in _rec) { try { r.Dispose(); } catch (Exception) { } }
+        _rec.Clear(); _names.Clear();
+        ProfilerDriver.deepProfiling = false;
+        Profiler.enableAllocationCallstacks = false;
+        try { File.Delete(_heartbeatPath); } catch (Exception) { }
     }
 
     static string CounterRow(int frame)

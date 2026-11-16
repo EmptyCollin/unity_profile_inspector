@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -141,34 +142,97 @@ def _write_unified(doc: dict, run_id: str) -> None:
 
 
 SESSION_TRIGGER = ROOT / "runs" / "_probe" / "unified_trigger.txt"
+SESSION_STOP = ROOT / "runs" / "_probe" / "unified_stop.txt"
+SESSION_TRIGGER_DIR = ROOT / "runs" / "_probe" / "triggers"
+SESSION_WINDOW_DIR = ROOT / "runs" / "_probe" / "windows"
+SESSION_ACK_DIR = ROOT / "runs" / "_probe" / "acks"
+SESSION_HEARTBEAT = ROOT / "runs" / "_probe" / "heartbeat.json"
+SESSION_LEASE = ROOT / "runs" / "_probe" / "lease.txt"
+_SESSION_STARTED = False
+_LEASE_THREAD = None
+_LEASE_STOP = False
+
+
+def _lease_loop() -> None:
+    while not _LEASE_STOP:
+        try:
+            SESSION_LEASE.parent.mkdir(parents=True, exist_ok=True)
+            SESSION_LEASE.write_text("alive", encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(2)
 
 
 def start_session(project: Path) -> None:
-    """进 Play 后安装一次常驻统一探针；之后靠 trigger 取窗口。"""
+    """一次 replay 只装一次常驻探针；心跳/租约/trigger 队列。"""
+    global _SESSION_STARTED, _LEASE_THREAD, _LEASE_STOP
+    if _SESSION_STARTED:
+        return
     UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
+    for d in (SESSION_TRIGGER_DIR, SESSION_WINDOW_DIR, SESSION_ACK_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+        for p in d.glob("*.json"):
+            p.unlink(missing_ok=True)
     SESSION_TRIGGER.unlink(missing_ok=True)
+    SESSION_STOP.unlink(missing_ok=True)
+    SESSION_HEARTBEAT.unlink(missing_ok=True)
+    _LEASE_STOP = False
+    _LEASE_THREAD = threading.Thread(target=_lease_loop, daemon=True)
+    _LEASE_THREAD.start()
     UNIFIED_CFG.write_text(json.dumps({
         "mode": "resident", "budget_ms": 600000,
-        "pre_frames": 300, "post_frames": 8,
-        "trigger_file": str(SESSION_TRIGGER)}), encoding="utf-8")
+        "pre_frames": 8, "post_frames": 8,
+        "trigger_dir": str(SESSION_TRIGGER_DIR),
+        "window_dir": str(SESSION_WINDOW_DIR),
+        "ack_dir": str(SESSION_ACK_DIR),
+        "heartbeat": str(SESSION_HEARTBEAT),
+        "lease": str(SESSION_LEASE), "lease_ms": 10000,
+        "stop_file": str(SESSION_STOP)}), encoding="utf-8")
     d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
               "--project-path", str(project), "--timeout", "120")
     if not d.get("success"):
         raise RuntimeError("unified session install 失败：" +
                            json.dumps(d.get("errors"), ensure_ascii=False)[:300])
+    deadline = time.time() + 10
+    while time.time() < deadline and not SESSION_HEARTBEAT.exists():
+        time.sleep(0.2)
+    if not SESSION_HEARTBEAT.exists():
+        raise RuntimeError("unified session 心跳未出现")
+    _SESSION_STARTED = True
+
+
+def stop_session() -> None:
+    """显式清理常驻探针：stop → 等心跳消失 → 停租约。"""
+    global _SESSION_STARTED, _LEASE_STOP
+    _LEASE_STOP = True
+    _SESSION_STARTED = False
+    try:
+        SESSION_STOP.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_STOP.write_text("stop", encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    deadline = time.time() + 10
+    while time.time() < deadline and SESSION_HEARTBEAT.exists():
+        time.sleep(0.2)
+    try:
+        SESSION_LEASE.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def arm_trigger(tag: str) -> None:
-    SESSION_TRIGGER.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_TRIGGER.write_text(tag, encoding="utf-8")
+    SESSION_TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
+    (SESSION_TRIGGER_DIR / f"{tag}.json").write_text(
+        json.dumps({"tag": tag}), encoding="utf-8")
 
 
 def finish_trigger(project: Path, run_id: str, tag: str, limit: int,
                    since: str | None = None) -> list[dict]:
-    p = Path(str(UNIFIED_OUT).replace(".json", f"_{tag}.json"))
+    p = SESSION_WINDOW_DIR / f"{tag}.json"
+    ack = SESSION_ACK_DIR / f"{tag}.json"
     deadline = time.time() + 60
-    while time.time() < deadline and not p.exists():
-        time.sleep(0.3)
+    while time.time() < deadline and not (p.exists() and ack.exists()):
+        time.sleep(0.2)
     if not p.exists():
         raise RuntimeError(f"resident trigger {tag} 未落盘")
     doc = json.loads(p.read_text(encoding="utf-8"))
@@ -347,6 +411,23 @@ def capture_window_with_counters(project: Path, tag: str, limit: int,
     return cands
 
 
+def _console_errors(project: Path) -> list[str]:
+    try:
+        r = unity("console.get", "--project-path", str(project), timeout=30)
+        entries = ((r.get("data") or {}).get("result") or {}).get("entries") or []
+        return [f"{x.get('message','')} | {str(x.get('stackTrace',''))[:200]}"
+                for x in entries if str(x.get("level", "")).lower() == "error"]
+    except Exception as e:  # noqa: BLE001
+        return [f"console.get 失败：{type(e).__name__}: {e}"]
+
+
+def _clear_console(project: Path) -> None:
+    try:
+        unity("console.clear", "--project-path", str(project), timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def run_and_capture(project: Path, run_id: str, limit: int,
                     replay_path: Path, *, enable_deep: bool = True,
                     fast: bool = False, target_windows: bool = False) -> list[dict]:
@@ -356,6 +437,8 @@ def run_and_capture(project: Path, run_id: str, limit: int,
     if not on.get("success", True):
         raise RuntimeError("无法开启浅档 profiler：" +
                            json.dumps(on, ensure_ascii=False)[:200])
+    _clear_console(project)
+    start_session(project)
     merged: dict[str, dict] = {}
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
     timeline: list[dict] = []
@@ -383,8 +466,10 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                          and last_action.get(cmd.type) == i
                          or (not fast and not target_windows)))
             win_start = _profiler_frame(project) if take else -1
+            tag = f"{run_id}_a{i}"
             if take:
-                start_window(project, f"{run_id}_a{i}", start_frame=win_start)
+                print("session trigger", i, cmd.type, tag, flush=True)
+                arm_trigger(tag)
             if cmd.type in ACTION_CMDS:
                 try:
                     from upi.tooling import probe_control as _PC
@@ -394,8 +479,8 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
             if take:
-                for c in finish_window(project, f"{run_id}_a{i}", limit,
-                                       since=started):
+                for c in finish_trigger(project, tag, tag, limit,
+                                        since=started):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c
@@ -411,6 +496,13 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                 k = str(c.get("root_cause") or "")
                 if k and k not in merged:
                     merged[k] = c
+        _errs = _console_errors(project)
+        _err_path = ROOT / "runs" / run_id / "console_errors.json"
+        _err_path.parent.mkdir(parents=True, exist_ok=True)
+        _err_path.write_text(
+            json.dumps(_errs, ensure_ascii=False, indent=2), encoding="utf-8")
+        if _errs:
+            raise RuntimeError(f"控制台有 {len(_errs)} 条 error，拒绝使用该轮采样")
         wins = _windows_since(project, started)
         try:
             from upi.core.anomaly_candidates import windows_from_bundle
@@ -471,6 +563,7 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             encoding="utf-8")
         return list(merged.values())
     finally:
+        stop_session()
         _eval(project, PROFILER_OFF, timeout=30)
 
 

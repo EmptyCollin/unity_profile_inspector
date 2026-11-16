@@ -8,7 +8,8 @@
 -            if (busy || bonusOpen || phase != Phase.Playing) return;
 +            using (HintScanMarker.Auto())
 +            {
-+                for (int guard = 0; guard < 4; guard++)
-+                    if (model.HasMatch()) break;
++                if (model != null)
++                    for (int guard = 0; guard < 4; guard++)
++                        if (model.HasMatch()) break;
 +            }
 +            if (busy || bonusOpen || phase != Phase.Playing) return;
