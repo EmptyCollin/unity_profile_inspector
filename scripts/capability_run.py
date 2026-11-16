@@ -261,6 +261,25 @@ def end_window() -> None:
     time.sleep(0.08)
 
 
+def save_profile(project: Path, path: Path) -> dict:
+    cfg = ROOT / "runs" / "_probe" / "profile_cfg.txt"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(path.as_posix(), encoding="utf-8")
+    r = unity("script.eval_file", "--file",
+              str(ROOT / "probe" / "save_profile.cs"),
+              "--project-path", str(project), timeout=180)
+    out = str(((r.get("data") or {}).get("result") or {}).get("result") or "")
+    info = {"path": str(path), "exists": path.is_file(), "first": 0, "last": 0}
+    for part in out.split(";"):
+        k, _, v = part.partition("=")
+        if k in ("first", "last"):
+            try:
+                info[k] = int(v)
+            except ValueError:
+                pass
+    return info
+
+
 def run_full_capture(project: Path, run_id: str, limit: int,
                      replay_path: Path, mode: str) -> list[dict]:
     _clear_console(project)
