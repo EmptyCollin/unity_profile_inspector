@@ -111,9 +111,48 @@ def ensure_play(project: Path) -> dict:
     raise RuntimeError("进入 Play Mode 超时")
 
 
+def _estimate_counter_lag(doc: dict) -> int:
+    """counters 相对 functions 的帧延迟；用同轮序列互相关估计。"""
+    rows = doc.get("counters") or []
+    c = {}
+    for x in rows:
+        try:
+            c[int(x.get("frame_idx"))] = float(
+                (x.get("counters") or {}).get("CPU Main Thread Frame Time") or 0) / 1e6
+        except Exception:  # noqa: BLE001
+            continue
+    f = {}
+    for x in doc.get("functions") or []:
+        try:
+            fr = int(x.get("frame_idx"))
+            f[fr] = f.get(fr, 0.0) + float(x.get("total_ms") or 0)
+        except Exception:  # noqa: BLE001
+            continue
+    if len(c) < 8 or len(f) < 8:
+        return 0
+    best_lag, best_corr = 0, -2.0
+    for lag in range(-10, 11):
+        pairs = [(c[i + lag], f[i]) for i in f if i + lag in c]
+        if len(pairs) < 8:
+            continue
+        xs = [p[0] for p in pairs]
+        ys = [p[1] for p in pairs]
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        vx = sum((x - mx) ** 2 for x in xs)
+        vy = sum((y - my) ** 2 for y in ys)
+        if not vx or not vy:
+            continue
+        cov = sum((x - mx) * (y - my) for x, y in pairs)
+        corr = cov / (vx * vy) ** 0.5
+        if corr > best_corr:
+            best_lag, best_corr = lag, corr
+    return best_lag if best_corr >= 0.3 else 0
+
+
 def _write_unified(doc: dict, run_id: str) -> None:
     """把统一探针输出落成 evidence 输入 + counters 输入。"""
     rows = doc.get("counters") or []
+    lag_frames = _estimate_counter_lag(doc)
     frames = [int(x.get("frame_idx") or 0) for x in rows]
     funcs = doc.get("functions") or []
     alloc_rows = doc.get("allocations") or []
@@ -129,7 +168,9 @@ def _write_unified(doc: dict, run_id: str) -> None:
               "allocations": ev_allocs, "render_objects": [], "blindspots": [],
               "raw_refs": [], "meta": {"probe": "unified",
                                        "mode": doc.get("mode", ""),
-                                       "counter_lag_frames": 4,
+                                       "counter_lag_frames": lag_frames,
+                                       "lag_source": "cross_correlation",
+                                       "counter_event_frame": "counter_frame - lag_frames",
                                        "edges": doc.get("edges") or [],
                                        "paths": doc.get("paths") or [],
                                        "allocations": alloc_rows}}
@@ -147,11 +188,21 @@ def _write_unified(doc: dict, run_id: str) -> None:
     (out / "counters.json").write_text(json.dumps(
         {"captured_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
          "frame_last": doc.get("last_frame"),
-         "counter_lag_frames": 4,
+         "counter_lag_frames": lag_frames,
+         "lag_source": "cross_correlation",
          "counters": counters},
         ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "unified_probe.json").write_text(
         json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    aligned = []
+    for x in rows:
+        cf = int(x.get("frame_idx") or 0)
+        aligned.append({"counter_frame": cf, "event_frame": cf - lag_frames,
+                        "counters": x.get("counters") or {}})
+    (out / "aligned_counters.json").write_text(
+        json.dumps({"lag_frames": lag_frames,
+                    "rows": aligned}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
 
 
 SESSION_TRIGGER = ROOT / "runs" / "_probe" / "unified_trigger.txt"
