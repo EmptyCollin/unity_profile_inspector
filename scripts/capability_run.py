@@ -264,8 +264,7 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
                     try:
                         cands = capture_window(
                             project, tag, limit, since=started,
-                            start_frame=int(p["window"].get("start_frame", -1)),
-                            mode="deep")
+                            start_frame=-1, mode="deep")
                         for c in cands:
                             key = str(c.get("root_cause") or "")
                             if key and key not in merged:
