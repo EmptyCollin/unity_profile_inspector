@@ -245,7 +245,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
     except Exception:  # noqa: BLE001 — 资产扫描失败不影响代码候选
         pass
     edges = (bundle.meta or {}).get("edges") or []
-    return drop_containers(out, edges)[:limit]
+    return drop_containers(out, edges, project_root=project_root)[:limit]
 
 
 def _short_name(s: str) -> str:
@@ -254,12 +254,29 @@ def _short_name(s: str) -> str:
     return s.split(".")[-1] if "." in s else s
 
 
+def _has_direct_work(c: CandidateV2, project_root=None) -> bool:
+    """self≈0 但函数体有 new/loop 等直接工作 → 不是纯 facade。"""
+    if not c.sources or project_root is None:
+        return True
+    s = c.sources[0]
+    try:
+        p = Path(project_root) / s.file
+        lines = p.read_text(encoding="utf-8").splitlines()
+        lo = max(1, s.start_line) - 1
+        hi = min(len(lines), max(s.end_line, s.start_line + 60))
+        body = "\n".join(lines[lo:hi])
+        import re
+        return bool(re.search(r"\b(new|for|while|foreach)\b", body))
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def drop_containers(cands: list[CandidateV2], edges: list[dict] | None = None,
-                    eps: float = 0.001) -> list[CandidateV2]:
+                    eps: float = 0.001, project_root=None) -> list[CandidateV2]:
     """self/total≈0 的函数是纯容器/入口，不产出 finding；子函数保留。
 
-    有候选父节点的容器保留（例如 ResolveAllSync 是 c06 的 case 根）；
-    只删没有候选父节点的入口 facade。
+    有候选父节点、或函数体有直接工作的容器保留（例如 c06 的 ResolveAllSync）；
+    只删没有候选父节点且纯委托的入口 facade。
     """
     names = {_short_name(c.root_cause.split(":")[-1]) for c in cands}
     parents: dict[str, set[str]] = {}
@@ -273,7 +290,7 @@ def drop_containers(cands: list[CandidateV2], edges: list[dict] | None = None,
         n = _short_name(c.root_cause.split(":")[-1])
         container = (c.kind == "function" and c.total_ms > 0
                      and 0.0 <= c.self_share <= eps)
-        if container and not parents.get(n):
+        if container and not parents.get(n) and not _has_direct_work(c, project_root):
             continue
         out.append(c)
     return out
