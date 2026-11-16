@@ -745,7 +745,8 @@ def _make_collector(project: Path, project_id: str, replay: str):
             subprocess.run(
                 [sys.executable, str(ROOT / "scripts" / "capability_run.py"),
                  "--project", str(project), "--project-id", project_id,
-                 "--replay", replay, "--no-save"],
+                 "--replay", replay, "--no-save", "--light",
+                 "--target-windows"],
                 cwd=str(ROOT), capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=1800)
             from upi.core.evidence_diagnosis import candidates_from_latest
