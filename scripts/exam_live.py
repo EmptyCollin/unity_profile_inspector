@@ -86,7 +86,8 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
             metric="llm", link="",
             anchors=anchors, evidence_refs=sorted(set(refs)),
             attribution=AttributionInfo(confidence=float(h.get("confidence", 0)),
-                                        factors={"root_cause": h.get("root_cause")}),
+                                        factors={"root_cause": h.get("root_cause"),
+                                                 "window_id": h.get("window_id", "")}),
             state="candidate"))
     return out
 

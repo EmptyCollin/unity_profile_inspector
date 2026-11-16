@@ -44,6 +44,7 @@ public static class UpiUnifiedProbe
     static string _mode = "shallow";
     static string _triggerPath = @"D:/unity_profile_inspector/runs/_probe/unified_trigger.txt";
     static string _stopPath = @"D:/unity_profile_inspector/runs/_probe/unified_stop.txt";
+    static string _windowPath = @"D:/unity_profile_inspector/runs/_probe/action_window.txt";
     static string _triggerDir = @"D:/unity_profile_inspector/runs/_probe/triggers";
     static string _windowDir = @"D:/unity_profile_inspector/runs/_probe/windows";
     static string _ackDir = @"D:/unity_profile_inspector/runs/_probe/acks";
@@ -60,6 +61,10 @@ public static class UpiUnifiedProbe
     static int _seq;
     static int _lastLeaseCheck;
     static int _hbFrame = -1;
+    static string _winTag = "";
+    static int _winStart = -1;
+    static readonly List<string> _winRows = new List<string>();
+    static string _lastWinCmd = "";
 
     public static string Main()
     {
@@ -115,6 +120,7 @@ public static class UpiUnifiedProbe
             _mode = ReadStr(j, "mode", "shallow");
             _triggerPath = ReadStr(j, "trigger_file", _triggerPath);
             _stopPath = ReadStr(j, "stop_file", _stopPath);
+            _windowPath = ReadStr(j, "window_file", _windowPath);
             _triggerDir = ReadStr(j, "trigger_dir", _triggerDir);
             _windowDir = ReadStr(j, "window_dir", _windowDir);
             _ackDir = ReadStr(j, "ack_dir", _ackDir);
@@ -134,6 +140,31 @@ public static class UpiUnifiedProbe
     {
         if (_done) return;
         int now = ProfilerDriver.lastFrameIndex;
+        try
+        {
+            if (File.Exists(_windowPath))
+            {
+                string wc = File.ReadAllText(_windowPath).Trim();
+                if (wc != _lastWinCmd)
+                {
+                    _lastWinCmd = wc;
+                    if (wc.StartsWith("begin:"))
+                    {
+                        _winTag = wc.Substring(6);
+                        _winStart = now;
+                    }
+                    else if (wc == "end" && _winStart >= 0)
+                    {
+                        _winRows.Add("{\"window_id\":" + Q(_winTag) +
+                            ",\"frame_start\":" + _winStart +
+                            ",\"frame_end\":" + now + "}");
+                        _winTag = "";
+                        _winStart = -1;
+                    }
+                }
+            }
+        }
+        catch (Exception) { }
         if (_mode == "resident")
         {
             if (now != _hbFrame)
@@ -427,7 +458,7 @@ public static class UpiUnifiedProbe
               .Append(",\"last_frame\":").Append(kv.Value[3])
               .Append('}');
         }
-        sb.Append("]}");
+        sb.Append("],\"windows\":[").Append(string.Join(",", _winRows.ToArray())).Append("]}");
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }

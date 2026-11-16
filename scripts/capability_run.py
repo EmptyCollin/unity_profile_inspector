@@ -51,6 +51,7 @@ UNIFIED_PROBE = _render_probe(ROOT / "probe" / "upi_unified_probe.cs",
 UNIFIED_CFG = ROOT / "runs" / "_probe" / "unified_cfg.json"
 UNIFIED_OUT = ROOT / "runs" / "_probe" / "unified_probe.json"
 EV = ROOT / "runs" / "_probe" / "marker_evidence.json"
+ACTION_WINDOW_FILE = ROOT / "runs" / "_probe" / "action_window.txt"
 
 SHALLOW_ON = ("UnityEngine.Profiling.Profiler.enabled=true;"
               "UnityEditorInternal.ProfilerDriver.enabled=true;"
@@ -223,8 +224,10 @@ def start_full_probe(project: Path, mode: str) -> None:
     UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
     UNIFIED_OUT.unlink(missing_ok=True)
     SESSION_FINISH.unlink(missing_ok=True)
+    ACTION_WINDOW_FILE.unlink(missing_ok=True)
     UNIFIED_CFG.write_text(json.dumps({
         "mode": mode, "frames": 100000, "budget_ms": 600000,
+        "window_file": str(ACTION_WINDOW_FILE),
         "finish_file": str(SESSION_FINISH)}), encoding="utf-8")
     d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
               "--project-path", str(project), "--timeout", "120")
@@ -247,6 +250,17 @@ def finish_full_probe(project: Path, run_id: str, limit: int,
     return _collect_run(project, run_id, limit, since, UNIFIED_OUT)
 
 
+def begin_window(tag: str) -> None:
+    ACTION_WINDOW_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ACTION_WINDOW_FILE.write_text("begin:" + tag, encoding="utf-8")
+    time.sleep(0.08)
+
+
+def end_window() -> None:
+    ACTION_WINDOW_FILE.write_text("end", encoding="utf-8")
+    time.sleep(0.08)
+
+
 def run_full_capture(project: Path, run_id: str, limit: int,
                      replay_path: Path, mode: str) -> list[dict]:
     _clear_console(project)
@@ -256,11 +270,37 @@ def run_full_capture(project: Path, run_id: str, limit: int,
     if spec is None:
         return []
     ex = ReplayExecutor(project)
-    for cmd in spec.commands:
+    for i, cmd in enumerate(spec.commands):
+        begin_window(f"cmd-{i}-{cmd.type}")
         ex._one(cmd)  # noqa: SLF001
+        end_window()
     cands = finish_full_probe(project, run_id, max(30, limit), since=started)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    windows = []
+    doc_p = run_dir / "unified_probe.json"
+    if doc_p.is_file():
+        try:
+            windows = json.loads(doc_p.read_text(encoding="utf-8")).get("windows") or []
+        except Exception:  # noqa: BLE001
+            windows = []
+    windows.sort(key=lambda w: int(w.get("frame_start", 0)))
+    for i, w in enumerate(windows):
+        if i + 1 < len(windows):
+            nxt = int(windows[i + 1].get("frame_start", 0))
+            if nxt > int(w.get("frame_start", 0)):
+                w["frame_end"] = nxt - 1
+    (run_dir / "action_windows.json").write_text(
+        json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8")
+    for c in cands:
+        pf = int(c.get("peak_frame") or 0)
+        hit = next((w for w in windows
+                    if int(w.get("frame_start", 0)) <= pf <= int(w.get("frame_end", 0))), None)
+        if hit is None and windows:
+            hit = min(windows, key=lambda w: abs(
+                pf - int(w.get("frame_start", 0))))
+        if hit:
+            c["window_id"] = hit.get("window_id", "")
     (run_dir / "merged_candidates.json").write_text(
         json.dumps(cands, ensure_ascii=False, indent=2), encoding="utf-8")
     errs = _console_errors(project)

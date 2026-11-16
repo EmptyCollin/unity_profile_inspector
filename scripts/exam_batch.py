@@ -270,7 +270,8 @@ def main() -> int:
                     _anchors.append(f"{_s.get('file','')}:{_s.get('start_line',0)}")
             if _anchors:
                 _hs.append({"root_cause": _c.get("root_cause", ""),
-                            "code_anchors": _anchors, "confidence": 0.5})
+                            "code_anchors": _anchors, "confidence": 0.5,
+                            "window_id": _c.get("window_id", "")})
         findings = X.findings_from_hypotheses(run_id, _hs, {})
     else:
         from upi.core.project_store import knowledge_db as _knowledge_db

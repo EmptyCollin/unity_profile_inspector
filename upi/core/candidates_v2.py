@@ -32,6 +32,7 @@ class CandidateV2(BaseModel):
     self_ms: float = 0.0
     total_ms: float = 0.0
     self_share: float = -1.0
+    peak_frame: int = 0
     score_interval_low: float = 0.0
     score_interval_high: float = 0.0
     interval_basis: str = ""
@@ -111,6 +112,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
     fn_by_sym: dict[tuple, dict] = defaultdict(lambda: {"total": 0.0, "calls": 0,
                                                          "self": 0.0,
                                                          "has_self": False,
+                                                         "peak": 0.0, "peak_frame": 0,
                                                          "span": None, "ids": [],
                                                          "vals": [], "peaks": []})
     for i, fn in enumerate(bundle.functions):
@@ -127,6 +129,9 @@ def generate_candidates(bundle: EvidenceBundleV2,
         e["ids"].append(f"fn:{i}:{fn.symbol}")
         e["vals"].append(float(fn.total_ms) * 1000.0 + float(fn.calls))
         e["peaks"].append(float(fn.total_ms))
+        if float(fn.total_ms) > e["peak"]:
+            e["peak"] = float(fn.total_ms)
+            e["peak_frame"] = int(fn.frame_idx)
     for (sym, file, line), e in fn_by_sym.items():
         key = ("fn", file, line)
         if key in seen:
@@ -148,6 +153,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
             total_ms=float(e["total"]),
             self_share=((float(e["self"]) / float(e["total"]))
                         if e["total"] and e["has_self"] else -1.0),
+            peak_frame=int(e.get("peak_frame") or 0),
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
