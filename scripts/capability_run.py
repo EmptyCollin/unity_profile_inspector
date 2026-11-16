@@ -45,18 +45,11 @@ def _render_probe(src: Path, name: str) -> Path:
     return out
 
 
-PROBE = _render_probe(ROOT / "probe" / "upi_marker_evidence.cs",
-                      "generated_marker_evidence.cs")
 UNIFIED_PROBE = _render_probe(ROOT / "probe" / "upi_unified_probe.cs",
                               "generated_unified_probe.cs")
 UNIFIED_CFG = ROOT / "runs" / "_probe" / "unified_cfg.json"
 UNIFIED_OUT = ROOT / "runs" / "_probe" / "unified_probe.json"
-EVIDENCE_PROBE = _render_probe(ROOT / "probe" / "upi_evidence_v1.cs",
-                               "generated_evidence_v1.cs")
-COUNTERS_PROBE = _render_probe(ROOT / "probe" / "upi_counters_v1.cs",
-                               "generated_counters_v1.cs")
 EV = ROOT / "runs" / "_probe" / "marker_evidence.json"
-CFG = ROOT / "runs" / "_probe" / "capture_cfg.json"
 
 SHALLOW_ON = ("UnityEngine.Profiling.Profiler.enabled=true;"
               "UnityEditorInternal.ProfilerDriver.enabled=true;"
@@ -194,42 +187,12 @@ def capture_window(project: Path, run_id: str, limit: int,
 
 
 ACTION_CMDS = {"set_board", "resolve", "resolve_board", "swap", "open_shop"}
-EV_DEEP = ROOT / "runs" / "_probe" / "evidence_v1.json"
 DEEP_ON = ("UnityEngine.Profiling.Profiler.enabled=true;"
            "UnityEditorInternal.ProfilerDriver.enabled=true;"
            "UnityEditorInternal.ProfilerDriver.profileEditor=true;"
            "UnityEditorInternal.ProfilerDriver.deepProfiling=true;"
            "UnityEngine.Profiling.Profiler.enableAllocationCallstacks=true;"
            "UnityEditorInternal.ProfilerDriver.ClearAllFrames();return \"deep\";")
-
-
-def collect_counters(project: Path, run_id: str) -> dict:
-    """通用 ProfilerRecorder 计数；失败返回空，不阻断。"""
-    src = ROOT / "runs" / "_probe" / "counters_v1.json"
-    try:
-        src.unlink(missing_ok=True)
-    except OSError:
-        pass
-    try:
-        d = unity("script eval", "--file",
-                  str(COUNTERS_PROBE),
-                  "--project-path", str(project), "--timeout", "120")
-        if not d.get("success"):
-            return {}
-        deadline = time.time() + 30
-        while time.time() < deadline and not src.exists():
-            time.sleep(0.3)
-        if not src.exists():
-            return {}
-        data = json.loads(src.read_text(encoding="utf-8"))
-        out = ROOT / "runs" / run_id / "counters.json"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                       encoding="utf-8")
-        return data.get("counters", {})
-    except Exception as e:  # noqa: BLE001
-        print("counters skipped:", type(e).__name__, e)
-        return {}
 
 
 def deep_capture(project: Path, run_id: str, limit: int) -> list[dict]:
@@ -263,8 +226,6 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
                          windows: list[dict], timeline: list[dict],
                          limit: int) -> list[dict]:
     """r′：完整重放；只在窗口对应命令区间内开深档并采集。"""
-    CFG.write_text(json.dumps({"evidence_threads": 8, "evidence_frames": 8,
-                               "evidence_budget_ms": 6000}), encoding="utf-8")
     parsed = []
     for w in windows:
         start, end = int(w["start_frame"]), int(w["end_frame"])
@@ -301,41 +262,14 @@ def deep_windows_capture(project: Path, run_id: str, replay_path: Path,
                 for k, p in enumerate(ends[i]):
                     tag = f"{run_id}_w{k}"
                     try:
-                        EV_DEEP.unlink(missing_ok=True)
-                        d = unity("script eval", "--file",
-                                  str(EVIDENCE_PROBE),
-                                  "--project-path", str(project),
-                                  "--timeout", "120")
-                        if not d.get("success"):
-                            continue
-                        deadline = time.time() + 45
-                        while time.time() < deadline and not EV_DEEP.exists():
-                            time.sleep(0.3)
-                        if not EV_DEEP.exists():
-                            continue
-                        collect_counters(project, tag)
-                        subprocess.run(
-                            [sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
-                             "--project", str(project), "--evidence", str(EV_DEEP),
-                             "--run-id", tag, "--scene",
-                             "Assets/Scenes/00_Bootstrap.unity",
-                             "--events-since", started],
-                            cwd=str(ROOT), capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", timeout=60)
-                        bundle = ROOT / "runs" / tag / "evidence" / "evidence_v2.json"
-                        out = ROOT / "runs" / tag / "evidence" / "candidates.json"
-                        subprocess.run(
-                            [sys.executable, str(ROOT / "scripts" / "evidence_candidates.py"),
-                             "--project", str(project), "--evidence", str(bundle),
-                             "--out", str(out), "--limit", str(limit)],
-                            cwd=str(ROOT), capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", timeout=60)
-                        if out.exists():
-                            for c in json.loads(out.read_text(encoding="utf-8")).get(
-                                    "candidates", []):
-                                key = str(c.get("root_cause") or "")
-                                if key and key not in merged:
-                                    merged[key] = c
+                        cands = capture_window(
+                            project, tag, limit, since=started,
+                            start_frame=int(p["window"].get("start_frame", -1)),
+                            mode="deep")
+                        for c in cands:
+                            key = str(c.get("root_cause") or "")
+                            if key and key not in merged:
+                                merged[key] = c
                     except Exception as e:  # noqa: BLE001
                         print("deep window failed:", type(e).__name__, e)
                 _eval(project, PROFILER_OFF, timeout=30)
