@@ -262,6 +262,8 @@ def main() -> int:
                     for c in _cands]
         _hs = []
         for _c in _raw[:30]:
+            if str(_c.get("kind") or "") == "anomaly":
+                continue
             _anchors = []
             for _s in (_c.get("sources") or [])[:4]:
                 if isinstance(_s, dict):
