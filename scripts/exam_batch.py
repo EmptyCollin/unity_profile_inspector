@@ -255,7 +255,6 @@ def main() -> int:
         if _mp.is_file():
             _raw = json.loads(_mp.read_text(encoding="utf-8"))
         else:
-            from upi.core.evidence_diagnosis import candidates_from_latest
             _cands, _b, _p = candidates_from_latest(p, limit=12)
             _raw = [{"root_cause": c.root_cause,
                      "sources": [{"file": s.file, "start_line": s.start_line}
