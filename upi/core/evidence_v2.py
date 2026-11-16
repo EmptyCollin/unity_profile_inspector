@@ -62,6 +62,7 @@ class FunctionStat(BaseModel):
     calls: int = Field(default=0, ge=0)
     total_ms: float = Field(default=0.0, ge=0)
     self_ms: float = Field(default=0.0, ge=0)
+    time_semantics: Literal["inclusive", "exclusive", "unknown"] = "unknown"
     source: Optional[SourceSpan] = None
     data_tier: EvidenceTier = "A2"
 

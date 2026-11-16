@@ -98,7 +98,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[span],
             evidence_ids=a["evidence"],
             score=float(sum(a["vals"])),
-            metric_value=(float(sum(a["vals"])) / max(1, len(a["vals"]))),
+            metric_value=max(a["vals"] or [0.0]),
             metric_unit="bytes",
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
@@ -107,7 +107,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
     # 2) 热点函数：按 total_ms 聚合，只保留工程源码内的函数。
     fn_by_sym: dict[tuple, dict] = defaultdict(lambda: {"total": 0.0, "calls": 0,
                                                          "span": None, "ids": [],
-                                                         "vals": []})
+                                                         "vals": [], "peaks": []})
     for i, fn in enumerate(bundle.functions):
         if fn.source is None or not g.span_project(fn.source):
             continue
@@ -118,6 +118,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
         e["span"] = fn.source
         e["ids"].append(f"fn:{i}:{fn.symbol}")
         e["vals"].append(float(fn.total_ms) * 1000.0 + float(fn.calls))
+        e["peaks"].append(float(fn.total_ms))
     for (sym, file, line), e in fn_by_sym.items():
         key = ("fn", file, line)
         if key in seen:
@@ -133,7 +134,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[e["span"]],
             evidence_ids=e["ids"],
             score=float(e["total"]) * 1000.0 + float(e["calls"]),
-            metric_value=(float(e["total"]) / max(1, len(e["vals"]))),
+            metric_value=max(e["peaks"] or [0.0]),
             metric_unit="ms",
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],

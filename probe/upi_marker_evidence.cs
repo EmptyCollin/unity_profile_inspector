@@ -157,6 +157,7 @@ public static class UpiMarkerEvidence
                 Q(kv.Key.Substring(sep + 1)) + ",\"calls\":" + kv.Value[0] +
                 ",\"total_ms\":" + (kv.Value[1] / 1e6).ToString("0.000") +
                 ",\"self_ms\":" + (kv.Value[1] / 1e6).ToString("0.000") +
+                ",\"time_semantics\":\"inclusive\"" +
                 ",\"data_tier\":\"A2\"}");
         }
         var sb = new StringBuilder();
@@ -167,7 +168,12 @@ public static class UpiMarkerEvidence
           .Append(",\"functions\":[").Append(string.Join(",", fs.ToArray())).Append("]")
           .Append(",\"render_objects\":[]")
           .Append(",\"allocations\":[]")
-          .Append(",\"blindspots\":[],\"truncated\":").Append(truncated ? "true" : "false").Append("}");
+          .Append(",\"blindspots\":[")
+          .Append("{\"code\":\"allocation_site_unavailable\",\"reason\":\"marker probe 未采 allocation callstack\",\"unlock\":\"开启 allocation callstacks 或 B 档\"},")
+          .Append("{\"code\":\"callstack_unavailable\",\"reason\":\"marker probe 未采 callstack\",\"unlock\":\"开启 callstack 采样\"},")
+          .Append("{\"code\":\"exclusive_time_unavailable\",\"reason\":\"self_ms 当前等于 total_ms；为 inclusive 语义\",\"unlock\":\"按 sample 子节点扣减\"}")
+          .Append("]")
+          .Append(",\"truncated\":").Append(truncated ? "true" : "false").Append("}");
         try { File.WriteAllText(Out, sb.ToString(), new UTF8Encoding(false)); } catch (Exception) { }
         LastLine = "frames=" + frames.Count + " funcs=" + fs.Count;
         return;

@@ -131,23 +131,36 @@ def _cost_context(bundle, cand) -> str:
         if total_frame is not None and total_frame > 10000:
             total_frame = total_frame / 1e6
         total_alloc = _median("GC Allocated In Frame")
+        _frame_vals = ((counters.get("CPU Main Thread Frame Time") or {})
+                       .get("series") or [])
+        _frame_vals = [float(x) for x in _frame_vals]
+        if _frame_vals and max(_frame_vals) > 10000:
+            _frame_vals = [x / 1e6 for x in _frame_vals]
+        total_peak = max(_frame_vals) if _frame_vals else None
         method = str(getattr(cand, "root_cause", "")).split(":")[-1].split(".")[-1]
         methods = {method}
         if method.endswith("Body"):
             methods.add(method[:-4])
         funcs = getattr(bundle, "functions", []) or []
         target_sum = 0.0
+        target_peak = 0.0
         for f in funcs:
             sym = str(getattr(f, "symbol", "") or "")
             name = sym.split(".")[-1].split("::")[-1].split("(")[0].strip()
             if name in methods:
-                target_sum += float(getattr(f, "self_ms", 0) or 0)
+                target_sum += float(getattr(f, "total_ms", 0) or 0)
+                target_peak = max(target_peak,
+                                  float(getattr(f, "total_ms", 0) or 0))
         nframes = max(1, len(getattr(bundle, "frames", []) or []))
         target_ms = target_sum / nframes
         parts = []
         if total_frame:
             parts.append(f"target_self_ms={target_ms:.3f}; total_frame_ms={total_frame:.3f}; "
                          f"share={target_ms / total_frame:.3f}")
+        if total_peak and target_peak:
+            parts.append(f"target_peak_ms={target_peak:.3f}; "
+                         f"total_peak_ms={total_peak:.3f}; "
+                         f"share_peak={target_peak / total_peak:.3f}")
         if total_alloc:
             parts.append(f"total_alloc={total_alloc:.0f}")
         return "; ".join(parts)
@@ -160,10 +173,13 @@ def _cost_values(bundle, cand) -> dict:
     text = _cost_context(bundle, cand)
     m = re.search(r"target_self_ms=([\d.]+); total_frame_ms=([\d.]+); "
                   r"share=([\d.]+)", text)
-    if not m:
+    p = re.search(r"target_peak_ms=([\d.]+); total_peak_ms=([\d.]+); "
+                  r"share_peak=([\d.]+)", text)
+    if not m and not p:
         return {}
-    return {"abs_ms": float(m.group(1)), "total_ms": float(m.group(2)),
-            "share": float(m.group(3))}
+    return {"abs_ms": float(p.group(1)) if p else float(m.group(1)),
+            "total_ms": float(p.group(2)) if p else float(m.group(2)),
+            "share": float(p.group(3)) if p else float(m.group(3))}
 
 
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
