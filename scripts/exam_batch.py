@@ -349,6 +349,38 @@ def main() -> int:
                  or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
+    if _prof.name != "screen":
+        _mp = run_dir / "merged_candidates.json"
+        _cands = []
+        if _mp.is_file():
+            try:
+                _cands = json.loads(_mp.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                _cands = []
+        _wins = sorted({str(c.get("window_id") or "") for c in _cands
+                       if c.get("window_id")
+                       and str(c.get("kind") or "") not in ("asset", "anomaly")})
+        if _wins:
+            import subprocess
+            _p = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "profile_windows.py"),
+                 "--project", str(p), "--replay", a.replay,
+                 "--run-id", run_id, "--windows", ",".join(_wins)],
+                cwd=str(ROOT), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=1800)
+            _profiles = []
+            _pf = run_dir / "profiles" / "profile_windows.json"
+            if _pf.is_file():
+                try:
+                    _profiles = json.loads(_pf.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    _profiles = []
+            (run_dir / "two_pass.json").write_text(json.dumps(
+                {"status": "done" if _p.returncode == 0 else "profile_failed",
+                 "windows": _wins, "profiles": len(_profiles),
+                 "raw_missing": [x.get("window_id") for x in _profiles
+                                 if x.get("raw_status") != "ok"]},
+                ensure_ascii=False, indent=2), encoding="utf-8")
     asset_records = []
     asset_units = [u for u in units
                    if "oversized_resource_asset" in u.mechanism]
