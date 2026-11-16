@@ -1,4 +1,4 @@
-"""每个 action 前清 Profiler，动作后保存独立 .data。"""
+"""Pass 2：只对指定 window 做深采，生成独立 .data。"""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,10 @@ def main() -> int:
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--replay", default="sim/replay/c01.json")
     ap.add_argument("--run-id", required=True)
+    ap.add_argument("--windows", required=True,
+                    help="逗号分隔的 window_id")
     a = ap.parse_args()
+    selected = {x.strip() for x in a.windows.split(",") if x.strip()}
     project = Path(a.project).resolve()
     run = ROOT / "runs" / a.run_id
     prof_dir = run / "profiles"
@@ -33,13 +36,13 @@ def main() -> int:
     ex = C.ReplayExecutor(project)
     windows = []
     for i, cmd in enumerate(spec.commands):
-        action = cmd.type in C.ACTION_CMDS
-        if action:
+        tag = f"cmd-{i}-{cmd.type}"
+        take = tag in selected
+        if take:
             C._eval(project, "UnityEditorInternal.ProfilerDriver.ClearAllFrames();return 1;",
                     timeout=30)
         ex._one(cmd)  # noqa: SLF001
-        if action:
-            tag = f"cmd-{i}-{cmd.type}"
+        if take:
             p = prof_dir / f"{tag}.data"
             p.unlink(missing_ok=True)
             info = C.save_profile(project, p)

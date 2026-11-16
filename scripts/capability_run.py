@@ -309,6 +309,24 @@ def run_full_capture(project: Path, run_id: str, limit: int,
             nxt = int(windows[i + 1].get("frame_start", 0))
             if nxt > int(w.get("frame_start", 0)):
                 w["frame_end"] = nxt - 1
+    rows = []
+    if doc_p.is_file():
+        try:
+            rows = json.loads(doc_p.read_text(encoding="utf-8")).get("counters") or []
+        except Exception:  # noqa: BLE001
+            rows = []
+    for w in windows:
+        lo, hi = int(w.get("frame_start", 0)), int(w.get("frame_end", 0))
+        sel = [x.get("counters") or {} for x in rows
+               if lo <= int(x.get("frame_idx", 0)) <= hi]
+        w["counter_rows"] = len(sel)
+        metrics = {}
+        for name in {k for m in sel for k in m}:
+            vals = sorted(float(m[name]) for m in sel if name in m)
+            if vals:
+                metrics[name] = {"median": vals[len(vals) // 2],
+                                 "max": vals[-1], "n": len(vals)}
+        w["counters"] = metrics
     (run_dir / "action_windows.json").write_text(
         json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8")
     for c in cands:
@@ -746,22 +764,35 @@ def run_and_capture(project: Path, run_id: str, limit: int,
 
 def run_two_pass_capture(project: Path, run_id: str, limit: int,
                          replay_path: Path) -> list[dict]:
-    """r 浅采全程 → r′ 深采全程；深采只用于定因。"""
+    """Pass1 浅采定性选窗；Pass2 只对选中 window 深采取证。"""
     light = run_full_capture(project, run_id, limit, replay_path, "shallow")
-    deep = run_full_capture(project, f"{run_id}_deep", limit,
-                            replay_path, "deep")
-    merged = {str(c.get("root_cause") or ""): c for c in light}
-    for c in deep:
-        merged.setdefault(str(c.get("root_cause") or ""), c)
-    out = list(merged.values())
+    selected = sorted({str(c.get("window_id") or "") for c in light
+                       if c.get("window_id")
+                       and str(c.get("kind") or "") not in ("asset", "anomaly")})
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "merged_candidates.json").write_text(
-        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not selected:
+        (run_dir / "two_pass.json").write_text(json.dumps(
+            {"status": "no_target", "light": len(light), "windows": []},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        return light
+    cmd = [sys.executable, str(ROOT / "scripts" / "profile_windows.py"),
+           "--project", str(project), "--replay", str(replay_path),
+           "--run-id", run_id, "--windows", ",".join(selected)]
+    p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=1800)
+    profiles = []
+    pf = run_dir / "profiles" / "profile_windows.json"
+    if pf.is_file():
+        try:
+            profiles = json.loads(pf.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            profiles = []
     (run_dir / "two_pass.json").write_text(json.dumps(
-        {"status": "done", "light": len(light), "deep": len(deep),
-         "mode": "full"}, ensure_ascii=False, indent=2), encoding="utf-8")
-    return out
+        {"status": "done", "light": len(light), "windows": selected,
+         "profiles": len(profiles), "profile_ok": p.returncode == 0},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    return light
 
 
 def _anchor_of(c: dict) -> list[Anchor]:
