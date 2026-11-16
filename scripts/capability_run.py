@@ -140,11 +140,45 @@ def _write_unified(doc: dict, run_id: str) -> None:
         json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def capture_window(project: Path, run_id: str, limit: int,
-                   since: str | None = None,
-                   start_frame: int = -1,
-                   mode: str = "shallow") -> list[dict]:
-    """采一窗：统一探针同时写 counters/functions。"""
+SESSION_TRIGGER = ROOT / "runs" / "_probe" / "unified_trigger.txt"
+
+
+def start_session(project: Path) -> None:
+    """进 Play 后安装一次常驻统一探针；之后靠 trigger 取窗口。"""
+    UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_TRIGGER.unlink(missing_ok=True)
+    UNIFIED_CFG.write_text(json.dumps({
+        "mode": "resident", "budget_ms": 600000,
+        "pre_frames": 300, "post_frames": 8,
+        "trigger_file": str(SESSION_TRIGGER)}), encoding="utf-8")
+    d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
+              "--project-path", str(project), "--timeout", "120")
+    if not d.get("success"):
+        raise RuntimeError("unified session install 失败：" +
+                           json.dumps(d.get("errors"), ensure_ascii=False)[:300])
+
+
+def arm_trigger(tag: str) -> None:
+    SESSION_TRIGGER.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_TRIGGER.write_text(tag, encoding="utf-8")
+
+
+def finish_trigger(project: Path, run_id: str, tag: str, limit: int,
+                   since: str | None = None) -> list[dict]:
+    p = Path(str(UNIFIED_OUT).replace(".json", f"_{tag}.json"))
+    deadline = time.time() + 60
+    while time.time() < deadline and not p.exists():
+        time.sleep(0.3)
+    if not p.exists():
+        raise RuntimeError(f"resident trigger {tag} 未落盘")
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    _write_unified(doc, run_id)
+    return _collect_run(project, run_id, limit, since, p)
+
+
+def start_window(project: Path, run_id: str, start_frame: int = -1,
+                 mode: str = "shallow") -> None:
+    """动作开始前安装统一探针；finish_window 读取。"""
     UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
     UNIFIED_CFG.write_text(json.dumps({
         "mode": mode, "frames": 300,
@@ -154,19 +188,16 @@ def capture_window(project: Path, run_id: str, limit: int,
         UNIFIED_OUT.unlink(missing_ok=True)
     except OSError:
         pass
-    since = since or time.strftime("%Y-%m-%dT%H:%M:%S")
     d = unity("script.eval_file", "--file", str(UNIFIED_PROBE),
               "--project-path", str(project), "--timeout", "120")
     if not d.get("success"):
-        raise RuntimeError("unified probe eval 失败：" +
+        raise RuntimeError("unified probe install 失败：" +
                            json.dumps(d.get("errors"), ensure_ascii=False)[:300])
-    deadline = time.time() + 60
-    while time.time() < deadline and not UNIFIED_OUT.exists():
-        time.sleep(0.3)
-    if not UNIFIED_OUT.exists():
-        raise RuntimeError("unified probe 文件未落盘")
-    doc = json.loads(UNIFIED_OUT.read_text(encoding="utf-8"))
-    _write_unified(doc, run_id)
+
+
+def _collect_run(project: Path, run_id: str, limit: int,
+                 since: str | None = None, raw_ref: Path | None = None) -> list[dict]:
+    since = since or time.strftime("%Y-%m-%dT%H:%M:%S")
     subprocess.run([sys.executable, str(ROOT / "scripts" / "collect_evidence.py"),
                     "--project", str(project), "--evidence", str(EV),
                     "--run-id", run_id, "--scene",
@@ -184,6 +215,27 @@ def capture_window(project: Path, run_id: str, limit: int,
     if not out.exists():
         return []
     return json.loads(out.read_text(encoding="utf-8")).get("candidates", [])
+
+
+def finish_window(project: Path, run_id: str, limit: int,
+                  since: str | None = None) -> list[dict]:
+    since = since or time.strftime("%Y-%m-%dT%H:%M:%S")
+    deadline = time.time() + 60
+    while time.time() < deadline and not UNIFIED_OUT.exists():
+        time.sleep(0.3)
+    if not UNIFIED_OUT.exists():
+        raise RuntimeError("unified probe 文件未落盘")
+    doc = json.loads(UNIFIED_OUT.read_text(encoding="utf-8"))
+    _write_unified(doc, run_id)
+    return _collect_run(project, run_id, limit, since, UNIFIED_OUT)
+
+
+def capture_window(project: Path, run_id: str, limit: int,
+                   since: str | None = None,
+                   start_frame: int = -1,
+                   mode: str = "shallow") -> list[dict]:
+    start_window(project, run_id, start_frame=start_frame, mode=mode)
+    return finish_window(project, run_id, limit, since=since)
 
 
 ACTION_CMDS = {"set_board", "resolve", "resolve_board", "swap", "open_shop"}
@@ -331,6 +383,8 @@ def run_and_capture(project: Path, run_id: str, limit: int,
                          and last_action.get(cmd.type) == i
                          or (not fast and not target_windows)))
             win_start = _profiler_frame(project) if take else -1
+            if take:
+                start_window(project, f"{run_id}_a{i}", start_frame=win_start)
             if cmd.type in ACTION_CMDS:
                 try:
                     from upi.tooling import probe_control as _PC
@@ -340,9 +394,8 @@ def run_and_capture(project: Path, run_id: str, limit: int,
             ex._one(cmd)
             timeline.append({"cmd_index": i, "type": cmd.type, "frame": f})
             if take:
-                for c in capture_window_with_counters(
-                        project, f"{run_id}_a{i}", limit,
-                        start_frame=win_start):
+                for c in finish_window(project, f"{run_id}_a{i}", limit,
+                                       since=started):
                     k = str(c.get("root_cause") or "")
                     if k and k not in merged:
                         merged[k] = c

@@ -43,6 +43,8 @@ public static class UpiUnifiedProbe
     static int _postN = 8;
     static bool _triggered;
     static int _triggerFrame = -1;
+    static string _triggerTag = "";
+    static int _seq;
 
     public static string Main()
     {
@@ -85,10 +87,10 @@ public static class UpiUnifiedProbe
             string j = File.ReadAllText(CfgPath);
             _mode = ReadStr(j, "mode", "shallow");
             _triggerPath = ReadStr(j, "trigger_file", _triggerPath);
-            _preN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "pre_frames", 8)));
+            _preN = (int)Math.Min(600, Math.Max(1, ReadNum(j, "pre_frames", 8)));
             _postN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "post_frames", 8)));
             _frames = (int)Math.Min(600, Math.Max(1, ReadNum(j, "frames", 30)));
-            _budgetMs = (long)Math.Min(30000, Math.Max(500, ReadNum(j, "budget_ms", 5000)));
+            _budgetMs = (long)Math.Min(600000, Math.Max(500, ReadNum(j, "budget_ms", 5000)));
         }
         catch (Exception) { }
     }
@@ -104,38 +106,60 @@ public static class UpiUnifiedProbe
         }
         if (_mode == "resident" && !_triggered && File.Exists(_triggerPath))
         {
+            try { _triggerTag = File.ReadAllText(_triggerPath).Trim(); } catch (Exception) { }
+            if (string.IsNullOrEmpty(_triggerTag)) _triggerTag = "w" + (++_seq);
+            try { File.Delete(_triggerPath); } catch (Exception) { }
             _triggered = true;
             _triggerFrame = now;
+            _funcs.Clear();
             ProfilerDriver.deepProfiling = true;
             Profiler.enableAllocationCallstacks = true;
             return;
         }
-        bool enough = _mode == "resident"
+        bool capture = _mode == "resident"
             ? (_triggered && now - _triggerFrame >= _postN)
             : (now - _startFrame >= _frames);
         bool timeout = (DateTime.UtcNow - _startUtc).TotalMilliseconds > _budgetMs;
-        if (!enough && !timeout) return;
-        _done = true;
-        EditorApplication.update -= Tick;
+        if (!capture && !timeout) return;
+        if (_mode == "resident" && !_triggered && timeout)
+        {
+            _done = true;
+            EditorApplication.update -= Tick;
+            foreach (var r in _rec) { try { r.Dispose(); } catch (Exception) { } }
+            _rec.Clear(); _names.Clear();
+            return;
+        }
+        if (_mode != "resident") _done = true;
         try
         {
             int first = _mode == "resident" && _triggered
                 ? Math.Max(_startFrame, _triggerFrame - _preN)
                 : _startFrame;
             CaptureFunctions(first, now);
-            Write();
+            string path = Out;
+            if (_mode == "resident" && !string.IsNullOrEmpty(_triggerTag))
+                path = Out.Replace(".json", "_" + _triggerTag + ".json");
+            Write(path);
         }
         catch (Exception e)
         {
             try { File.WriteAllText(Out + ".err", e.ToString()); } catch (Exception) { }
         }
-        finally
+        if (_mode == "resident")
         {
-            foreach (var r in _rec) { try { r.Dispose(); } catch (Exception) { } }
-            _rec.Clear(); _names.Clear();
+            _triggered = false;
+            _triggerFrame = -1;
+            _triggerTag = "";
             ProfilerDriver.deepProfiling = false;
             Profiler.enableAllocationCallstacks = false;
+            _lastFrame = now;
+            return;
         }
+        EditorApplication.update -= Tick;
+        foreach (var r in _rec) { try { r.Dispose(); } catch (Exception) { } }
+        _rec.Clear(); _names.Clear();
+        ProfilerDriver.deepProfiling = false;
+        Profiler.enableAllocationCallstacks = false;
     }
 
     static string CounterRow(int frame)
@@ -182,7 +206,7 @@ public static class UpiUnifiedProbe
         }
     }
 
-    static void Write()
+    static void Write(string path)
     {
         var sb = new StringBuilder();
         sb.Append("{\"mode\":\"").Append(Esc(_mode))
@@ -206,8 +230,8 @@ public static class UpiUnifiedProbe
               .Append(",\"time_semantics\":\"inclusive\"}");
         }
         sb.Append("]}");
-        Directory.CreateDirectory(Path.GetDirectoryName(Out));
-        File.WriteAllText(Out, sb.ToString(), new UTF8Encoding(false));
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
     }
 
     static string ReadStr(string json, string key, string dflt)
