@@ -206,20 +206,24 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 sig = {"dim": "gc" if alloc else "frame", "metric": metric,
                        "mechanism": c.mechanism, "threshold": 0.0,
                        "threshold_source": "evidence(no absolute line)"}
+                _mv = float(getattr(c, "metric_value", 0.0) or c.score)
+                _mu = str(getattr(c, "metric_unit", "") or
+                          ("bytes" if alloc else "ms"))
                 ev = Evidence(tool="evidence_v2", raw_ref=str(ev_path),
-                              value=float(c.score),
-                              unit="bytes" if alloc else "ms", data_tier="A2")
+                              value=_mv,
+                              unit=_mu, data_tier="A2")
                 model = Issue(signature=sig, link="cpu", evidence=[ev],
-                              magnitude=float(c.score), deviation_ratio=0.0,
+                              magnitude=_mv, deviation_ratio=0.0,
                               explains_share_of_regression=1.0,
                               state="confirmed")
                 issue = {"id": f"ISS-{bundle.run_id}",
                          "fixture": (st.get("fixture") or bundle.project_id
                                      or "project"),
                          "detector": det_id, "metric": metric,
-                         "magnitude": float(c.score), "deviation_ratio": 0.0,
+                         "magnitude": _mv, "deviation_ratio": 0.0,
                          "evidence": {"source": "evidence_v2",
-                                      "ref": str(ev_path), "score": c.score},
+                                      "ref": str(ev_path), "score": c.score,
+                                      "metric_value": _mv, "unit": _mu},
                          "state": "confirmed", "anchor": c.mechanism,
                          "signature": sig, "source": "evidence",
                          "scene": bundle.scene,
@@ -227,7 +231,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 return {"findings": [{"kind": "issue",
                                       "fixture": issue["fixture"],
                                       "metric": metric,
-                                      "magnitude": float(c.score),
+                                      "magnitude": _mv,
                                       "detector": det_id,
                                       "signature": sig}],
                         "issue": issue, "route": "proceed",
@@ -316,8 +320,9 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             span_text = span_text.replace("\\", "/")
             cards[c.root_cause] = (
                 f"mechanism={c.mechanism}; kind={c.kind}; "
-                f"score={c.score:.2f} (CI {c.score_interval_low:.2f}-"
-                f"{c.score_interval_high:.2f}); evidence_n={c.evidence_n}; "
+                f"score={c.score:.2f}; metric_value={getattr(c,'metric_value',0):.3f}"
+                f"{getattr(c,'metric_unit','')}; "
+                f"evidence_n={c.evidence_n}; "
                 f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}")
         archive: dict = {}
         from upi.core.contribution import (Contribution,

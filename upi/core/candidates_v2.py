@@ -27,6 +27,8 @@ class CandidateV2(BaseModel):
     sources: list[SourceSpan] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     score: float = 0.0
+    metric_value: float = 0.0
+    metric_unit: str = ""
     score_interval_low: float = 0.0
     score_interval_high: float = 0.0
     interval_basis: str = ""
@@ -96,6 +98,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[span],
             evidence_ids=a["evidence"],
             score=float(sum(a["vals"])),
+            metric_value=(float(sum(a["vals"])) / max(1, len(a["vals"]))),
+            metric_unit="bytes",
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
@@ -129,6 +133,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[e["span"]],
             evidence_ids=e["ids"],
             score=float(e["total"]) * 1000.0 + float(e["calls"]),
+            metric_value=(float(e["total"]) / max(1, len(e["vals"]))),
+            metric_unit="ms",
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
@@ -163,6 +169,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
             sources=[e["span"]],
             evidence_ids=e["ids"],
             score=float(e["weight"]) * 100.0,
+            metric_value=float(e["weight"]),
+            metric_unit="ms",
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
@@ -217,6 +225,7 @@ def generate_candidates(bundle: EvidenceBundleV2,
                         code_anchors=[rel],
                         sources=[SourceSpan(file=rel, start_line=1, end_line=1)],
                         evidence_ids=[], score=float(size) / 1024.0,
+                        metric_value=float(size), metric_unit="bytes",
                         score_interval_low=float(size) / 1024.0,
                         score_interval_high=float(size) / 1024.0,
                         interval_basis="file_size", evidence_n=1))
