@@ -32,6 +32,7 @@ public static class UpiUnifiedProbe
     static readonly List<string> _names = new List<string>();
     static readonly List<string> _counterRows = new List<string>();
     static readonly Dictionary<string, long[]> _funcs = new Dictionary<string, long[]>();
+    static readonly Dictionary<string, long[]> _edges = new Dictionary<string, long[]>();
     static int _startFrame;
     static int _lastFrame;
     static int _frames = 30;
@@ -284,18 +285,34 @@ public static class UpiUnifiedProbe
                 {
                     if (!view.valid) break;
                     int n = view.sampleCount;
+                    var stack = new List<KeyValuePair<int, string>>();
                     for (int i = 0; i < n; i++)
                     {
+                        while (stack.Count > 0 && i > stack[stack.Count - 1].Key)
+                            stack.RemoveAt(stack.Count - 1);
+                        string parent = stack.Count > 0 ? stack[stack.Count - 1].Value : "";
                         string name = view.GetSampleName(i);
+                        int childCount = view.GetSampleChildrenCountRecursive(i);
+                        stack.Add(new KeyValuePair<int, string>(i + childCount, name));
                         if (string.IsNullOrEmpty(name)) continue;
-                        if (!(name.Contains("ChromaGame") || name.Contains("BoardModel")
-                              || name.Contains("DevSim"))) continue;
+                        bool isGame = name.Contains("ChromaGame")
+                            || name.Contains("BoardModel") || name.Contains("DevSim");
+                        if (!isGame) continue;
+                        if (!string.IsNullOrEmpty(parent) &&
+                            (parent.Contains("ChromaGame") || parent.Contains("BoardModel")
+                             || parent.Contains("DevSim")))
+                        {
+                            string ek = parent + "|" + name;
+                            long[] e;
+                            if (!_edges.TryGetValue(ek, out e)) { e = new long[2]; _edges[ek] = e; }
+                            e[0]++;
+                            e[1] += (long)view.GetSampleTimeNs(i);
+                        }
                         string key = frame + "|" + name;
                         long[] a;
                         if (!_funcs.TryGetValue(key, out a)) { a = new long[3]; _funcs[key] = a; }
                         a[0]++;
                         long total = (long)view.GetSampleTimeNs(i);
-                        int childCount = view.GetSampleChildrenCountRecursive(i);
                         long childTime = 0;
                         for (int j = i + 1; j <= i + childCount && j < n; j++)
                             childTime += (long)view.GetSampleTimeNs(j);
@@ -330,6 +347,19 @@ public static class UpiUnifiedProbe
               .Append(",\"total_ms\":").Append((kv.Value[1] / 1e6).ToString("0.000"))
               .Append(",\"self_ms\":").Append((kv.Value[2] / 1e6).ToString("0.000"))
               .Append(",\"time_semantics\":\"exclusive\"}");
+        }
+        sb.Append("],\"edges\":[");
+        bool ef = true;
+        foreach (var kv in _edges)
+        {
+            if (!ef) sb.Append(',');
+            ef = false;
+            int sep2 = kv.Key.IndexOf('|');
+            sb.Append("{\"parent\":").Append(Q(kv.Key.Substring(0, sep2)))
+              .Append(",\"child\":").Append(Q(kv.Key.Substring(sep2 + 1)))
+              .Append(",\"calls\":").Append(kv.Value[0])
+              .Append(",\"total_ms\":").Append((kv.Value[1] / 1e6).ToString("0.000"))
+              .Append('}');
         }
         sb.Append("]}");
         Directory.CreateDirectory(Path.GetDirectoryName(path));
