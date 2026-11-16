@@ -47,15 +47,18 @@ def _project() -> Path:
     return _prof().abs_project
 
 
-def _merged_candidates(limit: int = 12):
-    """采集端两遍 replay 的合并候选（含 light+deep）。"""
+def _merged_candidates(limit: int = 12, run_dir: Path | None = None):
+    """当前 run 的候选优先；禁止跨 run 取全局最新文件。"""
     try:
         from upi.core.candidates_v2 import CandidateV2
-        files = sorted(E.RUNS.glob("*/merged_candidates.json"),
-                       key=lambda p: p.stat().st_mtime)
-        if not files:
-            return []
-        raw = json.loads(files[-1].read_text(encoding="utf-8"))
+        p = (run_dir / "merged_candidates.json") if run_dir else None
+        if p is None or not p.is_file():
+            files = sorted(E.RUNS.glob("*/merged_candidates.json"),
+                           key=lambda p: p.stat().st_mtime) if run_dir is None else []
+            if not files:
+                return []
+            p = files[-1]
+        raw = json.loads(p.read_text(encoding="utf-8"))
         return [CandidateV2(**c) for c in raw][:limit]
     except Exception:  # noqa: BLE001
         return []
@@ -182,6 +185,52 @@ def _cost_values(bundle, cand) -> dict:
             "share": float(p.group(3)) if p else float(m.group(3))}
 
 
+def _issue_from_run_counters(run_dir: Path) -> dict | None:
+    """Issue 的唯一来源：当前 run 绑定的 counters 窗口峰值。"""
+    try:
+        b = json.loads((run_dir / "baseline_capture.json").read_text(encoding="utf-8"))
+        cap = str(b.get("capture_id") or "")
+        p = E.RUNS / cap / "counters.json"
+        if not cap or not p.is_file():
+            return None
+        counters = json.loads(p.read_text(encoding="utf-8")).get("counters") or {}
+        name = "CPU Main Thread Frame Time"
+        if name not in counters:
+            name = next(iter(counters), "")
+        vals = [float(x) for x in (counters.get(name) or {}).get("series") or []]
+        if not vals:
+            return None
+        vals = sorted(vals)
+        peak = vals[-1]
+        med = vals[len(vals) // 2]
+        scale = 1e6 if peak > 10000 else 1.0
+        peak_v = peak / scale
+        med_v = med / scale
+        unit = "ms" if "Time" in name else "count"
+        agg = {"dim": "cpu" if unit == "ms" else "gc",
+               "metric": "frame_time_ms" if unit == "ms" else "gc_alloc_per_frame",
+               "mechanism": "window_peak",
+               "threshold": med_v, "threshold_source": "window_median"}
+        ev = Evidence(tool="counters", raw_ref=str(p), value=peak_v,
+                      unit=unit, data_tier="A2")
+        model = Issue(signature=agg, link="cpu", evidence=[ev],
+                      magnitude=peak_v,
+                      deviation_ratio=(peak_v / med_v if med_v else 0.0),
+                      explains_share_of_regression=1.0,
+                      state="candidate")
+        return {"id": f"ISS-{cap}", "fixture": run_dir.name,
+                "detector": "DET-COUNTERS-FRAMESPIKE",
+                "metric": agg["metric"], "magnitude": peak_v,
+                "deviation_ratio": model.deviation_ratio,
+                "evidence": {"source": "counters", "ref": str(p),
+                             "peak": peak_v, "median": med_v, "unit": unit},
+                "state": "candidate", "anchor": "window_peak",
+                "signature": agg, "source": "run_counters",
+                "scene": "", "issue_model": model.model_dump()}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None,
@@ -194,6 +243,16 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
     def detect(st: dict) -> dict:
         # 产品默认：从运行证据包构造 Issue（不再跑夹具束的 m1_detect）。
         if True:  # I10: 只走运行证据
+            _counter_issue = _issue_from_run_counters(run_dir)
+            if _counter_issue is not None:
+                return {"findings": [{"kind": "issue",
+                                      "fixture": _counter_issue["fixture"],
+                                      "metric": _counter_issue["metric"],
+                                      "magnitude": _counter_issue["magnitude"],
+                                      "detector": _counter_issue["detector"],
+                                      "signature": _counter_issue["signature"]}],
+                        "issue": _counter_issue, "route": "proceed",
+                        "detection_ref": _counter_issue["evidence"]["ref"]}
             try:
                 from upi.core.candidates_v2 import generate_candidates
                 from upi.core.evidence_diagnosis import load_latest_bundle
@@ -205,7 +264,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                         root = _prof().abs_project
                     except Exception:  # noqa: BLE001
                         root = None
-                cands = _merged_candidates(limit=1)
+                cands = _merged_candidates(limit=1, run_dir=run_dir)
                 if not cands:
                     cands = (generate_candidates(bundle, project_root=root, limit=1)
                              if bundle is not None else [])
@@ -283,7 +342,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 if not root:
                     root = _prof().abs_project
                 ev_cands, _bundle, ev_path = candidates_from_latest(root, limit=12)
-                merged = _merged_candidates(limit=12)
+                merged = _merged_candidates(limit=12, run_dir=run_dir)
                 if merged:
                     ev_cands = merged
             except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理

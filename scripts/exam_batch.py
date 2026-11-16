@@ -203,6 +203,10 @@ def main() -> int:
                 return 1
             baseline_runs.append(counters_since(0, last_cap["id"]))
             baseline_windows.append(window_counters(last_cap["id"]))
+            (run_dir / "baseline_capture.json").write_text(json.dumps(
+                {"capture_id": last_cap["id"], "project_id": a.project_id,
+                 "replay": a.replay}, ensure_ascii=False, indent=2),
+                encoding="utf-8")
             mp = run_dir / "merged_candidates.json"
             if mp.exists():
                 roots = {str(x.get("root_cause", "")).split(":", 1)[-1]
