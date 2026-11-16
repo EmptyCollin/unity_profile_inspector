@@ -339,6 +339,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                      what="contribution_group", strict=False)
         _group_ok = bool(_gd.get("eligible"))
         ev_rounds = 0
+        _seen_roots: set[tuple] = set()
         while True:
             hs, judged = build_hypotheses_for_issue(
                 cfg, issue, tuples, history=hist, cards=cards)
@@ -369,6 +370,16 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 hist += ("\n补采不可用：" + str(delta.get("reason", ""))[:200])
                 break
             text = str(delta.get("text", ""))[:2000]
+            _roots = tuple(delta.get("payload", {}).get("roots") or [])
+            if _roots and _roots in _seen_roots:
+                hist += "\n补采候选根集合未变化，停止重复重采。"
+                E.write_json(run_dir / f"evidence_round_{ev_rounds}.json",
+                             {"request": req.model_dump(), "delta": delta,
+                              "deduped": True},
+                             what="evidence_round", strict=False)
+                break
+            if _roots:
+                _seen_roots.add(_roots)
             hist += f"\n补采证据（{req.kind}）：{text}"
             E.write_json(run_dir / f"evidence_round_{ev_rounds}.json",
                          {"request": req.model_dump(), "delta": delta},
