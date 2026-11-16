@@ -7,6 +7,7 @@ using System.IO;
 using System.Text;
 using UnityEditor;
 using UnityEditorInternal;
+using UnityEditor.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
 using Unity.Profiling;
@@ -291,9 +292,15 @@ public static class UpiUnifiedProbe
                               || name.Contains("DevSim"))) continue;
                         string key = frame + "|" + name;
                         long[] a;
-                        if (!_funcs.TryGetValue(key, out a)) { a = new long[2]; _funcs[key] = a; }
+                        if (!_funcs.TryGetValue(key, out a)) { a = new long[3]; _funcs[key] = a; }
                         a[0]++;
-                        a[1] += (long)view.GetSampleTimeNs(i);
+                        long total = (long)view.GetSampleTimeNs(i);
+                        int childCount = view.GetSampleChildrenCountRecursive(i);
+                        long childTime = 0;
+                        for (int j = i + 1; j <= i + childCount && j < n; j++)
+                            childTime += (long)view.GetSampleTimeNs(j);
+                        a[1] += total;
+                        a[2] += Math.Max(0, total - childTime);
                     }
                 }
             }
@@ -321,7 +328,8 @@ public static class UpiUnifiedProbe
               .Append(",\"symbol\":").Append(Q(kv.Key.Substring(sep + 1)))
               .Append(",\"calls\":").Append(kv.Value[0])
               .Append(",\"total_ms\":").Append((kv.Value[1] / 1e6).ToString("0.000"))
-              .Append(",\"time_semantics\":\"inclusive\"}");
+              .Append(",\"self_ms\":").Append((kv.Value[2] / 1e6).ToString("0.000"))
+              .Append(",\"time_semantics\":\"exclusive\"}");
         }
         sb.Append("]}");
         Directory.CreateDirectory(Path.GetDirectoryName(path));

@@ -29,6 +29,9 @@ class CandidateV2(BaseModel):
     score: float = 0.0
     metric_value: float = 0.0
     metric_unit: str = ""
+    self_ms: float = 0.0
+    total_ms: float = 0.0
+    self_share: float = -1.0
     score_interval_low: float = 0.0
     score_interval_high: float = 0.0
     interval_basis: str = ""
@@ -106,6 +109,8 @@ def generate_candidates(bundle: EvidenceBundleV2,
 
     # 2) 热点函数：按 total_ms 聚合，只保留工程源码内的函数。
     fn_by_sym: dict[tuple, dict] = defaultdict(lambda: {"total": 0.0, "calls": 0,
+                                                         "self": 0.0,
+                                                         "has_self": False,
                                                          "span": None, "ids": [],
                                                          "vals": [], "peaks": []})
     for i, fn in enumerate(bundle.functions):
@@ -114,6 +119,9 @@ def generate_candidates(bundle: EvidenceBundleV2,
         key = (_short_symbol(fn.symbol), fn.source.file, fn.source.start_line)
         e = fn_by_sym[key]
         e["total"] += fn.total_ms
+        e["self"] += fn.self_ms
+        if getattr(fn, "time_semantics", "") == "exclusive":
+            e["has_self"] = True
         e["calls"] += fn.calls
         e["span"] = fn.source
         e["ids"].append(f"fn:{i}:{fn.symbol}")
@@ -136,6 +144,10 @@ def generate_candidates(bundle: EvidenceBundleV2,
             score=float(e["total"]) * 1000.0 + float(e["calls"]),
             metric_value=max(e["peaks"] or [0.0]),
             metric_unit="ms",
+            self_ms=float(e["self"]),
+            total_ms=float(e["total"]),
+            self_share=((float(e["self"]) / float(e["total"]))
+                        if e["total"] and e["has_self"] else -1.0),
             score_interval_low=ci["low"], score_interval_high=ci["high"],
             interval_basis=ci["basis"], evidence_n=ci["n"],
         ))
@@ -232,4 +244,12 @@ def generate_candidates(bundle: EvidenceBundleV2,
                         interval_basis="file_size", evidence_n=1))
     except Exception:  # noqa: BLE001 — 资产扫描失败不影响代码候选
         pass
-    return out[:limit]
+    return drop_containers(out)[:limit]
+
+
+def drop_containers(cands: list[CandidateV2], eps: float = 0.001
+                    ) -> list[CandidateV2]:
+    """self/total≈0 的函数是纯容器/入口，不产出 finding；子函数保留。"""
+    return [c for c in cands
+            if not (c.kind == "function" and c.total_ms > 0
+                    and 0.0 <= c.self_share <= eps)]

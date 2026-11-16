@@ -50,7 +50,7 @@ def _project() -> Path:
 def _merged_candidates(limit: int = 12, run_dir: Path | None = None):
     """当前 run 的候选优先；禁止跨 run 取全局最新文件。"""
     try:
-        from upi.core.candidates_v2 import CandidateV2
+        from upi.core.candidates_v2 import CandidateV2, drop_containers
         p = (run_dir / "merged_candidates.json") if run_dir else None
         if p is None or not p.is_file():
             files = sorted(E.RUNS.glob("*/merged_candidates.json"),
@@ -59,7 +59,7 @@ def _merged_candidates(limit: int = 12, run_dir: Path | None = None):
                 return []
             p = files[-1]
         raw = json.loads(p.read_text(encoding="utf-8"))
-        return [CandidateV2(**c) for c in raw][:limit]
+        return drop_containers([CandidateV2(**c) for c in raw])[:limit]
     except Exception:  # noqa: BLE001
         return []
 
