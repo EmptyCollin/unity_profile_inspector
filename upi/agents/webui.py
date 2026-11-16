@@ -584,6 +584,10 @@ _INDEX_HTML = r"""<!doctype html>
             <button class="pbtn" id="capSave">保存</button>
             <span id="capMsg" class="small"></span>
           </div>
+          <div style="margin-top:12px">
+            <button class="pbtn" id="cleanupProfilesBtn">清理 3 天前 profile</button>
+            <span id="cleanupMsg" class="small"></span>
+          </div>
           <div class="small" style="margin-top:6px">这些值与 I8 Lab 共用 config/i8_lab.json；下一次取证/采样生效。</div>
         </div>
       </div>
@@ -798,7 +802,20 @@ async function saveCaptureCfg(){
 document.addEventListener("click", (ev) => {
   const t = ev.target.closest("#capSave");
   if (t) { ev.preventDefault(); saveCaptureCfg(); }
+  const cb = ev.target.closest("#cleanupProfilesBtn");
+  if (cb) { ev.preventDefault(); cleanupProfiles(); }
 });
+async function cleanupProfiles(){
+  try{
+    const r = await post("/api/maintenance/cleanup", {days:3});
+    const el = $("cleanupMsg");
+    if(el) el.textContent = `已清理 ${r.removed || 0} 个，释放 ${Math.round((r.bytes_freed||0)/1048576)}MB`;
+    await refresh();
+  }catch(e){
+    const el = $("cleanupMsg");
+    if(el) el.textContent = "清理失败：" + e.message;
+  }
+}
 async function verifyLast(sid){
   try{
     const r = await post(`/api/regression/suites/${encodeURIComponent(sid)}/verify`, {});
@@ -1589,6 +1606,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
             return
 
+        if parsed.path == "/api/maintenance/cleanup":
+            try:
+                from upi.core.retention import cleanup_profiles
+                days = int(body.get("days") or 3)
+                stats = cleanup_profiles(E.RUNS, days)
+                self._send_json(200, {"ok": True, **stats})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"ok": False,
+                                      "error": f"{type(e).__name__}: {e}"})
+            return
+
         if parsed.path == "/api/regression/suites":
             try:
                 from upi.core.regression import RegressionStore, ReplaySuite
@@ -1869,6 +1897,11 @@ class WebUI:
         self.httpd: Optional[ThreadingHTTPServer] = None
 
     def start(self) -> "WebUI":
+        try:
+            from upi.core.retention import cleanup_profiles
+            cleanup_profiles(E.RUNS, 3)
+        except Exception:  # noqa: BLE001
+            pass
         self.httpd = ThreadingHTTPServer((self.host, self.port), _Handler)
         self.httpd.daemon_threads = True
         self.httpd.ui = self  # type: ignore[attr-defined]
