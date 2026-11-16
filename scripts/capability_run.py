@@ -252,13 +252,25 @@ def finish_full_probe(project: Path, run_id: str, limit: int,
 
 def begin_window(tag: str) -> None:
     ACTION_WINDOW_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ACTION_WINDOW_FILE.write_text("begin:" + tag, encoding="utf-8")
-    time.sleep(0.08)
+    for _ in range(20):
+        try:
+            ACTION_WINDOW_FILE.write_text("begin:" + tag, encoding="utf-8")
+            time.sleep(0.08)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    raise RuntimeError("action_window.txt 被占用，无法写入 begin")
 
 
 def end_window() -> None:
-    ACTION_WINDOW_FILE.write_text("end", encoding="utf-8")
-    time.sleep(0.08)
+    for _ in range(20):
+        try:
+            ACTION_WINDOW_FILE.write_text("end", encoding="utf-8")
+            time.sleep(0.08)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    raise RuntimeError("action_window.txt 被占用，无法写入 end")
 
 
 def save_profile(project: Path, path: Path) -> dict:
