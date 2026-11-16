@@ -121,7 +121,8 @@ def _write_unified(doc: dict, run_id: str) -> None:
               "frames": frames, "functions": funcs, "callstacks": [],
               "allocations": [], "render_objects": [], "blindspots": [],
               "raw_refs": [], "meta": {"probe": "unified",
-                                       "mode": doc.get("mode", "")}}
+                                       "mode": doc.get("mode", ""),
+                                       "edges": doc.get("edges") or []}}
     EV.write_text(json.dumps(ev_doc, ensure_ascii=False), encoding="utf-8")
     names = set()
     for x in rows:

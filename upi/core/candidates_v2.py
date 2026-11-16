@@ -244,12 +244,36 @@ def generate_candidates(bundle: EvidenceBundleV2,
                         interval_basis="file_size", evidence_n=1))
     except Exception:  # noqa: BLE001 — 资产扫描失败不影响代码候选
         pass
-    return drop_containers(out)[:limit]
+    edges = (bundle.meta or {}).get("edges") or []
+    return drop_containers(out, edges)[:limit]
 
 
-def drop_containers(cands: list[CandidateV2], eps: float = 0.001
-                    ) -> list[CandidateV2]:
-    """self/total≈0 的函数是纯容器/入口，不产出 finding；子函数保留。"""
-    return [c for c in cands
-            if not (c.kind == "function" and c.total_ms > 0
-                    and 0.0 <= c.self_share <= eps)]
+def _short_name(s: str) -> str:
+    s = (s or "").split("::")[-1].split("[")[0]
+    s = s.replace("()", "").replace(" [Invoke]", "").strip()
+    return s.split(".")[-1] if "." in s else s
+
+
+def drop_containers(cands: list[CandidateV2], edges: list[dict] | None = None,
+                    eps: float = 0.001) -> list[CandidateV2]:
+    """self/total≈0 的函数是纯容器/入口，不产出 finding；子函数保留。
+
+    有候选父节点的容器保留（例如 ResolveAllSync 是 c06 的 case 根）；
+    只删没有候选父节点的入口 facade。
+    """
+    names = {_short_name(c.root_cause.split(":")[-1]) for c in cands}
+    parents: dict[str, set[str]] = {}
+    for e in edges or []:
+        p = _short_name(str(e.get("parent") or ""))
+        ch = _short_name(str(e.get("child") or ""))
+        if p and ch and p in names and ch in names:
+            parents.setdefault(ch, set()).add(p)
+    out = []
+    for c in cands:
+        n = _short_name(c.root_cause.split(":")[-1])
+        container = (c.kind == "function" and c.total_ms > 0
+                     and 0.0 <= c.self_share <= eps)
+        if container and not parents.get(n):
+            continue
+        out.append(c)
+    return out
