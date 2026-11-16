@@ -98,7 +98,12 @@ def _profiler_frame(project: Path) -> int:
 
 
 def ensure_play(project: Path) -> dict:
-    st = _status(project)
+    st = None
+    for _ in range(90):
+        st = _status(project)
+        if st:
+            break
+        time.sleep(1.0)
     if not st:
         raise RuntimeError(f"工程未在 Unity 打开或 pipeline 不可达：{project}")
     if st.get("playMode") == "playing":
