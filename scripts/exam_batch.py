@@ -116,7 +116,11 @@ def main() -> int:
                     help="plan 阶段生成/校验/冻结 PatchClaim")
     ap.add_argument("--acceptance-status", action="store_true",
                     help="用 I27 三轴 acceptance 覆盖旧 status（默认只记录）")
+    ap.add_argument("--group-acceptance", action="store_true",
+                    help="单组验收：组前 3 次 before + 全部补丁 + 组后 3 次 after")
     a = ap.parse_args()
+    if a.group_acceptance and a.serial:
+        raise SystemExit("--group-acceptance 与 --serial 不能同时使用")
     from upi.core.measure_profile import get as _mp
     _prof = _mp(a.measure_profile)
     if a.baselines is None:
@@ -1073,6 +1077,47 @@ def main() -> int:
             combined.compile_ok &= r.compile_ok
             combined.capture_ok &= r.capture_ok
         return combined
+
+    def run_group_acceptance() -> int:
+        """单组验收：组前 3 次 before → 全部补丁 → 组后 3 次 after。"""
+        nonlocal baseline_metrics, baseline_windows, baseline_runs
+        if not units:
+            print("group acceptance: no units")
+            return 0
+        bm: list[dict] = []
+        bw: list[dict] = []
+        for i in range(3):
+            ok, _ = capture_with_recovery(
+                f"group-before-{i + 1}", two_pass=False,
+                light=True, target_windows=True)
+            if not ok:
+                print("group acceptance: before capture failed", i + 1)
+                return 1
+            bm.append(counters_since(0, last_cap["id"]))
+            bw.append(window_counters(last_cap["id"]))
+        baseline_metrics, baseline_windows, baseline_runs = bm, bw, bm
+        (run_dir / "group_before.json").write_text(json.dumps(
+            {"before_n": len(bm), "captures": bm},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        print("group acceptance: units", len(units), "before", len(bm))
+        res = run_batch(units, plan=plan, apply=apply,
+                        compile_fn=compile_fn, capture=capture_fn,
+                        verify=verify, rollback=rollback, round_no=1)
+        print("group acceptance result", res)
+        (run_dir / "group_acceptance.json").write_text(json.dumps({
+            "group": [u.unit_id for u in units],
+            "before_n": len(bm),
+            "result": res.__dict__,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        (run_dir / "counterfactual.jsonl").write_text(
+            "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
+            encoding="utf-8")
+        run.stop_reason = f"group:verified={len(res.verified)}"
+        save_run(run)
+        return 0
+
+    if a.group_acceptance:
+        return run_group_acceptance()
 
     active = list(units)
     flow.enter("plan", active=[u.unit_id for u in active])
