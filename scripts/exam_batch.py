@@ -770,6 +770,7 @@ def main() -> int:
         from upi.core.site_audit import sites_remaining
         _claim = None
         window_indices_obs: list[int] = []
+        acceptance_doc: dict = {"status": "unassessed"}
 
         def finish(status: str, *, inv_ok=None, metric_status="",
                    sites=0, scope="function") -> str:
@@ -804,6 +805,7 @@ def main() -> int:
                 "patch_family": patch_family,
                 "patch_class": patch_class,
                 "sites_remaining": sites,
+                "acceptance": acceptance_doc,
                 "status": status,
             })
             return status
@@ -879,6 +881,36 @@ def main() -> int:
                     bmetrics, ametrics = _b, _a
                     window_used = _win
                     print("metric-window", unit.unit_id, _win, _idx)
+        # I27：三轴 acceptance 落账（暂不改 status，先让证据可见）。
+        try:
+            from upi.core.acceptance import verdict as _acc_verdict
+            from upi.core.target_metrics import metric_series as _metric_series
+            _am = unit_metric.get(unit.unit_id) or "frame_time"
+
+            def _ser(metrics_list):
+                vals: list[float] = []
+                for _c in metrics_list or []:
+                    vals.extend(_metric_series(_c, _am))
+                return vals
+
+            _target_idx = set(window_indices_obs)
+            _ctrl_idx = next((i for i, t in action_idx.items()
+                              if t == "wait" and i not in _target_idx), None)
+            _cb = ([w.get(_ctrl_idx) for w in baseline_windows
+                    if w.get(_ctrl_idx)] if _ctrl_idx is not None else [])
+            _ca = ([w.get(_ctrl_idx) for w in after_windows
+                    if w.get(_ctrl_idx)] if _ctrl_idx is not None else [])
+            _abs = (unit_contract.get(unit.unit_id) or {}).get("absolute_target") or {}
+            _abs_val = _abs.get("value") if isinstance(_abs, dict) else None
+            _acc = _acc_verdict(
+                unit.unit_id, before=_ser(bmetrics), after=_ser(ametrics),
+                control_before=_ser(_cb), control_after=_ser(_ca),
+                absolute_target=_abs_val, semantic_risk=semantic_risk)
+            acceptance_doc = _acc.model_dump()
+            print("acceptance", unit.unit_id, acceptance_doc.get("status"),
+                  acceptance_doc.get("relative", {}).get("status"))
+        except Exception as e:  # noqa: BLE001
+            print("acceptance error", type(e).__name__, e)
         pl = plans[unit.unit_id]
         sa = sites_remaining(p, [{"file": d.get("file", ""),
                                   "find": d.get("find", ""),

@@ -261,6 +261,20 @@ def _path_context(bundle, cand) -> str:
     return out
 
 
+def _capture_dir(run_dir: Path) -> Optional[Path]:
+    try:
+        b = json.loads((run_dir / "baseline_capture.json").read_text(
+            encoding="utf-8"))
+        cap = str(b.get("capture_id") or "")
+        if cap:
+            p = E.RUNS / cap
+            if p.is_dir():
+                return p
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _findings_for_run(run_dir: Path, st: dict):
     """I27：从当前 capture 的 action_windows 产 per-window findings。"""
     try:
