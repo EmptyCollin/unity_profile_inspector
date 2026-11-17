@@ -1325,7 +1325,13 @@ def main() -> int:
                             "before_n": len(bm),
                             "window_rollback": _window_rollback,
                             "result": res.__dict__})
-            applied_files |= group_files
+            # 只有真正 kept 的 unit 文件才算 applied；整窗回滚后不能留在集合里。
+            _kept = set(res.verified)
+            for u in group_units:
+                if u.unit_id in _kept:
+                    pl = plans.get(u.unit_id)
+                    if pl is not None:
+                        applied_files |= set(pl.touched_assets or [])
         (run_dir / "group_acceptance.json").write_text(json.dumps(
             {"mode": a.group_mode, "groups": results,
              "same_window_units": {w: ids for w, ids
