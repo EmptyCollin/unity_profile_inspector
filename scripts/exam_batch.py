@@ -1238,15 +1238,43 @@ def main() -> int:
                 ensure_ascii=False, indent=2), encoding="utf-8")
             print("group acceptance: group", gi, "units",
                   len(group_units), "before", len(bm))
+            _cf0 = len(cf_records)
             res = run_batch(
                 group_units,
                 plan=lambda u: patches.get(u.unit_id) or plan(u),
                 apply=apply, compile_fn=compile_fn, capture=capture_fn,
                 verify=verify, rollback=rollback, round_no=1)
+            # I27：同一 exact window 的 merged verdict 不是 verified → 整窗回滚。
+            _window_rollback = []
+            try:
+                from upi.core.acceptance import merge_window_verdicts
+                wdoc = merge_window_verdicts(cf_records[_cf0:])
+                for w, d in wdoc.items():
+                    if d.get("n", 0) <= 1 or d.get("status") == "verified":
+                        continue
+                    for uid in d.get("units") or []:
+                        p = patches.get(uid)
+                        if p is not None:
+                            rollback(p)
+                        if uid in res.verified:
+                            res.verified.remove(uid)
+                        res.failed[uid] = f"window_{d['status']}"
+                        if uid not in res.rolled_back:
+                            res.rolled_back.append(uid)
+                    for rec in cf_records[_cf0:]:
+                        if str(rec.get("unit_id") or "") in (d.get("units") or []):
+                            rec["window_status"] = d["status"]
+                            rec["status"] = "window_rollback"
+                    _window_rollback.append({"window": w,
+                                             "status": d["status"],
+                                             "units": d.get("units") or []})
+            except Exception as e:  # noqa: BLE001
+                print("window rollback error", type(e).__name__, e)
             print("group acceptance result", gi, res)
             results.append({"group": gi,
                             "units": [u.unit_id for u in group_units],
                             "before_n": len(bm),
+                            "window_rollback": _window_rollback,
                             "result": res.__dict__})
             applied_files |= group_files
         (run_dir / "group_acceptance.json").write_text(json.dumps(
