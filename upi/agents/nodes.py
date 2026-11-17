@@ -592,6 +592,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             from upi.core.evidence_loop import run_evidence_loop
             from upi.core.evidence_request import EvidenceDelta, EvidenceRequest
             _hist = hist
+            _deep_requested = {"v": False}
 
             def _annotate(_hs):
                 for _h in _hs:
@@ -614,13 +615,23 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 if _hs and _route(_hs, group_ok=_group_ok) != "needs_human":
                     return {"hypotheses": _hs}
                 _wid = finding.window.window_id
-                reqs = [EvidenceRequest(
+                # 先补窗口 series；仍不足且允许深采时，再补一次该窗口 .data。
+                if (_deltas and st.get("allow_deep")
+                        and not _deep_requested["v"]):
+                    _deep_requested["v"] = True
+                    return {"requests": [EvidenceRequest(
+                        kind="deep_window",
+                        reason="window series 仍不足以定因，补该窗口 .data",
+                        finding_id=finding.finding_id, window_ids=[_wid],
+                        metric=finding.metric,
+                        missing=["alloc_site", "callstack"],
+                        expected="该窗口 .data 的 alloc/path/call site")]}
+                return {"requests": [EvidenceRequest(
                     kind="window_series",
                     reason="finding 归因不足，补同窗口全量 series",
                     finding_id=finding.finding_id, window_ids=[_wid],
                     metric=finding.metric, missing=["per_frame"],
-                    expected="目标窗口的逐帧 counters series")]
-                return {"requests": reqs}
+                    expected="目标窗口的逐帧 counters series")]}
 
             def _do(req):
                 cap = _capture_dir(run_dir)
@@ -645,7 +656,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
 
             _res = run_evidence_loop(
                 finding, diagnose=_judge, fulfill=_do,
-                max_rounds=max(1, int(getattr(mcaps, "max_evidence_rounds", 2))),
+                max_rounds=(3 if st.get("allow_deep")
+                            else max(1, int(getattr(mcaps, "max_evidence_rounds", 2)))),
                 max_deep=1)
             E.write_json(run_dir / "evidence_loop.json", {
                 "status": _res.status, "rounds": _res.rounds,

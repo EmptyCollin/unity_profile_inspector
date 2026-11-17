@@ -114,6 +114,8 @@ def main() -> int:
                     help="oracle clean plans JSON（绕过 LLM planner）")
     ap.add_argument("--claim-gate", action="store_true",
                     help="plan 阶段生成/校验/冻结 PatchClaim")
+    ap.add_argument("--acceptance-status", action="store_true",
+                    help="用 I27 三轴 acceptance 覆盖旧 status（默认只记录）")
     a = ap.parse_args()
     from upi.core.measure_profile import get as _mp
     _prof = _mp(a.measure_profile)
@@ -292,7 +294,7 @@ def main() -> int:
             from upi.core.finding import Finding as _Finding
             _all_hs: list[dict] = []
             _failed: list[dict] = []
-            for _fd in _finds[:12]:
+            for _idx, _fd in enumerate(_finds[:12]):
                 try:
                     _fobj = _Finding(**_fd)
                 except Exception as e:  # noqa: BLE001
@@ -302,7 +304,8 @@ def main() -> int:
                     "issue": N.issue_from_finding(_fobj),
                     "project": str(p), "primary_finding": _fobj.model_dump(),
                     "baseline_dirs": _bdirs,
-                    "use_evidence_loop": True, "replay": a.replay})
+                    "use_evidence_loop": True, "replay": a.replay,
+                    "allow_deep": _idx < 3})
                 if _g.get("route") == "proceed":
                     _all_hs.extend(_g.get("hypotheses") or [])
                 else:
@@ -789,6 +792,10 @@ def main() -> int:
                 status = "not_structural"
             elif status == "verified" and not _prof.can_verify:
                 status = "candidate_only"
+            elif (a.acceptance_status and gate == "measured"
+                  and acceptance_doc.get("status") not in
+                  (None, "unassessed", "insufficient_evidence")):
+                status = str(acceptance_doc["status"])
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,
