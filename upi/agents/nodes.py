@@ -290,19 +290,27 @@ def _findings_for_run(run_dir: Path, st: dict):
 def _issue_from_finding(f) -> dict:
     """把 top Finding 映射成 legacy Issue（plan 仍消费 Issue）。"""
     from upi.core.models import Evidence, Issue
-    dim = ("gc" if "GC" in f.metric else
-           "memory" if "Memory" in f.metric else
-           "render" if ("Draw" in f.metric or "SetPass" in f.metric
-                        or "Triangles" in f.metric or "Vertices" in f.metric)
+    _m = str(f.metric).lower()
+    dim = ("gc" if "gc" in _m else
+           "memory" if "memory" in _m else
+           "render" if any(x in _m for x in
+                          ("draw", "setpass", "triangle", "vertice"))
            else "cpu")
     link = {"gc": "cpu", "memory": "cpu", "render": "gpu"}.get(dim, "cpu")
-    ref_med = float((f.reference or {}).get("median") or 0.0)
+    obs = f.observed or {}
+    ref = f.reference or {}
+    ref_med = float(ref.get("median") if ref.get("median") is not None
+                    else (ref.get("target") or 0.0))
+    value = float(obs.get("median") if obs.get("median") is not None
+                  else (obs.get("value") or 0.0))
+    ref_path = f.evidence_refs[0] if f.evidence_refs else ""
+    source = ("action_windows" if "action_windows" in ref_path
+              else "unified_probe" if "unified_probe" in ref_path
+              else "finding_evidence")
     sig = {"dim": dim, "metric": f.metric, "mechanism": "window_anomaly",
            "threshold": ref_med,
-           "threshold_source": str((f.reference or {}).get("source") or "")}
-    ev = Evidence(tool="action_windows",
-                  raw_ref=(f.evidence_refs[0] if f.evidence_refs else ""),
-                  value=float((f.observed or {}).get("median") or 0.0),
+           "threshold_source": str(ref.get("source") or "")}
+    ev = Evidence(tool=source, raw_ref=ref_path, value=value,
                   unit=f.unit, data_tier=f.data_tier)
     model = Issue(signature=sig, link=link, evidence=[ev],
                   magnitude=f.magnitude, deviation_ratio=f.deviation_ratio,
@@ -311,10 +319,9 @@ def _issue_from_finding(f) -> dict:
     return {"id": f"ISS-{f.finding_id}", "fixture": f.run_id or "project",
             "detector": "DET-FINDING-WINDOW", "metric": f.metric,
             "magnitude": f.magnitude, "deviation_ratio": f.deviation_ratio,
-            "evidence": {"source": "action_windows",
-                         "ref": (f.evidence_refs[0] if f.evidence_refs else ""),
-                         "median": (f.observed or {}).get("median"),
-                         "reference": ref_med, "unit": f.unit,
+            "evidence": {"source": source, "ref": ref_path,
+                         "value": value, "reference": ref_med,
+                         "unit": f.unit,
                          "window_id": f.window.window_id},
             "state": "candidate", "anchor": f.window.window_id,
             "signature": sig, "source": "finding",

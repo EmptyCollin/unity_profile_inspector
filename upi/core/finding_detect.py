@@ -27,6 +27,12 @@ METRIC_SPECS: dict[str, tuple[str, str, float]] = {
 
 DEFAULT_METRICS = tuple(METRIC_SPECS)
 
+# detect 的绝对门限：这些是“症状线”，不是根因/修复判据。
+ABSOLUTE_MIN = {
+    "gc_alloc_bytes": 64 * 1024.0,   # 单窗分配
+    "function_self_ms": 0.4,          # 单窗游戏函数 self 时间
+}
+
 
 def _load_windows(run_dir: Path) -> list[dict]:
     p = Path(run_dir) / "action_windows.json"
@@ -64,6 +70,72 @@ def _slug(metric: str) -> str:
     return METRIC_SPECS.get(metric, (metric, "", 0.0))[0]
 
 
+def _load_probe(run_dir: Path) -> dict:
+    p = Path(run_dir) / "unified_probe.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _window_aggregates(run_dir: Path, windows: list[dict]) -> dict[str, dict]:
+    """按窗口聚合 allocation bytes 与游戏函数 self_ms（不产 root cause）。"""
+    probe = _load_probe(run_dir)
+    if not probe:
+        return {}
+    out: dict[str, dict] = {}
+    for w in windows:
+        wid = str(w.get("window_id") or "")
+        try:
+            lo = int(w.get("frame_start") or 0)
+            hi = int(w.get("frame_end") or 0)
+        except (TypeError, ValueError):
+            continue
+        alloc_bytes = 0
+        top_alloc = ""
+        for a in probe.get("allocations") or []:
+            try:
+                f0 = int(a.get("first_frame") or 0)
+            except (TypeError, ValueError):
+                continue
+            if lo <= f0 <= hi:
+                b = int(a.get("bytes") or 0)
+                alloc_bytes += b
+                if b:
+                    top_alloc = str(a.get("path") or "").split(">")[-2:]
+        self_ms = 0.0
+        top_func = ""
+        for f in probe.get("functions") or []:
+            sym = str(f.get("symbol") or "")
+            if "ChromaGame" not in sym and "BoardModel" not in sym \
+                    and "DevSim" not in sym:
+                continue
+            try:
+                fr = int(f.get("frame_idx") or -1)
+            except (TypeError, ValueError):
+                continue
+            if lo <= fr <= hi:
+                v = float(f.get("self_ms") or 0.0)
+                self_ms += v
+                if v > 0 and not top_func:
+                    top_func = sym
+        out[wid] = {"gc_alloc_bytes": float(alloc_bytes),
+                    "function_self_ms": self_ms,
+                    "top_alloc": top_alloc, "top_func": top_func}
+    return out
+
+
+def _finding(window: WindowRef, *, run_id: str, metric: str, unit: str,
+             observed: dict, reference: dict, magnitude: float,
+             ratio: float, ref_path: Path, project_id: str = "") -> Finding:
+    return Finding(
+        finding_id=f"F-{run_id}-{window.window_id}-{metric}",
+        run_id=run_id, project_id=project_id, window=window, metric=metric,
+        unit=unit, observed=observed, reference=reference, magnitude=magnitude,
+        deviation_ratio=ratio, data_tier="A2",
+        evidence_refs=[str(ref_path)], state="discovered")
+
+
 def findings_from_capture(
     run_dir: Path | str,
     *,
@@ -73,6 +145,8 @@ def findings_from_capture(
     k: float = 3.0,
     min_ratio: float = 0.15,
     min_abs: dict[str, float] | None = None,
+    include_evidence: bool = True,
+    absolute_min: dict[str, float] | None = None,
 ) -> list[Finding]:
     """当前 capture vs baseline captures（同 window_id/metric）产 Finding。
 
@@ -85,6 +159,7 @@ def findings_from_capture(
         return []
     baselines = [_load_windows(Path(d)) for d in baseline_dirs]
     min_abs = min_abs or {}
+    abs_min = {**ABSOLUTE_MIN, **(absolute_min or {})}
     refs: dict[tuple[str, str], list[float]] = {}
     for b in baselines:
         for w in b:
@@ -145,5 +220,51 @@ def findings_from_capture(
                 magnitude=delta, deviation_ratio=ratio, data_tier="A2",
                 evidence_refs=[str(run / "action_windows.json")],
                 state="discovered"))
+    if include_evidence:
+        cur_aggs = _window_aggregates(run, current)
+        base_aggs = [_window_aggregates(Path(d), _load_windows(Path(d)))
+                     for d in baseline_dirs]
+        base_refs: dict[tuple[str, str], list[float]] = {}
+        for ba in base_aggs:
+            for wid, vals in ba.items():
+                for metric in ("gc_alloc_bytes", "function_self_ms"):
+                    base_refs.setdefault((wid, metric), []).append(
+                        float(vals.get(metric) or 0.0))
+        for w in current:
+            wid = str(w.get("window_id") or "")
+            agg = cur_aggs.get(wid)
+            if not agg:
+                continue
+            try:
+                ref_window = WindowRef.from_id(
+                    wid, frame_start=int(w.get("frame_start") or 0),
+                    frame_end=int(w.get("frame_end") or 0))
+            except ValueError:
+                continue
+            for metric, unit in (("gc_alloc_bytes", "bytes"),
+                                 ("function_self_ms", "ms")):
+                key = (wid, metric)
+                if key in seen:
+                    continue
+                cur = float(agg.get(metric) or 0.0)
+                target = float(abs_min.get(metric) or 0.0)
+                if target <= 0 or cur < target:
+                    continue
+                seen.add(key)
+                base_vals = base_refs.get(key) or []
+                top = agg.get("top_alloc") if metric == "gc_alloc_bytes" \
+                    else agg.get("top_func")
+                out.append(_finding(
+                    ref_window, run_id=run.name, metric=metric, unit=unit,
+                    observed={"value": cur, "top": top,
+                              "ref": str(run / "unified_probe.json")},
+                    reference={"target": target, "source": "absolute_min",
+                               "baseline_median": _median(base_vals)
+                               if base_vals else None,
+                               "baseline_n": len(base_vals)},
+                    magnitude=cur - target,
+                    ratio=(cur / target - 1.0) if target else 0.0,
+                    ref_path=run / "unified_probe.json",
+                    project_id=project_id))
     out.sort(key=lambda f: f.deviation_ratio, reverse=True)
     return out
