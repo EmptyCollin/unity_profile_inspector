@@ -438,18 +438,6 @@ def main() -> int:
                  or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
-    # 同窗口多 unit 必须显式可见：它们共享 before/after，不能当独立验收。
-    _window_units: dict[str, list[str]] = {}
-    for _u in units:
-        _ws = {_finding_window.get(_fid)
-               for _fid in (_u.finding_ids or [])}
-        _ws |= set((unit_contract.get(_u.unit_id) or {}).get("window_ids") or [])
-        for _w in _ws:
-            if _w:
-                _window_units.setdefault(str(_w), []).append(_u.unit_id)
-    (run_dir / "window_units.json").write_text(
-        json.dumps(_window_units, ensure_ascii=False, indent=2),
-        encoding="utf-8")
     if _prof.name != "screen":
         _mp = run_dir / "merged_candidates.json"
         _cands = []
@@ -560,6 +548,18 @@ def main() -> int:
     unit_contract: dict[str, dict] = {}
     _finding_window = {f.finding_id: f.window_id for f in findings
                        if getattr(f, "window_id", "")}
+    # 同窗口多 unit 必须显式可见：它们共享 before/after，不能当独立验收。
+    _window_units: dict[str, list[str]] = {}
+    for _u in units:
+        _ws = {_finding_window.get(_fid)
+               for _fid in (_u.finding_ids or [])}
+        _ws |= set((unit_contract.get(_u.unit_id) or {}).get("window_ids") or [])
+        for _w in _ws:
+            if _w:
+                _window_units.setdefault(str(_w), []).append(_u.unit_id)
+    (run_dir / "window_units.json").write_text(
+        json.dumps(_window_units, ensure_ascii=False, indent=2),
+        encoding="utf-8")
 
     def _attach_windows(unit, contract: dict) -> None:
         """I27：contract 没有精确窗口时，从 finding 继承，绝不退化成 action 名。"""
