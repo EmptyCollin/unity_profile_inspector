@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -969,10 +970,12 @@ def main() -> int:
             from upi.core.target_metrics import metric_series as _metric_series
             _am = unit_metric.get(unit.unit_id) or "frame_time"
 
-            def _ser(metrics_list):
+            def _med(metrics_list):
                 vals: list[float] = []
                 for _c in metrics_list or []:
-                    vals.extend(_metric_series(_c, _am))
+                    s = _metric_series(_c, _am)
+                    if s:
+                        vals.append(statistics.median(s))
                 return vals
 
             _target_idx = set(window_indices_obs)
@@ -988,8 +991,8 @@ def main() -> int:
                 from upi.core.metric_targets import target_for
                 _abs_val = target_for(_am)
             _acc = _acc_verdict(
-                unit.unit_id, before=_ser(bmetrics), after=_ser(ametrics),
-                control_before=_ser(_cb), control_after=_ser(_ca),
+                unit.unit_id, before=_med(bmetrics), after=_med(ametrics),
+                control_before=_med(_cb), control_after=_med(_ca),
                 absolute_target=_abs_val, semantic_risk=semantic_risk,
                 metric=_am)
             acceptance_doc = _acc.model_dump()
