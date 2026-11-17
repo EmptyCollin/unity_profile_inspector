@@ -125,6 +125,8 @@ def main() -> int:
                     help="single=window 不相交的 unit 全放一组；components=按相交拆组")
     ap.add_argument("--force-window", default="",
                     help="测试钩子：把所有 unit 的 contract 窗口固定到该 cmd-i-action")
+    ap.add_argument("--require-deep", action="store_true",
+                    help="Pass2 deep .data 失败或缺窗口时直接失败，不进入验收")
     a = ap.parse_args()
     if a.group_acceptance and a.serial:
         raise SystemExit("--group-acceptance 与 --serial 不能同时使用")
@@ -441,6 +443,7 @@ def main() -> int:
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
     if _prof.name != "screen":
+        _deep_ok = True
         _mp = run_dir / "merged_candidates.json"
         _cands = []
         if _mp.is_file():
@@ -476,12 +479,21 @@ def main() -> int:
                 json.dumps(_two, ensure_ascii=False, indent=2),
                 encoding="utf-8")
             if _p.returncode != 0 or _miss:
+                _deep_ok = False
                 (run_dir / "two_pass_error.log").write_text(
                     f"status={_two['status']}\nwindows={len(_wins)}\n"
                     f"profiles={len(_profiles)}\nraw_missing={_miss}\n"
                     f"stderr:\n{_two['stderr']}\n", encoding="utf-8")
                 print("two_pass degraded:", _two["status"],
                       "profiles", len(_profiles), "missing", len(_miss))
+    else:
+        _deep_ok = False
+    if a.require_deep and not _deep_ok:
+        print("deep evidence required but two_pass failed/missing")
+        (run_dir / "deep_required_failed.json").write_text(
+            json.dumps({"require_deep": True, "deep_ok": False},
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+        return 1
     asset_records = []
     asset_units = [u for u in units
                    if "oversized_resource_asset" in u.mechanism]
