@@ -226,6 +226,8 @@ _LEASE_STOP = False
 
 
 def start_full_probe(project: Path, mode: str) -> None:
+    # 清掉上一轮可能残留的 profiler 录制状态，避免跨轮累积
+    _eval(project, PROFILER_OFF, timeout=30)
     UNIFIED_CFG.parent.mkdir(parents=True, exist_ok=True)
     UNIFIED_OUT.unlink(missing_ok=True)
     SESSION_FINISH.unlink(missing_ok=True)
@@ -311,6 +313,7 @@ def run_full_capture(project: Path, run_id: str, limit: int,
         ex._one(cmd)  # noqa: SLF001
         end_window()
     cands = finish_full_probe(project, run_id, max(30, limit), since=started)
+    _eval(project, PROFILER_OFF, timeout=30)
     run_dir = ROOT / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     windows = []
@@ -339,10 +342,12 @@ def run_full_capture(project: Path, run_id: str, limit: int,
         w["counter_rows"] = len(sel)
         metrics = {}
         for name in {k for m in sel for k in m}:
-            vals = sorted(float(m[name]) for m in sel if name in m)
+            raw = [float(m[name]) for m in sel if name in m]
+            vals = sorted(raw)
             if vals:
                 metrics[name] = {"median": vals[len(vals) // 2],
-                                 "max": vals[-1], "n": len(vals)}
+                                 "max": vals[-1], "n": len(vals),
+                                 "series": raw}
         w["counters"] = metrics
     (run_dir / "action_windows.json").write_text(
         json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8")

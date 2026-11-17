@@ -64,6 +64,7 @@ public static class UpiUnifiedProbe
     static string _winTag = "";
     static int _winStart = -1;
     static readonly List<string> _winRows = new List<string>();
+    static readonly List<int[]> _winRanges = new List<int[]>();
     static string _lastWinCmd = "";
 
     public static string Main()
@@ -130,7 +131,9 @@ public static class UpiUnifiedProbe
             _leaseMs = (long)Math.Min(60000, Math.Max(1000, ReadNum(j, "lease_ms", 10000)));
             _preN = (int)Math.Min(600, Math.Max(1, ReadNum(j, "pre_frames", 8)));
             _postN = (int)Math.Min(64, Math.Max(1, ReadNum(j, "post_frames", 8)));
-            _frames = (int)Math.Min(600, Math.Max(1, ReadNum(j, "frames", 30)));
+            double framesCfg = ReadNum(j, "frames", 30);
+            int framesCap = _mode == "resident" ? 600 : 100000;
+            _frames = (int)Math.Min(framesCap, Math.Max(1, framesCfg));
             _budgetMs = (long)Math.Min(600000, Math.Max(500, ReadNum(j, "budget_ms", 5000)));
         }
         catch (Exception) { }
@@ -158,6 +161,7 @@ public static class UpiUnifiedProbe
                         _winRows.Add("{\"window_id\":" + Q(_winTag) +
                             ",\"frame_start\":" + _winStart +
                             ",\"frame_end\":" + now + "}");
+                        _winRanges.Add(new[] { _winStart, now });
                         _winTag = "";
                         _winStart = -1;
                     }
@@ -239,7 +243,21 @@ public static class UpiUnifiedProbe
             int first = _mode == "resident" && _triggered
                 ? Math.Max(_startFrame, _triggerFrame - _preN)
                 : _startFrame;
-            CaptureFunctions(first, now);
+            // 全趟采集不再逐帧抓函数：只抓每个动作窗口尾部 4 帧。
+            // 逐帧抓 600+ 帧会把 ProfilerEditor 与路径字符串堆到十几 GB（2026-11-17 实测 OOM）。
+            if (_mode != "resident" && _winRanges.Count > 0)
+            {
+                foreach (var r in _winRanges)
+                {
+                    int a = r[0], b = r[1];
+                    if (b < a) continue;
+                    CaptureFunctions(Math.Max(a, b - 3), b);
+                }
+            }
+            else
+            {
+                CaptureFunctions(first, now);
+            }
             string path = Out;
             if (_mode == "resident" && !string.IsNullOrEmpty(_triggerTag))
             {
@@ -278,6 +296,8 @@ public static class UpiUnifiedProbe
         _rec.Clear(); _names.Clear();
         ProfilerDriver.deepProfiling = false;
         Profiler.enableAllocationCallstacks = false;
+        Profiler.enabled = false;
+        ProfilerDriver.enabled = false;
     }
 
     static void StopSelf()
@@ -288,6 +308,8 @@ public static class UpiUnifiedProbe
         _rec.Clear(); _names.Clear();
         ProfilerDriver.deepProfiling = false;
         Profiler.enableAllocationCallstacks = false;
+        Profiler.enabled = false;
+        ProfilerDriver.enabled = false;
         try { File.Delete(_heartbeatPath); } catch (Exception) { }
     }
 
@@ -328,6 +350,10 @@ public static class UpiUnifiedProbe
                         int childCount = view.GetSampleChildrenCountRecursive(i);
                         stack.Add(new KeyValuePair<int, string>(i + childCount, name));
                         if (string.IsNullOrEmpty(name)) continue;
+                        bool isGame = IsGameName(name);
+                        bool isAlloc = name.Contains("GC.Alloc");
+                        // 只给游戏样本/分配样本构造路径：全量路径拼接是内存暴涨主因
+                        if (!isGame && !isAlloc) continue;
                         var pathSb = new StringBuilder();
                         for (int s = 0; s < stack.Count; s++)
                         {
@@ -335,9 +361,7 @@ public static class UpiUnifiedProbe
                             pathSb.Append(stack[s].Value);
                         }
                         string samplePath = pathSb.ToString();
-                        if (name.Contains("GC.Alloc") &&
-                            (samplePath.Contains("ChromaGame") || samplePath.Contains("BoardModel")
-                             || samplePath.Contains("DevSim")))
+                        if (isAlloc && IsGameName(samplePath))
                         {
                             long allocBytes = 0;
                             try
@@ -356,17 +380,13 @@ public static class UpiUnifiedProbe
                             av[1] += allocBytes;
                             av[3] = frame;
                         }
-                        bool isGame = name.Contains("ChromaGame")
-                            || name.Contains("BoardModel") || name.Contains("DevSim");
                         if (!isGame) continue;
                         string pk = name + "|" + samplePath;
                         long[] pv;
                         if (!_paths.TryGetValue(pk, out pv)) { pv = new long[2]; _paths[pk] = pv; }
                         pv[0]++;
                         pv[1] += (long)view.GetSampleTimeNs(i);
-                        if (!string.IsNullOrEmpty(parent) &&
-                            (parent.Contains("ChromaGame") || parent.Contains("BoardModel")
-                             || parent.Contains("DevSim")))
+                        if (!string.IsNullOrEmpty(parent) && IsGameName(parent))
                         {
                             string ek = parent + "|" + name;
                             long[] e;
@@ -485,6 +505,10 @@ public static class UpiUnifiedProbe
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out v) ? v : dflt;
     }
+
+    static bool IsGameName(string n) =>
+        !string.IsNullOrEmpty(n) &&
+        (n.Contains("ChromaGame") || n.Contains("BoardModel") || n.Contains("DevSim"));
 
     static string Q(string s) => "\"" + Esc(s).Replace("\n", "\\n") + "\"";
     static string Esc(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
