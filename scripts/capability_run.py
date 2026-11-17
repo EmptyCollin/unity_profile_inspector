@@ -1037,7 +1037,10 @@ def main() -> int:
         run_id=run_id, project_id=project_id, mode="resident",
         protocol_fingerprint=fp_digest(fp_build(
             replay_script_hash=file_hash(replay_path), data_tier="A2",
-            editor_mode="gui")),
+            editor_mode="gui",
+            reset_mode="per_replay_play_cycle",
+            warmup_s=PLAY_WARMUP_S, focus=True,
+            run_in_background=True)),
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         findings=findings, repairs=[],
     )

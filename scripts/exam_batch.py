@@ -287,9 +287,36 @@ def main() -> int:
         if d.get("route") != "proceed":
             print("detect failed", d)
             return 1
-        g = nd["diagnose"]({"issue": d["issue"], "project": str(p),
-                            "primary_finding": d.get("primary_finding"),
-                            "baseline_dirs": _bdirs})
+        _finds = d.get("findings_v2") or []
+        if _finds:
+            from upi.core.finding import Finding as _Finding
+            _all_hs: list[dict] = []
+            _failed: list[dict] = []
+            for _fd in _finds[:12]:
+                try:
+                    _fobj = _Finding(**_fd)
+                except Exception as e:  # noqa: BLE001
+                    _failed.append({"finding": str(_fd), "error": str(e)})
+                    continue
+                _g = nd["diagnose"]({
+                    "issue": N.issue_from_finding(_fobj),
+                    "project": str(p), "primary_finding": _fobj.model_dump(),
+                    "baseline_dirs": _bdirs})
+                if _g.get("route") == "proceed":
+                    _all_hs.extend(_g.get("hypotheses") or [])
+                else:
+                    _failed.append({"finding": _fobj.finding_id,
+                                    "route": _g.get("route"),
+                                    "error": str(_g.get("error") or "")[:160]})
+            if not _all_hs:
+                print("diagnose failed", _failed)
+                return 1
+            g = {"hypotheses": _all_hs, "route": "proceed",
+                 "failed_findings": _failed}
+        else:
+            g = nd["diagnose"]({"issue": d["issue"], "project": str(p),
+                                "primary_finding": d.get("primary_finding"),
+                                "baseline_dirs": _bdirs})
         if g.get("route") != "proceed":
             print("diagnose failed", g)
             return 1
@@ -399,12 +426,22 @@ def main() -> int:
                     _profiles = json.loads(_pf.read_text(encoding="utf-8"))
                 except Exception:  # noqa: BLE001
                     _profiles = []
-            (run_dir / "two_pass.json").write_text(json.dumps(
-                {"status": "done" if _p.returncode == 0 else "profile_failed",
-                 "windows": _wins, "profiles": len(_profiles),
-                 "raw_missing": [x.get("window_id") for x in _profiles
-                                 if x.get("raw_status") != "ok"]},
-                ensure_ascii=False, indent=2), encoding="utf-8")
+            _miss = [x.get("window_id") for x in _profiles
+                     if x.get("raw_status") != "ok"]
+            _two = {"status": "done" if _p.returncode == 0 else "profile_failed",
+                    "windows": _wins, "profiles": len(_profiles),
+                    "raw_missing": _miss,
+                    "stderr": (_p.stderr or "")[-4000:]}
+            (run_dir / "two_pass.json").write_text(
+                json.dumps(_two, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            if _p.returncode != 0 or _miss:
+                (run_dir / "two_pass_error.log").write_text(
+                    f"status={_two['status']}\nwindows={len(_wins)}\n"
+                    f"profiles={len(_profiles)}\nraw_missing={_miss}\n"
+                    f"stderr:\n{_two['stderr']}\n", encoding="utf-8")
+                print("two_pass degraded:", _two["status"],
+                      "profiles", len(_profiles), "missing", len(_miss))
     asset_records = []
     asset_units = [u for u in units
                    if "oversized_resource_asset" in u.mechanism]

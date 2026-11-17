@@ -14,6 +14,7 @@ FIELDS = (
     "scene", "replay_script_hash", "quality_tier", "warmup_samples",
     "window_samples", "n_samples", "poll_rate", "data_tier", "editor_mode",
     "scale_factor", "graphics_api", "environment_fingerprint",
+    "reset_mode", "warmup_s", "focus", "run_in_background",
 )
 
 

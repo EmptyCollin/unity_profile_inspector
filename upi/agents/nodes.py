@@ -329,6 +329,11 @@ def _issue_from_finding(f) -> dict:
             "issue_model": model.model_dump()}
 
 
+def issue_from_finding(f) -> dict:
+    """公开包装：finding → legacy Issue（exam/plan 兼容）。"""
+    return _issue_from_finding(f)
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None,
@@ -475,6 +480,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理
                 E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
                                     f"证据候选读取失败：{type(e).__name__}: {e}\n")
+        # I27：只让与 finding 同窗口的 candidate 参与该 finding 的定因；
+        # 若没有任何同窗候选，退回全部候选（由 diagnose 给 window_mismatch 标记）。
+        if finding is not None:
+            _wid = finding.window.window_id
+            _same = [c for c in ev_cands
+                     if getattr(c, "window_id", "") == _wid]
+            if _same:
+                ev_cands = _same + [c for c in ev_cands
+                                    if not getattr(c, "window_id", "")]
         if not ev_cands:
             return {"route": "insufficient_evidence",
                     "exit_code": "insufficient_evidence",
@@ -1057,6 +1071,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     replay_script_hash=st.get("replay_script_hash", "none-v0"),
                     scale_factor=sp.get("scale_factor", 1),
                     poll_rate=sp.get("poll_rate", 0),
+                    reset_mode="per_replay_play_cycle", warmup_s=5.0,
+                    focus=True, run_in_background=True,
                 ))
             except Exception:  # noqa: BLE001
                 pfp = ""

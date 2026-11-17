@@ -332,7 +332,9 @@ def main() -> int:
             run_id=run_id, project_id=a.project_id, mode="regression",
             protocol_fingerprint=fp_digest(fp_build(
                 replay_script_hash=file_hash(Path(a.replay)), data_tier="A2",
-                editor_mode="gui")),
+                editor_mode="gui",
+                reset_mode="per_replay_play_cycle", warmup_s=5.0,
+                focus=True, run_in_background=True)),
             created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
             findings=findings, repairs=[])
         save_run(run)
