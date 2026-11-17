@@ -104,6 +104,13 @@ def _why_not_auto(plan: EditPlan) -> str:
                 "§3 维度一硬规则：无论置信度多高一律 semi")
     return ("不在语义保持白名单内（§3 维度二），auto 档必要条件不满足")
 
+def _p95(vals) -> float:
+    xs = sorted(float(x) for x in (vals or []))
+    if not xs:
+        return 0.0
+    return xs[min(len(xs) - 1, int(len(xs) * 0.95))]
+
+
 def _cost_context(bundle, cand) -> str:
     """给归因卡补 total 分母和目标占比（只用实测 counters/functions）。"""
     if bundle is None:
@@ -139,21 +146,22 @@ def _cost_context(bundle, cand) -> str:
         _frame_vals = [float(x) for x in _frame_vals]
         if _frame_vals and max(_frame_vals) > 10000:
             _frame_vals = [x / 1e6 for x in _frame_vals]
-        total_peak = max(_frame_vals) if _frame_vals else None
+        # 冷启动会有一个 200ms+ 尖峰；用 max 当分母会把 share 压到 0.0x。
+        total_peak = _p95(_frame_vals) if _frame_vals else None
         method = str(getattr(cand, "root_cause", "")).split(":")[-1].split(".")[-1]
         methods = {method}
         if method.endswith("Body"):
             methods.add(method[:-4])
         funcs = getattr(bundle, "functions", []) or []
         target_sum = 0.0
-        target_peak = 0.0
+        target_vals: list[float] = []
         for f in funcs:
             sym = str(getattr(f, "symbol", "") or "")
             name = sym.split(".")[-1].split("::")[-1].split("(")[0].strip()
             if name in methods:
                 target_sum += float(getattr(f, "total_ms", 0) or 0)
-                target_peak = max(target_peak,
-                                  float(getattr(f, "total_ms", 0) or 0))
+                target_vals.append(float(getattr(f, "total_ms", 0) or 0))
+        target_peak = _p95(target_vals)
         nframes = max(1, len(getattr(bundle, "frames", []) or []))
         target_ms = target_sum / nframes
         parts = []
