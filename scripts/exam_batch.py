@@ -86,6 +86,8 @@ def main() -> int:
     ap.add_argument("--project", default="test_project")
     ap.add_argument("--project-id", default="test_project")
     ap.add_argument("--baselines", type=int, default=None)
+    ap.add_argument("--restart-editor", action="store_true",
+                    help="baseline 前冷重启 Unity，避免热 Editor 候选集缩水")
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-units", type=int, default=0)
     ap.add_argument("--max-findings", type=int, default=12,
@@ -217,6 +219,9 @@ def main() -> int:
             last_cap["id"] = getattr(adapter, "last_capture_id", "")
         return ok2, out2
 
+    if a.restart_editor and not cache_hit:
+        print("restart editor (cold baseline)")
+        M.restart_editor(p)
     if not cache_hit:
         for i in range(max(1, a.baselines)):
             bstart = time.time()

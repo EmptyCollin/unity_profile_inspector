@@ -42,6 +42,25 @@ def _unity(*args, timeout=120, project=None):
         return {"success": False, "raw": p.stdout[-300:]}
 
 
+def restart_editor(project: Path) -> None:
+    """按项目命令行筛 Unity PID 后重启；禁止按进程名批量杀（G10）。"""
+    import subprocess
+    q = ("Get-CimInstance Win32_Process -Filter \"Name='Unity.exe'\" | "
+         f"Where-Object {{ $_.CommandLine -like '*{project}*' }} | "
+         "ForEach-Object { $_.ProcessId }")
+    p = subprocess.run(["powershell", "-NoProfile", "-Command", q],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60)
+    pids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip().isdigit()]
+    for pid in pids:
+        subprocess.run(["taskkill", "/PID", pid, "/F"],
+                       capture_output=True, text=True, timeout=60)
+    if pids:
+        print("editor restart: stopped", len(pids), "process(es)")
+    time.sleep(5)
+    ensure_ready(project)
+
+
 def ensure_ready(project: Path) -> None:
     """编辑器就绪是硬步骤：不能假设 unity open 返回就等于可用。"""
     import subprocess
