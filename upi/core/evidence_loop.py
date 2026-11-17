@@ -82,7 +82,15 @@ def run_evidence_loop(
             return LoopResult("budget", deltas=deltas, rounds=round_no - 1,
                               requests=requests, trace=trace,
                               reason="wallclock")
-        out = diagnose(finding, deltas) or {}
+        try:
+            out = diagnose(finding, deltas) or {}
+        except Exception as e:  # noqa: BLE001
+            trace.append({"round": round_no, "kind": "diagnose_error",
+                          "error": f"{type(e).__name__}: {e}"})
+            return LoopResult("diagnose_error", deltas=deltas,
+                              rounds=round_no, requests=requests,
+                              trace=trace,
+                              reason=f"{type(e).__name__}: {str(e)[:200]}")
         hypotheses = list(out.get("hypotheses") or [])
         reqs = list(out.get("requests") or [])
         trace.append({"round": round_no, "kind": "diagnose",

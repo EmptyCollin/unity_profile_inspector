@@ -87,6 +87,8 @@ def main() -> int:
     ap.add_argument("--baselines", type=int, default=None)
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-units", type=int, default=0)
+    ap.add_argument("--max-findings", type=int, default=12,
+                    help="每次 diagnose 最多处理多少个 finding（控 LLM 成本）")
     ap.add_argument("--targets", default="",
                     help="逗号分隔的 mechanism 子串，只跑匹配的单元")
     ap.add_argument("--plan-repeat", type=int, default=1,
@@ -301,18 +303,36 @@ def main() -> int:
             from upi.core.finding import Finding as _Finding
             _all_hs: list[dict] = []
             _failed: list[dict] = []
-            for _idx, _fd in enumerate(_finds[:12]):
+            for _idx, _fd in enumerate(_finds[:max(1, a.max_findings)]):
                 try:
                     _fobj = _Finding(**_fd)
                 except Exception as e:  # noqa: BLE001
                     _failed.append({"finding": str(_fd), "error": str(e)})
                     continue
-                _g = nd["diagnose"]({
-                    "issue": N.issue_from_finding(_fobj),
-                    "project": str(p), "primary_finding": _fobj.model_dump(),
-                    "baseline_dirs": _bdirs,
-                    "use_evidence_loop": True, "replay": a.replay,
-                    "allow_deep": _idx < 3})
+                _g = None
+                _last_err = ""
+                for _try in range(2):
+                    try:
+                        _g = nd["diagnose"]({
+                            "issue": N.issue_from_finding(_fobj),
+                            "project": str(p),
+                            "primary_finding": _fobj.model_dump(),
+                            "baseline_dirs": _bdirs,
+                            "use_evidence_loop": True, "replay": a.replay,
+                            "allow_deep": _idx < 3})
+                    except Exception as _de:  # noqa: BLE001
+                        _g = None
+                        _last_err = f"{type(_de).__name__}: {str(_de)[:160]}"
+                    if _g and _g.get("route") == "proceed":
+                        break
+                    if _try == 0:
+                        print("diagnose retry", _fobj.finding_id,
+                              _last_err or (_g or {}).get("route"))
+                if _g is None:
+                    _failed.append({"finding": _fobj.finding_id,
+                                    "route": "exception",
+                                    "error": _last_err})
+                    continue
                 if _g.get("route") == "proceed":
                     _all_hs.extend(_g.get("hypotheses") or [])
                 else:

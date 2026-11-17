@@ -107,6 +107,16 @@ ok("trace 标 deep_budget",
    any("deep_budget" in (t.get("skipped") or []) for t in res5.trace),
    res5.trace)
 
+
+def diag_err(finding, deltas):
+    raise RuntimeError("llm empty")
+
+
+res6 = run_evidence_loop(F, diagnose=diag_err, fulfill=lambda r: delta(r))
+ok("diagnose 异常不冒泡", res6.status == "diagnose_error", res6.status)
+ok("异常留 trace", any(t.get("kind") == "diagnose_error"
+                    for t in res6.trace), res6.trace)
+
 print(f"\n==== I27 evidence_loop: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:
     print("失败项：" + ", ".join(FAIL))

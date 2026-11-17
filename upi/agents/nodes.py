@@ -494,15 +494,15 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             except Exception as e:  # noqa: BLE001 — 证据链不可用不阻断，按“无证据”处理
                 E.atomic_write_text(run_dir / "diagnose_evidence_error.txt",
                                     f"证据候选读取失败：{type(e).__name__}: {e}\n")
-        # I27：只让与 finding 同窗口的 candidate 参与该 finding 的定因；
-        # 若没有任何同窗候选，退回全部候选（由 diagnose 给 window_mismatch 标记）。
+        # I27：同窗口 candidate 优先，但不再丢掉其他窗口候选。
+        # 只留同窗会把 group_share 压到线外，定因直接 needs_human。
         if finding is not None:
             _wid = finding.window.window_id
             _same = [c for c in ev_cands
                      if getattr(c, "window_id", "") == _wid]
             if _same:
-                ev_cands = _same + [c for c in ev_cands
-                                    if not getattr(c, "window_id", "")]
+                _other = [c for c in ev_cands if c not in _same]
+                ev_cands = _same + _other
         if not ev_cands:
             return {"route": "insufficient_evidence",
                     "exit_code": "insufficient_evidence",
@@ -595,12 +595,27 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             _deep_requested = {"v": False}
 
             def _annotate(_hs):
+                out = []
                 for _h in _hs:
-                    _w = _cand_window.get(str(_h.get("root_cause") or "")) or ""
+                    if isinstance(_h, dict):
+                        _w = _cand_window.get(str(_h.get("root_cause") or "")) or ""
+                        if _w:
+                            _h.setdefault("window_id", _w)
+                        _h.setdefault("finding_id", finding.finding_id)
+                        _h.setdefault("finding_metric", finding.metric)
+                        out.append(_h)
+                        continue
+                    _rc = str(getattr(_h, "root_cause", "") or "")
+                    _w = _cand_window.get(_rc) or ""
+                    _up = {"finding_id": finding.finding_id,
+                           "finding_metric": finding.metric}
                     if _w:
-                        _h.setdefault("window_id", _w)
-                    _h.setdefault("finding_id", finding.finding_id)
-                    _h.setdefault("finding_metric", finding.metric)
+                        _up["window_id"] = _w
+                    try:
+                        out.append(_h.model_copy(update=_up))
+                    except Exception:  # noqa: BLE001
+                        out.append(_h)
+                return out
 
             def _judge(_f, _deltas):
                 nonlocal _hist
@@ -650,7 +665,7 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 _hs, _judged = build_hypotheses_for_issue(
                     cfg, issue, _tuples, history=_hist, cards=cards)
                 archive.update(_judged)
-                _annotate(_hs)
+                _hs = _annotate(_hs)
                 if _hs and _route(_hs, group_ok=_group_ok) != "needs_human":
                     return {"hypotheses": _hs}
                 _wid = finding.window.window_id

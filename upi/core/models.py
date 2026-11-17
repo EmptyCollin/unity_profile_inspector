@@ -245,6 +245,10 @@ class Hypothesis(BaseModel):
     weights_version: str = "hand-set-prior-v1"
     expected_effect: dict = Field(default_factory=dict)
     veto_reasons: list[str] = Field(default_factory=list)   # §5 否决项命中记录；非空则 conf≤0.5
+    # I27：finding-first 归属；由 diagnose 从 finding/candidate 回填
+    finding_id: str = ""
+    finding_metric: str = ""
+    window_id: str = ""
 
     @model_validator(mode="after")
     def _veto_cap_consistency(self):
