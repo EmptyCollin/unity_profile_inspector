@@ -144,9 +144,10 @@ def main() -> int:
     baseline_metrics: dict = {}
     baseline_runs: list[dict] = []
     baseline_windows: list[dict[int, dict]] = []
+    baseline_caps: list[str] = []
     after_windows: list[dict[int, dict]] = []
     after_n = 0
-    from upi.core.window_metrics import action_indices, index_for_window
+    from upi.core.window_metrics import action_indices, exact_index, index_for_window
     from upi.core.window_metrics import window_counters
     action_idx = action_indices(a.replay)
     last_cap = {"id": ""}
@@ -203,6 +204,8 @@ def main() -> int:
                 return 1
             baseline_runs.append(counters_since(0, last_cap["id"]))
             baseline_windows.append(window_counters(last_cap["id"]))
+            if last_cap.get("id"):
+                baseline_caps.append(str(last_cap["id"]))
             (run_dir / "baseline_capture.json").write_text(json.dumps(
                 {"capture_id": last_cap["id"], "project_id": a.project_id,
                  "replay": a.replay}, ensure_ascii=False, indent=2),
@@ -278,11 +281,15 @@ def main() -> int:
         nd = N.make_nodes(run_dir, live_llm=True,
                           knowledge_db=_knowledge_db(a.project_id),
                           mode="regression", evidence_collector=collector)
-        d = nd["detect"]({"project": str(p)})
+        _bdirs = [str(ROOT / "runs" / c) for c in baseline_caps]
+        d = nd["detect"]({"project": str(p), "project_id": a.project_id,
+                          "baseline_dirs": _bdirs})
         if d.get("route") != "proceed":
             print("detect failed", d)
             return 1
-        g = nd["diagnose"]({"issue": d["issue"], "project": str(p)})
+        g = nd["diagnose"]({"issue": d["issue"], "project": str(p),
+                            "primary_finding": d.get("primary_finding"),
+                            "baseline_dirs": _bdirs})
         if g.get("route") != "proceed":
             print("diagnose failed", g)
             return 1
@@ -464,6 +471,21 @@ def main() -> int:
     unit_metric: dict[str, str] = {}
     unit_inv: dict[str, tuple[str, str, str, int]] = {}
     unit_contract: dict[str, dict] = {}
+    _finding_window = {f.finding_id: f.window_id for f in findings
+                       if getattr(f, "window_id", "")}
+
+    def _attach_windows(unit, contract: dict) -> None:
+        """I27：contract 没有精确窗口时，从 finding 继承，绝不退化成 action 名。"""
+        if not isinstance(contract, dict) or contract.get("window_ids"):
+            return
+        wins: list[str] = []
+        for fid in (unit.finding_ids or []):
+            wid = _finding_window.get(fid)
+            if wid and wid not in wins:
+                wins.append(wid)
+        if wins:
+            contract["window_ids"] = wins
+
     round_no = 1
     after_metrics: dict = {}
     after_start = 0.0
@@ -557,6 +579,7 @@ def main() -> int:
             plans[unit.unit_id] = _pl
             unit_metric[unit.unit_id] = _pl.metric or ""
             unit_contract[unit.unit_id] = dict(_pl.repair_contract)
+            _attach_windows(unit, unit_contract[unit.unit_id])
             print("plan", unit.unit_id, "ORACLE CLEAN")
             return PatchRef(unit.unit_id,
                             sorted({str(d.get("file", ""))
@@ -626,6 +649,7 @@ def main() -> int:
             return None
         if pl.repair_contract:
             unit_contract[unit.unit_id] = dict(pl.repair_contract)
+        _attach_windows(unit, unit_contract[unit.unit_id])
         plans[unit.unit_id] = pl
         bases[unit.unit_id] = X._git_head(p)
         return PatchRef(unit.unit_id, list(pl.touched_assets))
@@ -751,6 +775,24 @@ def main() -> int:
         metric_delta = None
         metric_threshold = None
         _win = str((unit_contract.get(unit.unit_id) or {}).get("window") or "")
+        # I27：优先精确 window_id（cmd-i-action），不再用 action→last 映射。
+        _exact = list((unit_contract.get(unit.unit_id) or {}).get("window_ids")
+                      or [])
+        if not _exact:
+            _exact = [w for w in (_finding_window.get(fid)
+                                  for fid in (unit.finding_ids or []))
+                      if w]
+        if _exact and not window_used:
+            _wid = str(_exact[0])
+            _idx = exact_index(_wid)
+            if _idx is not None:
+                _b = [w.get(_idx) for w in baseline_windows if w.get(_idx)]
+                _a = [w.get(_idx) for w in after_windows if w.get(_idx)]
+                if _b and _a:
+                    bmetrics, ametrics = _b, _a
+                    window_used = _wid
+                    window_indices_obs = [_idx]
+                    print("exact-window", unit.unit_id, _wid, _idx)
         semantic_risk = ""
         patch_family = ""
         _diffs = (plans.get(unit.unit_id).diffs

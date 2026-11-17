@@ -261,6 +261,67 @@ def _path_context(bundle, cand) -> str:
     return out
 
 
+def _findings_for_run(run_dir: Path, st: dict):
+    """I27：从当前 capture 的 action_windows 产 per-window findings。"""
+    try:
+        from upi.core.finding_detect import findings_from_capture
+        b = json.loads((run_dir / "baseline_capture.json").read_text(
+            encoding="utf-8"))
+        cap = str(b.get("capture_id") or "")
+        if not cap:
+            return []
+        cap_dir = E.RUNS / cap
+        if not (cap_dir / "action_windows.json").is_file():
+            return []
+        baseline_dirs = [Path(x) for x in (st.get("baseline_dirs") or [])
+                          if x and Path(x).is_dir()]
+        return findings_from_capture(
+            cap_dir, baseline_dirs=baseline_dirs,
+            project_id=str(st.get("project_id") or ""))
+    except Exception as e:  # noqa: BLE001
+        try:
+            E.atomic_write_text(run_dir / "finding_detect_error.txt",
+                                f"{type(e).__name__}: {e}\n")
+        except OSError:
+            pass
+        return []
+
+
+def _issue_from_finding(f) -> dict:
+    """把 top Finding 映射成 legacy Issue（plan 仍消费 Issue）。"""
+    from upi.core.models import Evidence, Issue
+    dim = ("gc" if "GC" in f.metric else
+           "memory" if "Memory" in f.metric else
+           "render" if ("Draw" in f.metric or "SetPass" in f.metric
+                        or "Triangles" in f.metric or "Vertices" in f.metric)
+           else "cpu")
+    link = {"gc": "cpu", "memory": "cpu", "render": "gpu"}.get(dim, "cpu")
+    ref_med = float((f.reference or {}).get("median") or 0.0)
+    sig = {"dim": dim, "metric": f.metric, "mechanism": "window_anomaly",
+           "threshold": ref_med,
+           "threshold_source": str((f.reference or {}).get("source") or "")}
+    ev = Evidence(tool="action_windows",
+                  raw_ref=(f.evidence_refs[0] if f.evidence_refs else ""),
+                  value=float((f.observed or {}).get("median") or 0.0),
+                  unit=f.unit, data_tier=f.data_tier)
+    model = Issue(signature=sig, link=link, evidence=[ev],
+                  magnitude=f.magnitude, deviation_ratio=f.deviation_ratio,
+                  explains_share_of_regression=1.0, state="candidate",
+                  window=f.window.window_id)
+    return {"id": f"ISS-{f.finding_id}", "fixture": f.run_id or "project",
+            "detector": "DET-FINDING-WINDOW", "metric": f.metric,
+            "magnitude": f.magnitude, "deviation_ratio": f.deviation_ratio,
+            "evidence": {"source": "action_windows",
+                         "ref": (f.evidence_refs[0] if f.evidence_refs else ""),
+                         "median": (f.observed or {}).get("median"),
+                         "reference": ref_med, "unit": f.unit,
+                         "window_id": f.window.window_id},
+            "state": "candidate", "anchor": f.window.window_id,
+            "signature": sig, "source": "finding",
+            "scene": "", "window": f.window.window_id,
+            "issue_model": model.model_dump()}
+
+
 def make_nodes(run_dir: Path, *, live_llm: bool = False,
                approval_note: str = "",
                knowledge_db: Path | None = None,
@@ -271,6 +332,24 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
     knowledge_db 可注入（单测写临时库，不污染仓库 patterns.db 与成功率分母）。"""
 
     def detect(st: dict) -> dict:
+        # I27 finding-first：先产 per-window Finding；legacy Issue 只作为 plan 兼容载体。
+        _finds = _findings_for_run(run_dir, st)
+        if _finds:
+            top = _finds[0]
+            issue = _issue_from_finding(top)
+            return {
+                "findings": [{
+                    "kind": "issue", "fixture": issue["fixture"],
+                    "metric": f.metric, "magnitude": f.magnitude,
+                    "detector": issue["detector"],
+                    "window_id": f.window.window_id,
+                    "signature": issue["signature"],
+                } for f in _finds],
+                "findings_v2": [f.model_dump() for f in _finds],
+                "primary_finding": top.model_dump(),
+                "issue": issue, "route": "proceed",
+                "detection_ref": issue["evidence"]["ref"],
+            }
         # 产品默认：从运行证据包构造 Issue（不再跑夹具束的 m1_detect）。
         if True:  # I10: 只走运行证据
             _counter_issue = _issue_from_run_counters(run_dir)
@@ -362,6 +441,17 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             return {"route": "insufficient_evidence",
                     "exit_code": "insufficient_evidence",
                     "error": "Issue 既无 issue_model 也无已知 detector（I2）"}
+        # I27：diagnose 消费 finding 的精确窗口；window 进入 issue/cards。
+        finding = None
+        try:
+            _fd = st.get("primary_finding") or (st.get("findings_v2") or [None])[0]
+            if _fd:
+                from upi.core.finding import Finding
+                finding = Finding(**_fd)
+                issue.window = finding.window.window_id
+        except Exception as e:  # noqa: BLE001
+            E.atomic_write_text(run_dir / "diagnose_finding_error.txt",
+                                f"{type(e).__name__}: {e}\n")
         # 产品默认：诊断来自运行证据候选（不读夹具目录、不匹配代码文本）。
         ev_cands = []
         ev_path = None
@@ -423,10 +513,18 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             if _pname:
                 span_text = span_text.replace(_pname, "project")
             span_text = span_text.replace("\\", "/")
+            _wid = (str(getattr(c, "window_id", "") or "")
+                    or (finding.window.window_id if finding else ""))
+            _obs = (finding.observed if finding and _wid
+                    and _wid == finding.window.window_id else {}) or {}
             cards[c.root_cause] = (
                 f"mechanism={c.mechanism}; kind={c.kind}; "
                 f"score={c.score:.2f}; metric_value={getattr(c,'metric_value',0):.3f}"
                 f"{getattr(c,'metric_unit','')}; "
+                f"window={_wid or 'unknown'}; "
+                f"window_median={_obs.get('median','?')}; "
+                f"window_max={_obs.get('max','?')}; "
+                f"window_n={_obs.get('n','?')}; "
                 f"evidence_n={c.evidence_n}; "
                 f"spans={span_text}; cost={_cost_context(_bundle, c) or 'unknown'}; "
                 f"counter_lag_frames={getattr(_bundle,'meta',{}).get('counter_lag_frames','?')}; "
@@ -456,6 +554,11 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             _tuples = tuples if ev_rounds == 0 else tuples[:3]
             hs, judged = build_hypotheses_for_issue(
                 cfg, issue, _tuples, history=hist, cards=cards)
+            if finding is not None:
+                for _h in hs:
+                    _h.setdefault("finding_id", finding.finding_id)
+                    _h.setdefault("window_id", finding.window.window_id)
+                    _h.setdefault("finding_metric", finding.metric)
             archive.update(judged)
             from upi.core.attribution import route as _route
             if (_route(hs, group_ok=_group_ok) != "needs_human"

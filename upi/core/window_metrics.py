@@ -67,6 +67,17 @@ def action_indices(replay_path: Path | str) -> dict[int, str]:
     return out
 
 
+def exact_index(window_id: str) -> int | None:
+    """从 cmd-<i>-<action> 取精确 index；非法返回 None。"""
+    parts = str(window_id or "").split("-", 2)
+    if len(parts) != 3 or parts[0] != "cmd":
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
 def index_for_window(indices: dict[int, str], window: str) -> int | None:
     hits = [i for i, t in indices.items() if t == window]
     return hits[-1] if hits else None

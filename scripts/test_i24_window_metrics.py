@@ -7,8 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.window_metrics import (action_indices, index_for_window,  # noqa: E402
-                                     window_counters)
+from upi.core.window_metrics import (action_indices, exact_index,  # noqa: E402
+                                     index_for_window, window_counters)
 
 PASS, FAIL = [], []
 
@@ -35,6 +35,8 @@ replay.write_text(json.dumps({"commands": [
 idx = action_indices(replay)
 ok("动作索引跳过 wait", 1 not in idx and idx[4] == "open_shop", idx)
 ok("window 取最后出现", index_for_window(idx, "open_shop") == 4, idx)
+ok("精确 window index", exact_index("cmd-10-open_shop") == 10)
+ok("动作名不能当精确 window", exact_index("open_shop") is None)
 
 print(f"\n==== I24 window counters 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
