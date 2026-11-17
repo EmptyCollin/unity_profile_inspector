@@ -973,6 +973,9 @@ def main() -> int:
                     if w.get(_ctrl_idx)] if _ctrl_idx is not None else [])
             _abs = (unit_contract.get(unit.unit_id) or {}).get("absolute_target") or {}
             _abs_val = _abs.get("value") if isinstance(_abs, dict) else None
+            if _abs_val is None:
+                from upi.core.metric_targets import target_for
+                _abs_val = target_for(_am)
             _acc = _acc_verdict(
                 unit.unit_id, before=_ser(bmetrics), after=_ser(ametrics),
                 control_before=_ser(_cb), control_after=_ser(_ca),

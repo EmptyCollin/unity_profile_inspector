@@ -113,6 +113,17 @@ ok("按 metric 取 min_ratio",
 ok("frame_time 显著但无绝对 target",
    v3.status == "improved_partial_absolute_unassessed", v3.status)
 
+from upi.core.metric_targets import target_for  # noqa: E402
+ok("frame_time 16.667ms(ns)", target_for("frame_time") == 16_667_000.0,
+   target_for("frame_time"))
+ok("gc_alloc 64KB", target_for("gc_alloc") == 65_536.0,
+   target_for("gc_alloc"))
+ok("未注册指标 unassessed", target_for("drawcalls") is None)
+v4 = verdict("u4", before=[20_000_000, 20_000_000, 20_000_000],
+             after=[15_000_000, 15_000_000, 15_000_000],
+             metric="frame_time", absolute_target=target_for("frame_time"))
+ok("绝对预算 met -> verified", v4.status == "verified", v4.status)
+
 wrecs = [
     {"unit_id": "a", "window": "cmd-10-open_shop",
      "status": "verified", "acceptance": {"status": "verified"}},
