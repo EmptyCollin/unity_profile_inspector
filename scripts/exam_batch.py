@@ -123,6 +123,8 @@ def main() -> int:
     ap.add_argument("--group-mode", choices=["single", "components"],
                     default="single",
                     help="single=window 不相交的 unit 全放一组；components=按相交拆组")
+    ap.add_argument("--force-window", default="",
+                    help="测试钩子：把所有 unit 的 contract 窗口固定到该 cmd-i-action")
     a = ap.parse_args()
     if a.group_acceptance and a.serial:
         raise SystemExit("--group-acceptance 与 --serial 不能同时使用")
@@ -1160,7 +1162,7 @@ def main() -> int:
 
     def run_group_acceptance() -> int:
         """多组验收：window/files 相交的 unit 同组；每组独立 before/after。"""
-        nonlocal baseline_metrics, baseline_windows, baseline_runs
+        nonlocal baseline_metrics, baseline_windows, baseline_runs, _window_units
         if not units:
             print("group acceptance: no units")
             return 0
@@ -1174,10 +1176,21 @@ def main() -> int:
         if not active:
             print("group acceptance: no planned units")
             return 1
+        if a.force_window:
+            for u in active:
+                c = unit_contract.setdefault(u.unit_id, {})
+                c["window_ids"] = [a.force_window]
+                c["window"] = a.force_window
+            _window_units = {a.force_window: [u.unit_id for u in active]}
+            (run_dir / "window_units.json").write_text(
+                json.dumps(_window_units, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            print("force-window", a.force_window, "units", len(active))
         items = []
         for u in active:
-            wins = [w for w in (_finding_window.get(fid)
-                                for fid in (u.finding_ids or [])) if w]
+            wins = ([a.force_window] if a.force_window else
+                    [w for w in (_finding_window.get(fid)
+                                 for fid in (u.finding_ids or [])) if w])
             pl = plans.get(u.unit_id)
             files = list(pl.touched_assets) if pl else []
             items.append({"unit_id": u.unit_id, "window_ids": wins,
