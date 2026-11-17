@@ -21,6 +21,18 @@ def stats(series: Iterable[float]) -> dict:
             "mad": mad}
 
 
+def min_ratio_for(metric: str) -> float:
+    """不同指标的最小相对改善线；frame_time 比绘制定数更敏感。"""
+    m = str(metric or "").lower()
+    if m in ("frame_time", "cpu_frame_time", "main_thread"):
+        return 0.03
+    if m in ("gc_alloc", "gc_alloc_bytes", "alloc_bytes"):
+        return 0.10
+    if m in ("drawcalls", "draw_calls", "batches"):
+        return 0.05
+    return 0.05
+
+
 def relative(before: Iterable[float], after: Iterable[float], *,
              k: float = 3.0, min_ratio: float = 0.05) -> dict:
     b, a = stats(before), stats(after)
@@ -39,7 +51,7 @@ def relative(before: Iterable[float], after: Iterable[float], *,
         status = "not_significant"
     return {"status": status, "before": b, "after": a,
             "delta": delta, "threshold": threshold, "k": k,
-            "noise": robust}
+            "noise": robust, "min_ratio": min_ratio}
 
 
 def absolute(observed: float | None, target: float | None, *,
@@ -147,8 +159,11 @@ def verdict(unit_id: str, *, before: Iterable[float], after: Iterable[float],
             control_after: Iterable[float] = (),
             absolute_target: float | None = None,
             higher_is_better: bool = False,
-            semantic_risk: str = "") -> Verdict:
-    rel = relative(before, after)
+            semantic_risk: str = "",
+            metric: str = "",
+            min_ratio: float | None = None) -> Verdict:
+    ratio = (min_ratio if min_ratio is not None else min_ratio_for(metric))
+    rel = relative(before, after, min_ratio=ratio)
     obs = (rel.get("after") or {}).get("median")
     abs_ = absolute(obs, absolute_target, higher_is_better=higher_is_better)
     env = (environment(control_before, control_after)

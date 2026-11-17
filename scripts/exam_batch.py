@@ -438,6 +438,18 @@ def main() -> int:
                  or u.mechanism.split(":", 1)[-1] in needles]
     if a.max_units and a.max_units < len(units):
         units = units[:a.max_units]
+    # 同窗口多 unit 必须显式可见：它们共享 before/after，不能当独立验收。
+    _window_units: dict[str, list[str]] = {}
+    for _u in units:
+        _ws = {_finding_window.get(_fid)
+               for _fid in (_u.finding_ids or [])}
+        _ws |= set((unit_contract.get(_u.unit_id) or {}).get("window_ids") or [])
+        for _w in _ws:
+            if _w:
+                _window_units.setdefault(str(_w), []).append(_u.unit_id)
+    (run_dir / "window_units.json").write_text(
+        json.dumps(_window_units, ensure_ascii=False, indent=2),
+        encoding="utf-8")
     if _prof.name != "screen":
         _mp = run_dir / "merged_candidates.json"
         _cands = []
@@ -848,6 +860,9 @@ def main() -> int:
                 "patch_class": patch_class,
                 "sites_remaining": sites,
                 "acceptance": acceptance_doc,
+                "same_window_units": [
+                    x for x in _window_units.get(window_used, [])
+                    if x != unit.unit_id],
                 "status": status,
             })
             return status
@@ -947,8 +962,13 @@ def main() -> int:
             _acc = _acc_verdict(
                 unit.unit_id, before=_ser(bmetrics), after=_ser(ametrics),
                 control_before=_ser(_cb), control_after=_ser(_ca),
-                absolute_target=_abs_val, semantic_risk=semantic_risk)
+                absolute_target=_abs_val, semantic_risk=semantic_risk,
+                metric=_am)
             acceptance_doc = _acc.model_dump()
+            _same = [x for x in _window_units.get(window_used, [])
+                     if x != unit.unit_id]
+            if _same:
+                acceptance_doc["same_window_units"] = _same
             print("acceptance", unit.unit_id, acceptance_doc.get("status"),
                   acceptance_doc.get("relative", {}).get("status"))
         except Exception as e:  # noqa: BLE001
@@ -1211,7 +1231,9 @@ def main() -> int:
                             "result": res.__dict__})
             applied_files |= group_files
         (run_dir / "group_acceptance.json").write_text(json.dumps(
-            {"mode": a.group_mode, "groups": results},
+            {"mode": a.group_mode, "groups": results,
+             "same_window_units": {w: ids for w, ids
+                                   in _window_units.items() if len(ids) > 1}},
             ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),

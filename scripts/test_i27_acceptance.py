@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.acceptance import (absolute, decide, environment,  # noqa: E402
-                                 group_by_overlap, relative, status_compare,
-                                 verdict)
+                                 group_by_overlap, min_ratio_for, relative,
+                                 status_compare, verdict)
 
 PASS, FAIL = [], []
 
@@ -100,6 +100,17 @@ hs = [
 dh = dedupe_hypotheses(hs)
 ok("hypothesis 去重", len(dh) == 2, dh)
 ok("hypothesis 留最高置信", dh[0]["confidence"] == 0.8, dh)
+
+ok("frame_time 3%", min_ratio_for("frame_time") == 0.03)
+ok("gc_alloc 10%", min_ratio_for("gc_alloc") == 0.10)
+ok("默认 5%", min_ratio_for("other") == 0.05)
+v3 = verdict("u3", before=[100, 100, 100], after=[96, 96, 96],
+             metric="frame_time")
+ok("按 metric 取 min_ratio",
+   v3.relative.get("min_ratio") == 0.03
+   and v3.relative["status"] == "significant", v3.relative)
+ok("frame_time 显著但无绝对 target",
+   v3.status == "improved_partial_absolute_unassessed", v3.status)
 
 print(f"\n==== I27 acceptance: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:
