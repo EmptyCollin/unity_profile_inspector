@@ -1079,40 +1079,73 @@ def main() -> int:
         return combined
 
     def run_group_acceptance() -> int:
-        """单组验收：组前 3 次 before → 全部补丁 → 组后 3 次 after。"""
+        """多组验收：window/files 相交的 unit 同组；每组独立 before/after。"""
         nonlocal baseline_metrics, baseline_windows, baseline_runs
         if not units:
             print("group acceptance: no units")
             return 0
-        bm: list[dict] = []
-        bw: list[dict] = []
-        for i in range(3):
-            ok, _ = capture_with_recovery(
-                f"group-before-{i + 1}", two_pass=False,
-                light=True, target_windows=True)
-            if not ok:
-                print("group acceptance: before capture failed", i + 1)
-                return 1
-            bm.append(counters_since(0, last_cap["id"]))
-            bw.append(window_counters(last_cap["id"]))
-        baseline_metrics, baseline_windows, baseline_runs = bm, bw, bm
-        (run_dir / "group_before.json").write_text(json.dumps(
-            {"before_n": len(bm), "captures": bm},
-            ensure_ascii=False, indent=2), encoding="utf-8")
-        print("group acceptance: units", len(units), "before", len(bm))
-        res = run_batch(units, plan=plan, apply=apply,
-                        compile_fn=compile_fn, capture=capture_fn,
-                        verify=verify, rollback=rollback, round_no=1)
-        print("group acceptance result", res)
-        (run_dir / "group_acceptance.json").write_text(json.dumps({
-            "group": [u.unit_id for u in units],
-            "before_n": len(bm),
-            "result": res.__dict__,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 先 plan 全部 unit，才能按 patch files 分组；run_batch 后续复用缓存。
+        patches: dict = {}
+        for u in units:
+            p = plan(u)
+            if p is not None:
+                patches[u.unit_id] = p
+        active = [u for u in units if u.unit_id in patches]
+        if not active:
+            print("group acceptance: no planned units")
+            return 1
+        items = []
+        for u in active:
+            wins = [w for w in (_finding_window.get(fid)
+                                for fid in (u.finding_ids or [])) if w]
+            pl = plans.get(u.unit_id)
+            files = list(pl.touched_assets) if pl else []
+            items.append({"unit_id": u.unit_id, "window_ids": wins,
+                          "files": files})
+        from upi.core.acceptance import group_by_overlap
+        raw_groups = group_by_overlap(items)
+        groups = []
+        for g in raw_groups:
+            ids = {x["unit_id"] for x in g}
+            groups.append([u for u in active if u.unit_id in ids])
+        results = []
+        for gi, group_units in enumerate(groups, 1):
+            bm: list[dict] = []
+            bw: list[dict] = []
+            for i in range(3):
+                ok, _ = capture_with_recovery(
+                    f"group{gi}-before-{i + 1}", two_pass=False,
+                    light=True, target_windows=True)
+                if not ok:
+                    print("group acceptance: before capture failed", gi, i + 1)
+                    return 1
+                bm.append(counters_since(0, last_cap["id"]))
+                bw.append(window_counters(last_cap["id"]))
+            baseline_metrics, baseline_windows, baseline_runs = bm, bw, bm
+            (run_dir / f"group_before_{gi}.json").write_text(json.dumps(
+                {"group": gi, "before_n": len(bm),
+                 "units": [u.unit_id for u in group_units]},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            print("group acceptance: group", gi, "units",
+                  len(group_units), "before", len(bm))
+            res = run_batch(
+                group_units,
+                plan=lambda u: patches.get(u.unit_id) or plan(u),
+                apply=apply, compile_fn=compile_fn, capture=capture_fn,
+                verify=verify, rollback=rollback, round_no=1)
+            print("group acceptance result", gi, res)
+            results.append({"group": gi,
+                            "units": [u.unit_id for u in group_units],
+                            "before_n": len(bm),
+                            "result": res.__dict__})
+        (run_dir / "group_acceptance.json").write_text(json.dumps(
+            {"groups": results}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
             encoding="utf-8")
-        run.stop_reason = f"group:verified={len(res.verified)}"
+        verified = sum(len(r["result"].get("verified") or []) for r in results)
+        run.stop_reason = f"groups={len(results)}:verified={verified}"
         save_run(run)
         return 0
 
