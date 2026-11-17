@@ -1195,9 +1195,9 @@ def main() -> int:
         # 先 plan 全部 unit，才能按 patch files 分组；run_batch 后续复用缓存。
         patches: dict = {}
         for u in units:
-            p = plan(u)
-            if p is not None:
-                patches[u.unit_id] = p
+            _planned = plan(u)
+            if _planned is not None:
+                patches[u.unit_id] = _planned
         active = [u for u in units if u.unit_id in patches]
         if not active:
             print("group acceptance: no planned units")
@@ -1250,9 +1250,9 @@ def main() -> int:
             # components 模式下，前面组的 kept patch 会改代码；本组重新 plan。
             if a.group_mode == "components" and gi > 1:
                 for u in group_units:
-                    p = plan(u)
-                    if p is not None:
-                        patches[u.unit_id] = p
+                    _planned = plan(u)
+                    if _planned is not None:
+                        patches[u.unit_id] = _planned
             group_files = set()
             for u in group_units:
                 pl = plans.get(u.unit_id)
@@ -1341,6 +1341,24 @@ def main() -> int:
                     res.failed.update(_rr.get("failed") or {})
                     if _rr.get("compile_ok") is not None:
                         res.compile_ok = bool(_rr["compile_ok"])
+                    if _rr.get("fallback"):
+                        import subprocess as _sp
+                        try:
+                            _r2 = _sp.run(
+                                ["git", "-C", str(p), "reset", "--hard",
+                                 _group_base],
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
+                            (run_dir / "window_reset_error.log").write_text(
+                                f"group_base={_group_base}\n"
+                                f"returncode={_r2.returncode}\n"
+                                f"stdout={(_r2.stdout or '')[-1000:]}\n"
+                                f"stderr={(_r2.stderr or '')[-2000:]}\n",
+                                encoding="utf-8")
+                            print("window reset detail", _r2.returncode,
+                                  (_r2.stderr or "")[:160])
+                        except Exception as _re:  # noqa: BLE001
+                            print("window reset detail error", _re)
                     for uid in _bad:
                         if uid in res.verified:
                             res.verified.remove(uid)
