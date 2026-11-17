@@ -127,6 +127,10 @@ def main() -> int:
                     help="single=window 不相交的 unit 全放一组；components=按相交拆组")
     ap.add_argument("--force-window", default="",
                     help="测试钩子：把所有 unit 的 contract 窗口固定到该 cmd-i-action")
+    ap.add_argument("--force-window-map", default="",
+                    help="测试钩子：unit_id=cmd-i-action,... 逐 unit 固定窗口")
+    ap.add_argument("--force-verified-unit", default="",
+                    help="测试钩子：强制该 unit 的 acceptance/status 为 verified")
     ap.add_argument("--require-deep", action="store_true",
                     help="Pass2 deep .data 失败或缺窗口时直接失败，不进入验收")
     a = ap.parse_args()
@@ -857,6 +861,11 @@ def main() -> int:
                   and acceptance_doc.get("status") not in
                   (None, "unassessed", "insufficient_evidence")):
                 status = str(acceptance_doc["status"])
+            if (a.force_verified_unit == unit.unit_id
+                    and gate == "measured"):
+                status = "verified"
+                acceptance_doc["status"] = "verified"
+                acceptance_doc["forced"] = True
             cf_records.append({
                 "unit_id": unit.unit_id,
                 "target": target,
@@ -1193,19 +1202,33 @@ def main() -> int:
         if not active:
             print("group acceptance: no planned units")
             return 1
-        if a.force_window:
+        _force_map: dict[str, str] = {}
+        for _part in (a.force_window_map or "").split(","):
+            if "=" in _part:
+                _uid, _w = _part.split("=", 1)
+                _force_map[_uid.strip()] = _w.strip()
+        if a.force_window or _force_map:
+            _buckets: dict[str, list[str]] = {}
             for u in active:
-                c = unit_contract.setdefault(u.unit_id, {})
-                c["window_ids"] = [a.force_window]
-                c["window"] = a.force_window
-            _window_units = {a.force_window: [u.unit_id for u in active]}
+                _w = _force_map.get(u.unit_id) or a.force_window
+                if not _w:
+                    _w = next((w for w in (_finding_window.get(fid)
+                                           for fid in (u.finding_ids or []))
+                               if w), "")
+                if _w:
+                    c = unit_contract.setdefault(u.unit_id, {})
+                    c["window_ids"] = [_w]
+                    c["window"] = _w
+                    _buckets.setdefault(_w, []).append(u.unit_id)
+            _window_units = _buckets
             (run_dir / "window_units.json").write_text(
                 json.dumps(_window_units, ensure_ascii=False, indent=2),
                 encoding="utf-8")
-            print("force-window", a.force_window, "units", len(active))
+            print("force-window", _window_units)
         items = []
         for u in active:
-            wins = ([a.force_window] if a.force_window else
+            _forced = _force_map.get(u.unit_id) or a.force_window
+            wins = ([_forced] if _forced else
                     [w for w in (_finding_window.get(fid)
                                  for fid in (u.finding_ids or [])) if w])
             pl = plans.get(u.unit_id)
@@ -1269,7 +1292,11 @@ def main() -> int:
             print("group acceptance: group", gi, "units",
                   len(group_units), "before", len(bm))
             _cf0 = len(cf_records)
-            _group_base = X._git_head(p)
+            _group_base = X._git_head(p) or next(
+                (str(v) for v in bases.values() if v), "")
+            if not _group_base:
+                print("group acceptance: empty group_base; "
+                      "window replay will fall back")
             res = run_batch(
                 group_units,
                 plan=lambda u: patches.get(u.unit_id) or plan(u),
