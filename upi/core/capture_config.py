@@ -21,6 +21,7 @@ DEFAULTS: dict[str, int] = {
     "board_frames": 4,
     "board_budget_ms": 5000,
     "probe_sample_window": 300,
+    "profile_store_gb": 20,
 }
 
 LIMITS: dict[str, tuple[int, int]] = {
@@ -31,6 +32,7 @@ LIMITS: dict[str, tuple[int, int]] = {
     "board_frames": (1, 8),
     "board_budget_ms": (500, 20000),
     "probe_sample_window": (30, 3600),
+    "profile_store_gb": (1, 500),
 }
 
 

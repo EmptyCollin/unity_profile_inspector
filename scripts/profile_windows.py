@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import capability_run as C  # noqa: E402
 import exam_multi as M  # noqa: E402
+from upi.core import capture_config as CC  # noqa: E402
+from upi.core.retention import cleanup_profiles  # noqa: E402
 
 
 def main() -> int:
@@ -25,6 +27,8 @@ def main() -> int:
     run = ROOT / "runs" / a.run_id
     prof_dir = run / "profiles"
     prof_dir.mkdir(parents=True, exist_ok=True)
+    gb = int(CC.load().get("profile_store_gb") or 20)
+    cleanup_profiles(ROOT / "runs", days=0, max_bytes=gb * 1024 ** 3)
     M.ensure_ready(project)
     C._eval(project, ("UnityEngine.Profiling.Profiler.maxUsedMemory=256*1024*1024;"
                       "UnityEngine.Profiling.Profiler.enabled=true;"

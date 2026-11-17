@@ -581,11 +581,12 @@ _INDEX_HTML = r"""<!doctype html>
             预算ms <input id="capBudget" type="number" min="500" max="20000" style="width:84px">
             板子帧数 <input id="capBoardFrames" type="number" min="1" max="8" style="width:66px">
             采样窗口 <input id="capSampleWindow" type="number" min="30" max="3600" style="width:76px">
+            profile 上限GB <input id="capProfileStoreGB" type="number" min="1" max="500" style="width:76px">
             <button class="pbtn" id="capSave">保存</button>
             <span id="capMsg" class="small"></span>
           </div>
           <div style="margin-top:12px">
-            <button class="pbtn" id="cleanupProfilesBtn">清理 3 天前 profile</button>
+            <button class="pbtn" id="cleanupProfilesBtn">按容量清理 profile</button>
             <span id="cleanupMsg" class="small"></span>
           </div>
           <div class="small" style="margin-top:6px">这些值与 I8 Lab 共用 config/i8_lab.json；下一次取证/采样生效。</div>
@@ -765,6 +766,7 @@ function renderSettings(s){
     $("capBudget").value = cc.evidence_budget_ms;
     $("capBoardFrames").value = cc.board_frames;
     $("capSampleWindow").value = cc.probe_sample_window;
+    $("capProfileStoreGB").value = cc.profile_store_gb;
   }
   const pats = (s.learning || {}).patterns || [];
   $("patternBody").innerHTML = pats.length ? pats.map(p =>
@@ -793,6 +795,7 @@ async function saveCaptureCfg(){
       evidence_budget_ms: +$("capBudget").value,
       board_frames: +$("capBoardFrames").value,
       probe_sample_window: +$("capSampleWindow").value,
+      profile_store_gb: +$("capProfileStoreGB").value,
     };
     const r = await post("/api/capture/config", body);
     $("capMsg").textContent = `已保存（线程 ${r.config.evidence_threads} / 帧 ${r.config.evidence_frames} / 预算 ${r.config.evidence_budget_ms}ms）`;
@@ -807,9 +810,9 @@ document.addEventListener("click", (ev) => {
 });
 async function cleanupProfiles(){
   try{
-    const r = await post("/api/maintenance/cleanup", {days:3});
+    const r = await post("/api/maintenance/cleanup", {days:0});
     const el = $("cleanupMsg");
-    if(el) el.textContent = `已清理 ${r.removed || 0} 个，释放 ${Math.round((r.bytes_freed||0)/1048576)}MB`;
+    if(el) el.textContent = `已清理 ${r.removed || 0} 个，释放 ${Math.round((r.bytes_freed||0)/1048576)}MB；上限 ${r.profile_store_gb || "?"}GB`;
     await refresh();
   }catch(e){
     const el = $("cleanupMsg");
@@ -1608,10 +1611,14 @@ class _Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/maintenance/cleanup":
             try:
+                from upi.core import capture_config as CC
                 from upi.core.retention import cleanup_profiles
-                days = int(body.get("days") or 3)
-                stats = cleanup_profiles(E.RUNS, days)
-                self._send_json(200, {"ok": True, **stats})
+                days = int(body.get("days") or 0)
+                gb = int(CC.load().get("profile_store_gb") or 20)
+                stats = cleanup_profiles(E.RUNS, days=days,
+                                         max_bytes=gb * 1024 ** 3)
+                self._send_json(200, {"ok": True,
+                                      "profile_store_gb": gb, **stats})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"ok": False,
                                       "error": f"{type(e).__name__}: {e}"})
@@ -1898,8 +1905,10 @@ class WebUI:
 
     def start(self) -> "WebUI":
         try:
+            from upi.core import capture_config as CC
             from upi.core.retention import cleanup_profiles
-            cleanup_profiles(E.RUNS, 3)
+            gb = int(CC.load().get("profile_store_gb") or 20)
+            cleanup_profiles(E.RUNS, days=0, max_bytes=gb * 1024 ** 3)
         except Exception:  # noqa: BLE001
             pass
         self.httpd = ThreadingHTTPServer((self.host, self.port), _Handler)
