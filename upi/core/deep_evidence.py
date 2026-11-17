@@ -116,17 +116,18 @@ def rank_candidates(cands: Iterable, summary: dict) -> list:
 
 
 def candidates_from_summary(summary: dict, project_root, *, window_id: str,
-                            limit: int = 8) -> list[dict]:
+                            limit: int = 8, index=None) -> list[dict]:
     """把 deep summary 的 symbol 映射到源码锚点，生成新的 CandidateV2 dict。
 
     没有源码锚点的 symbol 不生成候选（禁止无位置结论）。
+    index 可传入已构建的 StaticIndex，避免每个窗口重复扫工程。
     """
     from upi.core.candidates_v2 import CandidateV2
     from upi.core.evidence_v2 import SourceSpan
     from upi.core.static_index import StaticIndex
 
     try:
-        idx = StaticIndex(project_root)
+        idx = index if index is not None else StaticIndex(project_root)
     except Exception:  # noqa: BLE001
         return []
     out: list[dict] = []

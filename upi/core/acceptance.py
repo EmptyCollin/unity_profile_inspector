@@ -83,6 +83,38 @@ def decide(*, rel: dict, abs_: dict, env: dict,
     return "improved_partial_absolute_unmet"
 
 
+def group_by_overlap(items: list[dict]) -> list[list[dict]]:
+    """按 window 相交或补丁文件相交分组；不相交才可独立验收。
+
+    每个 item 至少读 window_ids / files；缺省视为空。
+    """
+    n = len(items)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    wins = [set(str(x) for x in (it.get("window_ids") or []))
+            for it in items]
+    files = [set(str(x) for x in (it.get("files") or [])) for it in items]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if (wins[i] & wins[j]) or (files[i] & files[j]):
+                union(i, j)
+    groups: dict[int, list[dict]] = {}
+    for i, it in enumerate(items):
+        groups.setdefault(find(i), []).append(it)
+    return [groups[k] for k in sorted(groups)]
+
+
 def verdict(unit_id: str, *, before: Iterable[float], after: Iterable[float],
             control_before: Iterable[float] = (),
             control_after: Iterable[float] = (),

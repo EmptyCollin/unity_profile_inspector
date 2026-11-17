@@ -5,7 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from upi.core.acceptance import absolute, decide, environment, relative, verdict  # noqa: E402
+from upi.core.acceptance import (absolute, decide, environment,  # noqa: E402
+                                 group_by_overlap, relative, verdict)
 
 PASS, FAIL = [], []
 
@@ -55,6 +56,23 @@ v2 = verdict("u2", before=[10, 10, 10], after=[5, 5, 5],
              control_before=[10, 10, 10], control_after=[14, 14, 14],
              absolute_target=6)
 ok("verdict environment_drift", v2.status == "environment_drift", v2)
+
+items = [
+    {"id": "a", "window_ids": ["cmd-1-x"], "files": ["A.cs"]},
+    {"id": "b", "window_ids": ["cmd-1-x"], "files": ["B.cs"]},
+    {"id": "c", "window_ids": ["cmd-2-y"], "files": ["B.cs"]},
+    {"id": "d", "window_ids": ["cmd-3-z"], "files": ["C.cs"]},
+]
+groups = group_by_overlap(items)
+ok("window 相交合并", any({x["id"] for x in g} == {"a", "b", "c"}
+                         for g in groups), groups)
+ok("文件相交合并", any({"b", "c"} <= {x["id"] for x in g} for g in groups), groups)
+ok("不相交独立", any({x["id"] for x in g} == {"d"} for g in groups), groups)
+no_overlap = group_by_overlap([
+    {"id": "a", "window_ids": ["cmd-1-x"], "files": ["A.cs"]},
+    {"id": "b", "window_ids": ["cmd-2-y"], "files": ["B.cs"]},
+])
+ok("无交集不合并", len(no_overlap) == 2, no_overlap)
 
 print(f"\n==== I27 acceptance: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:

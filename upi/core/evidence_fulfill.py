@@ -126,6 +126,12 @@ def _run_deep(request: EvidenceRequest, project: Path | str,
     meta = ROOT / "runs" / run_id / "profiles" / "profile_windows.json"
     refs = []
     rows = {}
+    _idx = None
+    try:
+        from upi.core.static_index import StaticIndex
+        _idx = StaticIndex(project)
+    except Exception:  # noqa: BLE001
+        _idx = None
     if meta.is_file():
         try:
             docs = json.loads(meta.read_text(encoding="utf-8"))
@@ -155,7 +161,7 @@ def _run_deep(request: EvidenceRequest, project: Path | str,
                     if doc:
                         d["deep"] = summarize(doc)
                         d["deep"]["candidates"] = candidates_from_summary(
-                            d["deep"], project, window_id=wid)
+                            d["deep"], project, window_id=wid, index=_idx)
                 except Exception:  # noqa: BLE001
                     pass
                 rows[wid] = d
