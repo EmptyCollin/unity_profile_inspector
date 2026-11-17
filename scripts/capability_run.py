@@ -117,6 +117,43 @@ def ensure_play(project: Path) -> dict:
     raise RuntimeError("进入 Play Mode 超时")
 
 
+PLAY_WARMUP_S = 5.0
+
+
+def stop_play(project: Path, timeout_s: float = 60.0) -> dict:
+    """退出 Play 并等待 playMode 真正离开 playing。"""
+    unity("editor.playmode stop", "--project-path", str(project))
+    deadline = time.time() + timeout_s
+    st: dict = {}
+    while time.time() < deadline:
+        st = _status(project) or {}
+        if str(st.get("playMode") or "") != "playing":
+            return st
+        time.sleep(0.5)
+    raise RuntimeError("退出 Play Mode 超时")
+
+
+def fresh_play(project: Path, warmup_s: float = PLAY_WARMUP_S) -> dict:
+    """硬规则：每次 replay 前 stop → start，并固定 warmup。
+
+    当前 Editor 可能已经在 Play（上一轮复用），这里强制进出一次，
+    避免跨 replay 的 Play session 复用；warmup 让第一枪不再采到冷启动帧。
+    """
+    unity("editor focus", "--project-path", str(project))
+    stop_play(project)
+    unity("editor.playmode start", "--project-path", str(project))
+    deadline = time.time() + 120
+    st: dict = {}
+    while time.time() < deadline:
+        st = _status(project) or {}
+        if str(st.get("playMode") or "") == "playing":
+            time.sleep(max(0.0, float(warmup_s)))
+            return _status(project) or st
+        time.sleep(0.5)
+    raise RuntimeError("进入 Play Mode 超时")
+
+
+
 def _estimate_counter_lag(doc: dict) -> int:
     """counters 相对 functions 的帧延迟；用同轮序列互相关估计。"""
     rows = doc.get("counters") or []
@@ -931,17 +968,42 @@ def main() -> int:
     project_id = a.project_id or project.name
     replay_path = Path(a.replay)
 
-    ensure_play(project)
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    st_before = fresh_play(project)
     run_id = a.run_id or new_run_id(project_id)
-    cands = ((run_full_capture(project, run_id, a.limit, replay_path, "shallow"))
-             if a.full_shallow else
-             (run_full_capture(project, run_id, a.limit, replay_path, "deep"))
-             if a.full_deep else
-             (run_two_pass_capture(project, run_id, a.limit, replay_path))
-             if a.two_pass else
-             run_and_capture(project, run_id, a.limit, replay_path,
-                             enable_deep=not a.light, fast=a.fast,
-                             target_windows=a.target_windows))
+    try:
+        cands = ((run_full_capture(project, run_id, a.limit, replay_path, "shallow"))
+                 if a.full_shallow else
+                 (run_full_capture(project, run_id, a.limit, replay_path, "deep"))
+                 if a.full_deep else
+                 (run_two_pass_capture(project, run_id, a.limit, replay_path))
+                 if a.two_pass else
+                 run_and_capture(project, run_id, a.limit, replay_path,
+                                 enable_deep=not a.light, fast=a.fast,
+                                 target_windows=a.target_windows))
+    finally:
+        try:
+            _eval(project, PROFILER_OFF, timeout=30)
+        except Exception:  # noqa: BLE001
+            pass
+        stop_play(project)
+    ended_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        (ROOT / "runs" / run_id).mkdir(parents=True, exist_ok=True)
+        (ROOT / "runs" / run_id / "capture_env.json").write_text(
+            json.dumps({
+                "reset_mode": "per_replay_play_cycle",
+                "warmup_s": PLAY_WARMUP_S,
+                "focus": True,
+                "run_in_background": st_before.get("runInBackground"),
+                "player_loop_ticking": st_before.get("playerLoopTicking"),
+                "code_load_count": st_before.get("codeLoadCount"),
+                "started_at": started_at,
+                "ended_at": ended_at,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
 
     findings: list[ToolFinding] = []
     for i, c in enumerate(cands):

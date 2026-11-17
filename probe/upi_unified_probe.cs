@@ -251,7 +251,7 @@ public static class UpiUnifiedProbe
                 {
                     int a = r[0], b = r[1];
                     if (b < a) continue;
-                    CaptureFunctions(Math.Max(a, b - 3), b);
+                    CaptureWindowFrames(a, b);
                 }
             }
             else
@@ -326,6 +326,23 @@ public static class UpiUnifiedProbe
         }
         sb.Append("}}");
         return sb.ToString();
+    }
+
+    static void CaptureWindowFrames(int a, int b)
+    {
+        // begin_window 可能晚于命令实际执行一帧；向前多取 8 帧作为 pre-roll。
+        // 短窗口全取，长窗口取首/中/尾，避免漏掉 open_shop 这类瞬时动作。
+        int a0 = Math.Max(_startFrame, a - 8);
+        if (b - a0 <= 30)
+        {
+            CaptureFunctions(a0, b);
+            return;
+        }
+        CaptureFunctions(a0, Math.Min(b, a0 + 1));
+        int mid = (a + b) / 2;
+        if (mid > a0 + 1 && mid < b - 3)
+            CaptureFunctions(mid - 1, mid + 1);
+        CaptureFunctions(Math.Max(a0, b - 3), b);
     }
 
     static void CaptureFunctions(int firstArg, int lastArg)

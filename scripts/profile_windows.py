@@ -60,6 +60,7 @@ def main() -> int:
         json.dumps(windows, ensure_ascii=False, indent=2), encoding="utf-8")
     C._eval(project, "UnityEditorInternal.ProfilerDriver.enabled=false;"
                      "UnityEngine.Profiling.Profiler.enabled=false;return 1;", timeout=30)
+    C.stop_play(project)
     print(json.dumps(windows, ensure_ascii=False, indent=2))
     return 0
 
