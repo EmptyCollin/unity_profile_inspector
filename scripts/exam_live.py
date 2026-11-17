@@ -80,6 +80,7 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
             if isinstance(v, dict):
                 refs.extend([str(x) for x in (v.get("refs")
                                               or v.get("evidence_refs") or [])])
+        _win = str(h.get("window_id") or "")
         out.append(ToolFinding(
             finding_id=f"llm-{run_id}-{i}",
             mechanism=str(h.get("root_cause", "")).split(":")[0],
@@ -87,8 +88,10 @@ def findings_from_hypotheses(run_id: str, hs: list[dict], archive: dict) -> list
             anchors=anchors, evidence_refs=sorted(set(refs)),
             attribution=AttributionInfo(confidence=float(h.get("confidence", 0)),
                                         factors={"root_cause": h.get("root_cause"),
-                                                 "window_id": h.get("window_id", "")}),
-            state="candidate"))
+                                                 "window_id": _win}),
+            state="candidate",
+            window_id=_win, window_ids=[_win] if _win else [],
+            magnitude=float(h.get("magnitude") or 0.0)))
     return out
 
 

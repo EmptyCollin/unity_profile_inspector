@@ -19,6 +19,7 @@ class RepairContract:
     guards: list[GuardBudget] = field(default_factory=list)
     mb_per_ms: float = 8.0
     min_net: float = 0.0
+    window_ids: list[str] = field(default_factory=list)  # I27：精确窗口，必填
 
 
 @dataclass

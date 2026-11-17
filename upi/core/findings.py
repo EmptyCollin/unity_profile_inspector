@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -50,6 +50,11 @@ class ToolFinding(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
     attribution: AttributionInfo = Field(default_factory=AttributionInfo)
     state: Literal["candidate", "confirmed", "needs_human", "false_positive"] = "candidate"
+    # I27：finding-first；window_id 形如 cmd-10-open_shop
+    window_id: str = ""
+    window_ids: list[str] = Field(default_factory=list)
+    magnitude: float = 0.0
+    threshold: float = 0.0
 
     @field_validator("anchors")
     @classmethod
@@ -57,6 +62,14 @@ class ToolFinding(BaseModel):
         if not v:
             raise ValueError("ToolFinding 至少需要一个 anchor（禁止无位置结论）")
         return v
+
+    @model_validator(mode="after")
+    def _sync_window_ids(self):
+        if self.window_id and not self.window_ids:
+            self.window_ids = [self.window_id]
+        elif self.window_ids and not self.window_id:
+            self.window_id = self.window_ids[0]
+        return self
 
 
 class RepairRecord(BaseModel):

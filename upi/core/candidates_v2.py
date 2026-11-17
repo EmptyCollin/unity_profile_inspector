@@ -11,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from upi.core.evidence_graph import EvidenceGraph
 from upi.core.evidence_v2 import EvidenceBundleV2, SourceSpan
@@ -33,12 +33,23 @@ class CandidateV2(BaseModel):
     total_ms: float = 0.0
     self_share: float = -1.0
     peak_frame: int = 0
+    # I27：精确窗口身份；window_id 形如 cmd-10-open_shop
+    window_id: str = ""
+    window_ids: list[str] = Field(default_factory=list)
     score_interval_low: float = 0.0
     score_interval_high: float = 0.0
     interval_basis: str = ""
     evidence_n: int = 0
     prior: float = 0.0
     source_kind: str = "evidence"
+
+    @model_validator(mode="after")
+    def _sync_window_ids(self):
+        if self.window_id and not self.window_ids:
+            self.window_ids = [self.window_id]
+        elif self.window_ids and not self.window_id:
+            self.window_id = self.window_ids[0]
+        return self
 
 
 def _short_symbol(symbol: str) -> str:

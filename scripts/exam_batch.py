@@ -305,6 +305,10 @@ def main() -> int:
         _root = str((_f.attribution.factors or {}).get("root_cause") or "")
         if _win_map.get(_root):
             _f.attribution.factors["window_id"] = _win_map[_root]
+            if not _f.window_id:
+                _f.window_id = _win_map[_root]
+            if _f.window_id and _f.window_id not in _f.window_ids:
+                _f.window_ids = [_f.window_id]
     try:
         from upi.core.asset_opportunity import scan as _scan_opps
         _opps = [o.as_dict() for o in _scan_opps(p)]

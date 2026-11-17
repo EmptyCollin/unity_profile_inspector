@@ -1019,6 +1019,10 @@ def main() -> int:
             evidence_refs=[str(x) for x in (c.get("evidence_ids") or [])],
             attribution=AttributionInfo(confidence=0.0, factors={}),
             state="candidate",
+            window_id=str(c.get("window_id") or ""),
+            window_ids=[str(x) for x in (c.get("window_ids") or [])
+                        if x],
+            magnitude=float(c.get("metric_value") or 0.0),
         ))
     from upi.core.asset_opportunity import scan as _scan_opportunities
     opportunities = _scan_opportunities(project)

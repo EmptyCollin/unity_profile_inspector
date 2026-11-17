@@ -15,7 +15,9 @@ from upi.core.mode_caps import caps
 
 RequestKind = Literal["source", "callstack", "live_window", "replay_window",
                       "code_search", "ast_callgraph", "asset_inventory",
-                      "reference_graph", "settings"]
+                      "reference_graph", "settings",
+                      "window_series", "deep_window", "paired_repeat",
+                      "control_window"]
 _STATIC_KINDS = {"source", "code_search", "ast_callgraph", "asset_inventory",
                  "reference_graph", "settings"}
 
@@ -31,6 +33,13 @@ class EvidenceRequest(BaseModel):
     expected: str = ""
     factor: str = ""          # I18：缺哪个归因因子
     producer: str = ""        # I18：希望谁产（detect/verify/knowledge）
+    # I27：finding-first 回边
+    request_id: str = ""
+    finding_id: str = ""
+    window_ids: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+    budget: dict = Field(default_factory=dict)
+    request_hash: str = ""
 
 
 class EvidenceDelta(BaseModel):
@@ -45,6 +54,12 @@ class EvidenceDelta(BaseModel):
     can_support: list[str] = Field(default_factory=list)
     cannot_support: list[str] = Field(default_factory=list)
     limits: str = ""
+    # I27：补证回边的可追溯引用
+    request_id: str = ""
+    refs: list[str] = Field(default_factory=list)
+    data_tier: str = ""
+    rows: dict = Field(default_factory=dict)
+    summary: str = ""
 
 
 def provider_kinds(mode: str) -> set[str]:
@@ -54,6 +69,8 @@ def provider_kinds(mode: str) -> set[str]:
         kinds.add("live_window")
     if c.allow_replay:
         kinds.add("replay_window")
+        kinds.update({"window_series", "deep_window", "paired_repeat",
+                      "control_window"})
     return kinds
 
 
