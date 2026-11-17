@@ -585,9 +585,84 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                       [c.__dict__ for c in _contribs]},
                      what="contribution_group", strict=False)
         _group_ok = bool(_gd.get("eligible"))
+        use_loop = bool(finding is not None and st.get("use_evidence_loop"))
+        if use_loop:
+            from upi.core.attribution import route as _route
+            from upi.core.evidence_fulfill import fulfill as _fulfill
+            from upi.core.evidence_loop import run_evidence_loop
+            from upi.core.evidence_request import EvidenceDelta, EvidenceRequest
+            _hist = hist
+
+            def _annotate(_hs):
+                for _h in _hs:
+                    _w = _cand_window.get(str(_h.get("root_cause") or "")) or ""
+                    if _w:
+                        _h.setdefault("window_id", _w)
+                    _h.setdefault("finding_id", finding.finding_id)
+                    _h.setdefault("finding_metric", finding.metric)
+
+            def _judge(_f, _deltas):
+                nonlocal _hist
+                for _d in _deltas:
+                    _hist += (f"\n补证({_d.kind}) refs={len(_d.refs)} "
+                              f"{(str(_d.summary or _d.text))[:400]}")
+                _tuples = tuples if not _deltas else tuples[:3]
+                _hs, _judged = build_hypotheses_for_issue(
+                    cfg, issue, _tuples, history=_hist, cards=cards)
+                archive.update(_judged)
+                _annotate(_hs)
+                if _hs and _route(_hs, group_ok=_group_ok) != "needs_human":
+                    return {"hypotheses": _hs}
+                _wid = finding.window.window_id
+                reqs = [EvidenceRequest(
+                    kind="window_series",
+                    reason="finding 归因不足，补同窗口全量 series",
+                    finding_id=finding.finding_id, window_ids=[_wid],
+                    metric=finding.metric, missing=["per_frame"],
+                    expected="目标窗口的逐帧 counters series")]
+                return {"requests": reqs}
+
+            def _do(req):
+                cap = _capture_dir(run_dir)
+                if req.kind in ("window_series", "control_window", "deep_window") \
+                        and cap is not None:
+                    return _fulfill(req, run_dir=cap, project=root,
+                                    replay=st.get("replay"))
+                if evidence_collector is not None:
+                    try:
+                        raw = evidence_collector(req) or {}
+                    except Exception as e:  # noqa: BLE001
+                        raw = {"available": False,
+                               "reason": f"{type(e).__name__}: {e}"}
+                    return EvidenceDelta(
+                        available=bool(raw.get("available")),
+                        kind=req.kind, text=str(raw.get("text") or "")[:4000],
+                        payload=raw.get("payload") or {},
+                        refs=list((raw.get("payload") or {}).get("refs") or []),
+                        reason=str(raw.get("reason") or ""))
+                return EvidenceDelta(available=False, kind=req.kind,
+                                     reason="没有可用的补证执行器")
+
+            _res = run_evidence_loop(
+                finding, diagnose=_judge, fulfill=_do,
+                max_rounds=max(1, int(getattr(mcaps, "max_evidence_rounds", 2))),
+                max_deep=1)
+            E.write_json(run_dir / "evidence_loop.json", {
+                "status": _res.status, "rounds": _res.rounds,
+                "trace": _res.trace,
+                "deltas": [d.model_dump() for d in _res.deltas],
+            }, what="evidence_loop", strict=False)
+            hs = _res.hypotheses
+            if not hs:
+                return {"route": "insufficient_evidence",
+                        "exit_code": "insufficient_evidence",
+                        "error": f"evidence_loop={_res.status}",
+                        "tokens_used": 0}
         ev_rounds = 0
         _seen_roots: set[tuple] = set()
         while True:
+            if use_loop:
+                break
             _tuples = tuples if ev_rounds == 0 else tuples[:3]
             hs, judged = build_hypotheses_for_issue(
                 cfg, issue, _tuples, history=hist, cards=cards)

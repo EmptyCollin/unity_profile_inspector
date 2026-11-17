@@ -301,7 +301,8 @@ def main() -> int:
                 _g = nd["diagnose"]({
                     "issue": N.issue_from_finding(_fobj),
                     "project": str(p), "primary_finding": _fobj.model_dump(),
-                    "baseline_dirs": _bdirs})
+                    "baseline_dirs": _bdirs,
+                    "use_evidence_loop": True, "replay": a.replay})
                 if _g.get("route") == "proceed":
                     _all_hs.extend(_g.get("hypotheses") or [])
                 else:
@@ -316,7 +317,8 @@ def main() -> int:
         else:
             g = nd["diagnose"]({"issue": d["issue"], "project": str(p),
                                 "primary_finding": d.get("primary_finding"),
-                                "baseline_dirs": _bdirs})
+                                "baseline_dirs": _bdirs,
+                                "use_evidence_loop": True, "replay": a.replay})
         if g.get("route") != "proceed":
             print("diagnose failed", g)
             return 1
