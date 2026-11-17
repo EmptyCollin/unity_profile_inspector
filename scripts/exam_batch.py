@@ -1269,40 +1269,21 @@ def main() -> int:
                                              "status": d["status"],
                                              "units": d.get("units") or []})
                 if _bad:
-                    _ok_reset = bool(_group_base and X._git_reset(p, _group_base))
-                    if not _ok_reset:
-                        for uid in _bad:
-                            pch = patches.get(uid)
-                            if pch is not None:
-                                rollback(pch)
-                    else:
-                        _keep = [u for u in group_units
-                                 if u.unit_id not in _bad
-                                 and u.unit_id in set(res.verified)]
-                        res.applied = []
-                        res.verified = []
-                        _reapply_ok = True
-                        for u in _keep:
-                            pch = patches.get(u.unit_id)
-                            if pch is None or not apply(pch):
-                                _reapply_ok = False
-                                break
-                            res.applied.append(u.unit_id)
-                            res.verified.append(u.unit_id)
-                        if _reapply_ok and res.applied:
-                            res.compile_ok = bool(compile_fn())
-                            if not res.compile_ok:
-                                X._git_reset(p, _group_base)
-                                res.applied = []
-                                res.verified = []
-                                for u in _keep:
-                                    res.failed[u.unit_id] = "window_reapply_compile_failed"
-                        elif not _reapply_ok:
-                            X._git_reset(p, _group_base)
-                            res.applied = []
-                            res.verified = []
-                            for u in _keep:
-                                res.failed[u.unit_id] = "window_reapply_failed"
+                    from upi.core.window_reset import reset_and_replay
+                    _keep = [(u.unit_id, patches[u.unit_id])
+                             for u in group_units
+                             if u.unit_id not in _bad
+                             and u.unit_id in set(res.verified)
+                             and patches.get(u.unit_id) is not None]
+                    _rr = reset_and_replay(
+                        p, _group_base, _keep,
+                        reset=X._git_reset, apply=apply,
+                        compile_fn=compile_fn, rollback=rollback)
+                    res.applied = list(_rr.get("applied") or [])
+                    res.verified = list(_rr.get("verified") or [])
+                    res.failed.update(_rr.get("failed") or {})
+                    if _rr.get("compile_ok") is not None:
+                        res.compile_ok = bool(_rr["compile_ok"])
                     for uid in _bad:
                         if uid in res.verified:
                             res.verified.remove(uid)
