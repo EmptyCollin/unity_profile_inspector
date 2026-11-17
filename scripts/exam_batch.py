@@ -597,7 +597,10 @@ def main() -> int:
                 required_sites=unit.sites,
                 remaining_sites=_hints or None,
                 candidate_card=_site_card(),
-                mechanism_class="unknown")
+                mechanism_class="unknown",
+                window_ids=[w for w in (_finding_window.get(fid)
+                                        for fid in (unit.finding_ids or []))
+                            if w])
             seen_plans.append(_pl)
             variants.append({
                 "ok": _pl is not None,

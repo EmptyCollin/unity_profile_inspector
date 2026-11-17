@@ -40,6 +40,9 @@ code_anchors: {anchors}
 候选证据卡:
 {candidate_card}
 
+## 目标窗口（必须原样使用）
+{window_ids}
+
 ## 上次未覆盖的同类站点
 {remaining_sites}
 
@@ -61,7 +64,7 @@ code_anchors: {anchors}
  "invariant":{{"file":"Assets/...","method":"方法名","pattern":"正则","expect":0}},
  "repair_contract":{{"primary_metric":"frame_time","min_improve":0.05,
    "guards":[{{"metric":"memory","max_relative":0.10}}],"mb_per_ms":8,
-   "window":"open_shop"}},
+   "window_ids":["cmd-10-open_shop"]}},
  "edits":[{{"file":"Assets/...", "find":"精确原文", "replace":"替换后"}}]}}
 
 invariant 必须由你根据这次补丁声明：
@@ -69,7 +72,8 @@ invariant 必须由你根据这次补丁声明：
 - invariant.pattern 必须能在 find 文本中匹配到，并且 apply 后应在 method 内消失；
 - 如果无法声明可靠不变量，invariant 输出 {{}}，metric 仍必须给出。
 - repair_contract 可选：声明主指标、最小改善、守护预算和内存/时间汇率。
-  window 可选，取 replay 动作名（如 open_shop），metric 只比较该动作窗口。
+  window_ids 必须原样使用上方“目标窗口”的精确 id（如 cmd-10-open_shop），
+  metric 只比较这些窗口；不要改写成动作名（open_shop）。
   不声明则 verifier 使用默认规则。
 """
 
@@ -241,7 +245,8 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
                strategy: str = "",
                required_sites: list[str] | None = None,
                mechanism_class: str = "unknown",
-               invariant: str = "") -> tuple[Optional[EditPlan], dict]:
+               invariant: str = "",
+               window_ids: list[str] | None = None) -> tuple[Optional[EditPlan], dict]:
     """假设 → EditPlan。失败返回 (None, meta{error,...})，不抛半路异常。"""
     root = Path(project_root).resolve()
     rc = str(hypothesis.get("root_cause", ""))
@@ -255,6 +260,8 @@ def plan_issue(cfg: LlmConfig, issue: Issue, hypothesis: dict,
         evidence=evidence, root_cause=rc,
         anchors=", ".join(anchors) or "（无）",
         candidate_card=(candidate_card or "（无额外候选统计）"),
+        window_ids=(", ".join(str(x) for x in (window_ids or []))
+                    or "（未提供；不得猜动作名）"),
         remaining_sites=("\n".join(remaining_sites) if remaining_sites
                          else "（无）"),
         strategy=(strategy or "首次尝试：给最小结构修复"),
