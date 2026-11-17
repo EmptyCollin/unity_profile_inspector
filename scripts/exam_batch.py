@@ -1127,6 +1127,25 @@ def main() -> int:
             combined.capture_ok &= r.capture_ok
         return combined
 
+    def write_window_acceptance() -> None:
+        try:
+            from upi.core.acceptance import merge_window_verdicts
+            doc = merge_window_verdicts(cf_records)
+            (run_dir / "window_acceptance.json").write_text(
+                json.dumps(doc, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            _multi = {w: d for w, d in doc.items() if d.get("n", 0) > 1}
+            if _multi:
+                print("window acceptance merged:", {
+                    w: d["status"] for w, d in _multi.items()})
+                if a.acceptance_status:
+                    for rec in cf_records:
+                        w = str(rec.get("window") or "")
+                        if w in _multi:
+                            rec["status"] = _multi[w]["status"]
+        except Exception as e:  # noqa: BLE001
+            print("window acceptance error", type(e).__name__, e)
+
     def write_acceptance_compare() -> None:
         try:
             from upi.core.acceptance import status_compare
@@ -1235,6 +1254,7 @@ def main() -> int:
              "same_window_units": {w: ids for w, ids
                                    in _window_units.items() if len(ids) > 1}},
             ensure_ascii=False, indent=2), encoding="utf-8")
+        write_window_acceptance()
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
             encoding="utf-8")
@@ -1278,6 +1298,7 @@ def main() -> int:
         if not active:
             break
     flow.enter("record", verified=sorted(all_verified), route="done")
+    write_window_acceptance()
     write_acceptance_compare()
     try:
         (run_dir / "counterfactual.jsonl").write_text(

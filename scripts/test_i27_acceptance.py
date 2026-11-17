@@ -6,8 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.acceptance import (absolute, decide, environment,  # noqa: E402
-                                 group_by_overlap, min_ratio_for, relative,
-                                 status_compare, verdict)
+                                 group_by_overlap, merge_window_verdicts,
+                                 min_ratio_for, relative, status_compare,
+                                 verdict)
 
 PASS, FAIL = [], []
 
@@ -111,6 +112,19 @@ ok("按 metric 取 min_ratio",
    and v3.relative["status"] == "significant", v3.relative)
 ok("frame_time 显著但无绝对 target",
    v3.status == "improved_partial_absolute_unassessed", v3.status)
+
+wrecs = [
+    {"unit_id": "a", "window": "cmd-10-open_shop",
+     "status": "verified", "acceptance": {"status": "verified"}},
+    {"unit_id": "b", "window": "cmd-10-open_shop",
+     "status": "not_significant",
+     "acceptance": {"status": "not_significant"}},
+]
+wv = merge_window_verdicts(wrecs)
+ok("同窗合并取最差",
+   wv["cmd-10-open_shop"]["status"] == "not_significant", wv)
+ok("同窗记录 window_status",
+   all(r.get("window_status") == "not_significant" for r in wrecs), wrecs)
 
 print(f"\n==== I27 acceptance: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:

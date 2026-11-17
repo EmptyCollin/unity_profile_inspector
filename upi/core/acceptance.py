@@ -154,6 +154,44 @@ def status_compare(records: list[dict]) -> dict:
             "new": dict(new_counts)}
 
 
+def merge_window_verdicts(records: list[dict]) -> dict:
+    """同窗口多 unit 合并成一个 window verdict。
+
+    unit 的 patch 仍各自 verify，但同一 exact window 的验收结论只能有一个：
+    取最差状态（semantic > drift > regressed > not_significant > partial > verified）。
+    """
+    rank = {
+        "verified": 0,
+        "improved_partial_absolute_unassessed": 1,
+        "improved_partial_absolute_unmet": 2,
+        "not_significant": 3,
+        "regressed": 4,
+        "environment_drift": 5,
+        "semantic_risk": 6,
+    }
+    groups: dict[str, list[dict]] = {}
+    for r in records or []:
+        w = str(r.get("window") or "")
+        if w:
+            groups.setdefault(w, []).append(r)
+    out: dict[str, dict] = {}
+    for w, rows in groups.items():
+        statuses = []
+        for r in rows:
+            st = str((r.get("acceptance") or {}).get("status") or "")
+            if not st or st == "unassessed":
+                st = str(r.get("status") or "insufficient_evidence")
+            statuses.append(st)
+        merged = max(statuses, key=lambda s: rank.get(s, 3))
+        for r in rows:
+            r["window_status"] = merged
+        out[w] = {"window": w,
+                  "units": [str(r.get("unit_id") or "") for r in rows],
+                  "statuses": statuses, "status": merged,
+                  "n": len(rows)}
+    return out
+
+
 def verdict(unit_id: str, *, before: Iterable[float], after: Iterable[float],
             control_before: Iterable[float] = (),
             control_after: Iterable[float] = (),
