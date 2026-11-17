@@ -117,7 +117,10 @@ def main() -> int:
     ap.add_argument("--acceptance-status", action="store_true",
                     help="用 I27 三轴 acceptance 覆盖旧 status（默认只记录）")
     ap.add_argument("--group-acceptance", action="store_true",
-                    help="单组验收：组前 3 次 before + 全部补丁 + 组后 3 次 after")
+                    help="组验收：组前 3 次 before + 补丁 + 组后 3 次 after")
+    ap.add_argument("--group-mode", choices=["single", "components"],
+                    default="single",
+                    help="single=window 不相交的 unit 全放一组；components=按相交拆组")
     a = ap.parse_args()
     if a.group_acceptance and a.serial:
         raise SystemExit("--group-acceptance 与 --serial 不能同时使用")
@@ -1102,14 +1105,23 @@ def main() -> int:
             files = list(pl.touched_assets) if pl else []
             items.append({"unit_id": u.unit_id, "window_ids": wins,
                           "files": files})
-        from upi.core.acceptance import group_by_overlap
-        raw_groups = group_by_overlap(items)
-        groups = []
-        for g in raw_groups:
-            ids = {x["unit_id"] for x in g}
-            groups.append([u for u in active if u.unit_id in ids])
+        if a.group_mode == "single":
+            groups = [active]
+        else:
+            from upi.core.acceptance import group_by_overlap
+            raw_groups = group_by_overlap(items)
+            groups = []
+            for g in raw_groups:
+                ids = {x["unit_id"] for x in g}
+                groups.append([u for u in active if u.unit_id in ids])
         results = []
         for gi, group_units in enumerate(groups, 1):
+            # components 模式下，前面组的 kept patch 会改代码；本组重新 plan。
+            if a.group_mode == "components" and gi > 1:
+                for u in group_units:
+                    p = plan(u)
+                    if p is not None:
+                        patches[u.unit_id] = p
             bm: list[dict] = []
             bw: list[dict] = []
             for i in range(3):
@@ -1139,8 +1151,8 @@ def main() -> int:
                             "before_n": len(bm),
                             "result": res.__dict__})
         (run_dir / "group_acceptance.json").write_text(json.dumps(
-            {"groups": results}, ensure_ascii=False, indent=2),
-            encoding="utf-8")
+            {"mode": a.group_mode, "groups": results},
+            ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
             encoding="utf-8")
