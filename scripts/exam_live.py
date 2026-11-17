@@ -257,7 +257,7 @@ def main() -> int:
         n_base = max(1, int(a.baselines))
         for bi in range(n_base):
             okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
-                                     f"baseline#{bi + 1}", two_pass=True,
+                                     f"baseline#{bi + 1}", two_pass=False,
                                      retries=1, checkpoint=cp)
             if not okcap:
                 mark(f"baseline#{bi + 1}", "failed",
