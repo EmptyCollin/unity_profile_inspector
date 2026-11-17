@@ -608,6 +608,26 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     _hist += (f"\n补证({_d.kind}) refs={len(_d.refs)} "
                               f"{(str(_d.summary or _d.text))[:400]}")
                 _tuples = tuples if not _deltas else tuples[:3]
+                _deep = []
+                for _d in _deltas:
+                    if _d.kind == "deep_window":
+                        for _r in (_d.rows or {}).values():
+                            if isinstance(_r, dict) and _r.get("deep"):
+                                _deep.append(_r["deep"])
+                if _deep:
+                    from upi.core.deep_evidence import (merge_summaries,
+                                                        rank_candidates)
+                    _merged = merge_summaries(_deep)
+                    _ordered = rank_candidates(ev_cands, _merged)
+                    _tuples = [(c.root_cause, [a.replace(str(root), "").replace(
+                        _pname, "project") for a in anchors_of(c)])
+                        for c in _ordered[:12]]
+                    _hist += ("\ndeep hot=" + "; ".join(
+                        f"{r.get('symbol')}={r.get('ms')}ms"
+                        for r in (_merged.get("hot") or [])[:5]))
+                    _hist += ("\ndeep alloc=" + "; ".join(
+                        f"{r.get('symbol')}={r.get('kbytes')}KB"
+                        for r in (_merged.get("allocs") or [])[:5]))
                 _hs, _judged = build_hypotheses_for_issue(
                     cfg, issue, _tuples, history=_hist, cards=cards)
                 archive.update(_judged)

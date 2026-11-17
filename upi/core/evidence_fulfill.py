@@ -134,6 +134,28 @@ def _run_deep(request: EvidenceRequest, project: Path | str,
         for d in docs:
             if d.get("raw_status") == "ok" and d.get("path"):
                 refs.append(str(d["path"]))
-                rows[str(d.get("window_id") or "")] = d
+                wid = str(d.get("window_id") or "")
+                # 把 .data 解包成 windows/<id>.json，并生成 candidate 排序摘要。
+                dest = ROOT / "runs" / run_id / "windows" / f"{wid}.json"
+                if wid and not dest.is_file():
+                    try:
+                        subprocess.run(
+                            [sys.executable,
+                             str(ROOT / "scripts" / "profile_window.py"),
+                             "--run-id", run_id, "--window-id", wid,
+                             "--project", str(project)],
+                            cwd=str(ROOT), capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=300)
+                    except Exception:  # noqa: BLE001
+                        pass
+                try:
+                    from upi.core.deep_evidence import (load_window,
+                                                        summarize)
+                    doc = load_window(ROOT / "runs" / run_id, wid)
+                    if doc:
+                        d["deep"] = summarize(doc)
+                except Exception:  # noqa: BLE001
+                    pass
+                rows[wid] = d
     return {"refs": refs, "rows": rows,
             "summary": f"rc={getattr(p, 'returncode', -1)} profiles={len(refs)}"}
