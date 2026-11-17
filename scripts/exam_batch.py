@@ -1239,25 +1239,25 @@ def main() -> int:
             print("group acceptance: group", gi, "units",
                   len(group_units), "before", len(bm))
             _cf0 = len(cf_records)
+            _group_base = X._git_head(p)
             res = run_batch(
                 group_units,
                 plan=lambda u: patches.get(u.unit_id) or plan(u),
                 apply=apply, compile_fn=compile_fn, capture=capture_fn,
                 verify=verify, rollback=rollback, round_no=1)
             # I27：同一 exact window 的 merged verdict 不是 verified → 整窗回滚。
+            # 用组前 git 快照 reset，然后重放本组 verified 补丁，避免逐 unit reset
+            # 在共享文件上互相覆盖。
             _window_rollback = []
             try:
                 from upi.core.acceptance import merge_window_verdicts
                 wdoc = merge_window_verdicts(cf_records[_cf0:])
+                _bad: set[str] = set()
                 for w, d in wdoc.items():
                     if d.get("n", 0) <= 1 or d.get("status") == "verified":
                         continue
                     for uid in d.get("units") or []:
-                        p = patches.get(uid)
-                        if p is not None:
-                            rollback(p)
-                        if uid in res.verified:
-                            res.verified.remove(uid)
+                        _bad.add(uid)
                         res.failed[uid] = f"window_{d['status']}"
                         if uid not in res.rolled_back:
                             res.rolled_back.append(uid)
@@ -1268,6 +1268,44 @@ def main() -> int:
                     _window_rollback.append({"window": w,
                                              "status": d["status"],
                                              "units": d.get("units") or []})
+                if _bad:
+                    _ok_reset = bool(_group_base and X._git_reset(p, _group_base))
+                    if not _ok_reset:
+                        for uid in _bad:
+                            pch = patches.get(uid)
+                            if pch is not None:
+                                rollback(pch)
+                    else:
+                        _keep = [u for u in group_units
+                                 if u.unit_id not in _bad
+                                 and u.unit_id in set(res.verified)]
+                        res.applied = []
+                        res.verified = []
+                        _reapply_ok = True
+                        for u in _keep:
+                            pch = patches.get(u.unit_id)
+                            if pch is None or not apply(pch):
+                                _reapply_ok = False
+                                break
+                            res.applied.append(u.unit_id)
+                            res.verified.append(u.unit_id)
+                        if _reapply_ok and res.applied:
+                            res.compile_ok = bool(compile_fn())
+                            if not res.compile_ok:
+                                X._git_reset(p, _group_base)
+                                res.applied = []
+                                res.verified = []
+                                for u in _keep:
+                                    res.failed[u.unit_id] = "window_reapply_compile_failed"
+                        elif not _reapply_ok:
+                            X._git_reset(p, _group_base)
+                            res.applied = []
+                            res.verified = []
+                            for u in _keep:
+                                res.failed[u.unit_id] = "window_reapply_failed"
+                    for uid in _bad:
+                        if uid in res.verified:
+                            res.verified.remove(uid)
             except Exception as e:  # noqa: BLE001
                 print("window rollback error", type(e).__name__, e)
             print("group acceptance result", gi, res)
