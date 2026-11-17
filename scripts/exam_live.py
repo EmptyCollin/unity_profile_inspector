@@ -258,7 +258,7 @@ def main() -> int:
         for bi in range(n_base):
             okcap, r = _capture_once(p, a.project_id, a.replay, run_dir,
                                      f"baseline#{bi + 1}", two_pass=False,
-                                     retries=1, checkpoint=cp)
+                                     light=True, retries=1, checkpoint=cp)
             if not okcap:
                 mark(f"baseline#{bi + 1}", "failed",
                      (r.stdout or r.stderr)[-160:] if r else "capture failed")
