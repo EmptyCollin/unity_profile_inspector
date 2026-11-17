@@ -113,3 +113,74 @@ def rank_candidates(cands: Iterable, summary: dict) -> list:
         scored.append((bool(h or a), boost, i, c))
     scored.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
     return [x[3] for x in scored]
+
+
+def candidates_from_summary(summary: dict, project_root, *, window_id: str,
+                            limit: int = 8) -> list[dict]:
+    """把 deep summary 的 symbol 映射到源码锚点，生成新的 CandidateV2 dict。
+
+    没有源码锚点的 symbol 不生成候选（禁止无位置结论）。
+    """
+    from upi.core.candidates_v2 import CandidateV2
+    from upi.core.evidence_v2 import SourceSpan
+    from upi.core.static_index import StaticIndex
+
+    try:
+        idx = StaticIndex(project_root)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _span(sym: str) -> tuple[str, str, int, int] | None:
+        hits = idx.find_symbol(sym.split(".")[-1])
+        if not hits:
+            return None
+        h = hits[0]
+        return (str(h["file"]), str(h["method"]), int(h["line"]),
+                int(h.get("end_line") or h["line"]))
+
+    for r in (summary.get("hot") or [])[:limit]:
+        sym = str(r.get("symbol") or "")
+        hit = _span(sym)
+        if not hit:
+            continue
+        file, method, line, end = hit
+        root = f"hot_function:{sym}"
+        if root in seen:
+            continue
+        seen.add(root)
+        ms = float(r.get("ms") or 0.0)
+        c = CandidateV2(
+            id=f"deep-hot-{len(out)}", root_cause=root,
+            mechanism="hot_path", kind="function",
+            code_anchors=[f"{file}:{line}"],
+            sources=[SourceSpan(file=file, symbol=method,
+                                start_line=line, end_line=end)],
+            metric_value=ms, metric_unit="ms", self_ms=ms, total_ms=ms,
+            score=ms, evidence_n=int(r.get("calls") or 1),
+            window_id=window_id)
+        out.append(c.model_dump())
+
+    for r in (summary.get("allocs") or [])[:limit]:
+        sym = str(r.get("symbol") or "")
+        hit = _span(sym)
+        if not hit:
+            continue
+        file, method, line, end = hit
+        root = f"allocation_site:{sym}:{line}"
+        if root in seen:
+            continue
+        seen.add(root)
+        b = int(r.get("bytes") or 0)
+        c = CandidateV2(
+            id=f"deep-alloc-{len(out)}", root_cause=root,
+            mechanism="per_frame_allocation", kind="allocation",
+            code_anchors=[f"{file}:{line}"],
+            sources=[SourceSpan(file=file, symbol=method,
+                                start_line=line, end_line=end)],
+            metric_value=float(b), metric_unit="bytes",
+            score=round(b / 1024.0, 1), evidence_n=int(r.get("count") or 1),
+            window_id=window_id)
+        out.append(c.model_dump())
+    return out

@@ -149,11 +149,13 @@ def _run_deep(request: EvidenceRequest, project: Path | str,
                     except Exception:  # noqa: BLE001
                         pass
                 try:
-                    from upi.core.deep_evidence import (load_window,
-                                                        summarize)
+                    from upi.core.deep_evidence import (candidates_from_summary,
+                                                        load_window, summarize)
                     doc = load_window(ROOT / "runs" / run_id, wid)
                     if doc:
                         d["deep"] = summarize(doc)
+                        d["deep"]["candidates"] = candidates_from_summary(
+                            d["deep"], project, window_id=wid)
                 except Exception:  # noqa: BLE001
                     pass
                 rows[wid] = d

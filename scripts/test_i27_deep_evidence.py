@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.candidates_v2 import CandidateV2  # noqa: E402
-from upi.core.deep_evidence import (load_window, merge_summaries,  # noqa: E402
+from upi.core.deep_evidence import (candidates_from_summary,  # noqa: E402
+                                    load_window, merge_summaries,
                                     rank_candidates, summarize)
 
 PASS, FAIL = [], []
@@ -61,6 +62,30 @@ ok("空窗口不炸", empty["allocs"] == [] and empty["hot"] == [], empty)
 merged = merge_summaries([s, s])
 ok("summary 合并 bytes", merged["alloc_bytes"] == 6000, merged)
 ok("summary 合并 windows", merged["windows"] == 2, merged)
+
+# symbol → 源码锚点 → 新 candidate
+proj = TMP / "proj"
+(proj / "Assets").mkdir(parents=True)
+(proj / "Assets" / "Game.cs").write_text(
+    "public class ChromaGame {\n"
+    "  void UpdateHud() { new object(); }\n"
+    "  void Update() { }\n"
+    "}\n", encoding="utf-8")
+dc = candidates_from_summary(s, proj, window_id="cmd-10-open_shop")
+roots = {x["root_cause"] for x in dc}
+ok("deep 生成 hot candidate",
+   "hot_function:ChromaGame.UpdateHud" in roots, roots)
+ok("deep candidate 有锚点",
+   all(x.get("code_anchors") for x in dc), dc)
+ok("deep candidate 有窗口",
+   all(x.get("window_id") == "cmd-10-open_shop" for x in dc), dc)
+s2 = dict(s)
+s2["hot"] = list(s.get("hot") or []) + [
+    {"symbol": "ChromaGame.Missing", "time_ns": 1, "ms": 0.001, "calls": 1}]
+dc2 = candidates_from_summary(s2, proj, window_id="cmd-10-open_shop")
+ok("deep 无源码的 symbol 被跳过",
+   not any("Missing" in x["root_cause"] for x in dc2),
+   [x["root_cause"] for x in dc2])
 
 print(f"\n==== I27 deep_evidence: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:

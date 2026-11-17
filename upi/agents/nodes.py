@@ -618,6 +618,25 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                     from upi.core.deep_evidence import (merge_summaries,
                                                         rank_candidates)
                     _merged = merge_summaries(_deep)
+                    _deep_cands = []
+                    for _r in _deep:
+                        _deep_cands.extend(_r.get("candidates") or [])
+                    if _deep_cands:
+                        from upi.core.candidates_v2 import CandidateV2
+                        _have = {c.root_cause for c in ev_cands}
+                        for _dc in _deep_cands:
+                            try:
+                                _c = CandidateV2(**_dc)
+                            except Exception:  # noqa: BLE001
+                                continue
+                            if _c.root_cause not in _have:
+                                ev_cands.append(_c)
+                                _have.add(_c.root_cause)
+                            cards.setdefault(
+                                _c.root_cause,
+                                f"mechanism={_c.mechanism}; kind={_c.kind}; "
+                                f"deep=true; window={_c.window_id}; "
+                                f"anchors={', '.join(_c.code_anchors) or '?'}")
                     _ordered = rank_candidates(ev_cands, _merged)
                     _tuples = [(c.root_cause, [a.replace(str(root), "").replace(
                         _pname, "project") for a in anchors_of(c)])
