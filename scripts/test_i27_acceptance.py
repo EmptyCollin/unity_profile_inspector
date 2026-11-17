@@ -22,6 +22,10 @@ ok("显著改善", r["status"] == "significant" and r["delta"] == 5, r)
 ok("不显著", relative([10, 10, 10], [10.1, 10.1, 10.1])["status"]
    == "not_significant")
 ok("劣化", relative([10, 10, 10], [20, 20, 20])["status"] == "regressed")
+ok("离群值不放大阈值",
+   relative([10, 10, 10, 1000], [5, 5, 5, 1000])["status"]
+   == "significant",
+   relative([10, 10, 10, 1000], [5, 5, 5, 1000]))
 
 a_met = absolute(5, 6)
 a_unmet = absolute(5, 4)
@@ -83,6 +87,19 @@ cmp = status_compare([
 ok("status_compare n", cmp["n"] == 2, cmp)
 ok("status_compare changed", cmp["changed"] == 1, cmp)
 ok("status_compare 跳 unassessed", "unmeasured -> unassessed" not in cmp["pairs"], cmp)
+
+from upi.core.finding import dedupe_hypotheses  # noqa: E402
+hs = [
+    {"root_cause": "a", "window_id": "w1", "finding_metric": "m",
+     "confidence": 0.4},
+    {"root_cause": "a", "window_id": "w1", "finding_metric": "m",
+     "confidence": 0.8},
+    {"root_cause": "a", "window_id": "w2", "finding_metric": "m",
+     "confidence": 0.3},
+]
+dh = dedupe_hypotheses(hs)
+ok("hypothesis 去重", len(dh) == 2, dh)
+ok("hypothesis 留最高置信", dh[0]["confidence"] == 0.8, dh)
 
 print(f"\n==== I27 acceptance: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:

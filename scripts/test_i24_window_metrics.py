@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.window_metrics import (action_indices, exact_index,  # noqa: E402
-                                     index_for_window, window_counters)
+                                     index_for_window, pick_control_index,
+                                     window_counters)
 
 PASS, FAIL = [], []
 
@@ -37,6 +38,18 @@ ok("动作索引跳过 wait", 1 not in idx and idx[4] == "open_shop", idx)
 ok("window 取最后出现", index_for_window(idx, "open_shop") == 4, idx)
 ok("精确 window index", exact_index("cmd-10-open_shop") == 10)
 ok("动作名不能当精确 window", exact_index("open_shop") is None)
+
+_w1 = {2: {"counters": {}}, 3: {"counters": {}}, 10: {"counters": {}}}
+_w2 = {2: {"counters": {}}, 3: {"counters": {}}, 10: {"counters": {}}}
+_aidx = {2: "wait", 3: "wait", 10: "open_shop"}
+ok("control 优先 wait", pick_control_index(_aidx, {10}, _w1, _w2) == 2,
+   pick_control_index(_aidx, {10}, _w1, _w2))
+_w2.pop(2)
+ok("control 跳过缺数据窗口",
+   pick_control_index(_aidx, {10}, _w1, _w2) == 3,
+   pick_control_index(_aidx, {10}, _w1, _w2))
+ok("只有 target 时无 control",
+   pick_control_index({10: "open_shop"}, {10}, _w1, _w2) is None)
 
 print(f"\n==== I24 window counters 测试: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:

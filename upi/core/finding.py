@@ -165,3 +165,26 @@ class Verdict(BaseModel):
     control: dict = Field(default_factory=dict)
     semantic: dict = Field(default_factory=dict)
     status: VerdictStatus = "insufficient_evidence"
+
+
+def dedupe_hypotheses(hs: list) -> list[dict]:
+    """同一 (root_cause, window_id, metric) 只留最高置信度。
+
+    per-finding diagnose 会为每个 finding 重复产出同一批 candidate hypothesis；
+    进 findings/units 前必须去重，否则 4 个 finding 会膨胀成 40 条。
+    """
+    best: dict[tuple, dict] = {}
+    for h in hs or []:
+        d = h.model_dump() if hasattr(h, "model_dump") else dict(h)
+        key = (str(d.get("root_cause") or ""),
+               str(d.get("window_id") or ""),
+               str(d.get("finding_metric") or ""))
+        try:
+            conf = float(d.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        if key not in best or conf > float(best[key].get("confidence") or 0.0):
+            best[key] = d
+    return sorted(best.values(),
+                  key=lambda x: float(x.get("confidence") or 0.0),
+                  reverse=True)

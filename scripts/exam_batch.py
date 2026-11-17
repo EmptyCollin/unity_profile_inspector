@@ -158,7 +158,8 @@ def main() -> int:
     baseline_caps: list[str] = []
     after_windows: list[dict[int, dict]] = []
     after_n = 0
-    from upi.core.window_metrics import action_indices, exact_index, index_for_window
+    from upi.core.window_metrics import (action_indices, exact_index,
+                                         index_for_window, pick_control_index)
     from upi.core.window_metrics import window_counters
     action_idx = action_indices(a.replay)
     last_cap = {"id": ""}
@@ -353,6 +354,11 @@ def main() -> int:
             print("diagnose failed", g)
             return 1
         hs = g.get("hypotheses") or []
+        from upi.core.finding import dedupe_hypotheses
+        _n_hs = len(hs)
+        hs = dedupe_hypotheses(hs)
+        if len(hs) != _n_hs:
+            print("hypotheses dedupe", _n_hs, "->", len(hs))
         findings = X.findings_from_hypotheses(run_id, hs, {})
     _asset_findings = [f for f in findings
                        if "oversized_resource_asset" in str(f.mechanism)]
@@ -930,8 +936,8 @@ def main() -> int:
                 return vals
 
             _target_idx = set(window_indices_obs)
-            _ctrl_idx = next((i for i, t in action_idx.items()
-                              if t == "wait" and i not in _target_idx), None)
+            _ctrl_idx = pick_control_index(action_idx, _target_idx,
+                                           baseline_windows, after_windows)
             _cb = ([w.get(_ctrl_idx) for w in baseline_windows
                     if w.get(_ctrl_idx)] if _ctrl_idx is not None else [])
             _ca = ([w.get(_ctrl_idx) for w in after_windows

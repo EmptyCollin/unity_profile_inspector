@@ -13,9 +13,12 @@ from upi.core.finding import Verdict, VerdictStatus
 def stats(series: Iterable[float]) -> dict:
     vals = [float(x) for x in series]
     if not vals:
-        return {"n": 0, "median": None, "sigma": None}
-    return {"n": len(vals), "median": statistics.median(vals),
-            "sigma": statistics.pstdev(vals) if len(vals) > 1 else 0.0}
+        return {"n": 0, "median": None, "sigma": None, "mad": None}
+    med = statistics.median(vals)
+    mad = statistics.median([abs(x - med) for x in vals])
+    return {"n": len(vals), "median": med,
+            "sigma": statistics.pstdev(vals) if len(vals) > 1 else 0.0,
+            "mad": mad}
 
 
 def relative(before: Iterable[float], after: Iterable[float], *,
@@ -25,8 +28,9 @@ def relative(before: Iterable[float], after: Iterable[float], *,
         return {"status": "unmeasured", "before": b, "after": a,
                 "delta": None, "threshold": None}
     delta = b["median"] - a["median"]
-    sigma = max(float(b["sigma"] or 0.0), float(a["sigma"] or 0.0), 1e-9)
-    threshold = max(k * sigma, abs(b["median"]) * min_ratio, 1e-9)
+    # 用 MAD 的稳健噪声；σ 在窗口内有离群值时会被放大到失效。
+    robust = 1.4826 * max(float(b["mad"] or 0.0), float(a["mad"] or 0.0))
+    threshold = max(k * robust, abs(b["median"]) * min_ratio, 1e-9)
     if delta < -threshold:
         status = "regressed"
     elif delta > threshold:
@@ -34,7 +38,8 @@ def relative(before: Iterable[float], after: Iterable[float], *,
     else:
         status = "not_significant"
     return {"status": status, "before": b, "after": a,
-            "delta": delta, "threshold": threshold, "k": k}
+            "delta": delta, "threshold": threshold, "k": k,
+            "noise": robust}
 
 
 def absolute(observed: float | None, target: float | None, *,
@@ -55,11 +60,11 @@ def environment(before: Iterable[float], after: Iterable[float], *,
     if not b["n"] or not a["n"]:
         return {"status": "unassessed", "before": b, "after": a}
     delta = abs(float(b["median"]) - float(a["median"]))
-    sigma = max(float(b["sigma"] or 0.0), float(a["sigma"] or 0.0), 1e-9)
-    threshold = max(k * sigma, abs(b["median"]) * tolerance, 1e-9)
+    robust = 1.4826 * max(float(b["mad"] or 0.0), float(a["mad"] or 0.0))
+    threshold = max(k * robust, abs(b["median"]) * tolerance, 1e-9)
     return {"status": "drift" if delta > threshold else "ok",
             "delta": delta, "threshold": threshold,
-            "before": b, "after": a}
+            "before": b, "after": a, "noise": robust}
 
 
 def decide(*, rel: dict, abs_: dict, env: dict,

@@ -78,6 +78,31 @@ def exact_index(window_id: str) -> int | None:
         return None
 
 
+def pick_control_index(action_idx: dict[int, str], target_indices,
+                       *window_lists) -> int | None:
+    """选一个未被 target 覆盖、且在全部 before/after 列表里都有数据的窗口。
+
+    优先 wait；没有 wait 再退到任意非 target 索引。control 没有 series 时
+    acceptance 的 environment 轴会变成 unassessed，所以先保证有数据。
+    """
+    target = set(int(x) for x in (target_indices or []))
+
+    def _has(wl, i: int) -> bool:
+        if isinstance(wl, dict):
+            return wl.get(i) is not None
+        return any(isinstance(w, dict) and w.get(i) for w in wl)
+
+    for want_wait in (True, False):
+        for i in sorted(action_idx):
+            if i in target:
+                continue
+            if want_wait and action_idx[i] != "wait":
+                continue
+            if all(_has(wl, i) for wl in window_lists):
+                return i
+    return None
+
+
 def index_for_window(indices: dict[int, str], window: str) -> int | None:
     hits = [i for i, t in indices.items() if t == window]
     return hits[-1] if hits else None
