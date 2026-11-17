@@ -512,6 +512,8 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
             _pname, "project") for a in anchors_of(c)])
             for c in ev_cands[:12]]
         cards: dict[str, str] = {}
+        _cand_window = {str(c.root_cause): str(getattr(c, "window_id", "") or "")
+                        for c in ev_cands[:12]}
         for c in ev_cands[:12]:
             spans = "; ".join(
                 f"{s.file}:{s.start_line}-{s.end_line}"
@@ -563,8 +565,10 @@ def make_nodes(run_dir: Path, *, live_llm: bool = False,
                 cfg, issue, _tuples, history=hist, cards=cards)
             if finding is not None:
                 for _h in hs:
+                    _w = _cand_window.get(str(_h.get("root_cause") or "")) or ""
+                    if _w:
+                        _h.setdefault("window_id", _w)
                     _h.setdefault("finding_id", finding.finding_id)
-                    _h.setdefault("window_id", finding.window.window_id)
                     _h.setdefault("finding_metric", finding.metric)
             archive.update(judged)
             from upi.core.attribution import route as _route
