@@ -116,8 +116,10 @@ def main() -> int:
                     help="oracle clean plans JSON（绕过 LLM planner）")
     ap.add_argument("--claim-gate", action="store_true",
                     help="plan 阶段生成/校验/冻结 PatchClaim")
-    ap.add_argument("--acceptance-status", action="store_true",
-                    help="用 I27 三轴 acceptance 覆盖旧 status（默认只记录）")
+    ap.add_argument("--acceptance-status",
+                    action=argparse.BooleanOptionalAction, default=True,
+                    help="默认用三轴 acceptance 覆盖旧 status；"
+                         "--no-acceptance-status 回到旧口径")
     ap.add_argument("--group-acceptance", action="store_true",
                     help="组验收：组前 3 次 before + 补丁 + 组后 3 次 after")
     ap.add_argument("--group-mode", choices=["single", "components"],
