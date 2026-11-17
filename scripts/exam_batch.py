@@ -1081,6 +1081,18 @@ def main() -> int:
             combined.capture_ok &= r.capture_ok
         return combined
 
+    def write_acceptance_compare() -> None:
+        try:
+            from upi.core.acceptance import status_compare
+            doc = status_compare(cf_records)
+            (run_dir / "acceptance_compare.json").write_text(
+                json.dumps(doc, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            print("acceptance compare: n=", doc.get("n"),
+                  "changed=", doc.get("changed"))
+        except Exception as e:  # noqa: BLE001
+            print("acceptance compare error", type(e).__name__, e)
+
     def run_group_acceptance() -> int:
         """多组验收：window/files 相交的 unit 同组；每组独立 before/after。"""
         nonlocal baseline_metrics, baseline_windows, baseline_runs
@@ -1115,6 +1127,7 @@ def main() -> int:
                 ids = {x["unit_id"] for x in g}
                 groups.append([u for u in active if u.unit_id in ids])
         results = []
+        applied_files: set[str] = set()
         for gi, group_units in enumerate(groups, 1):
             # components 模式下，前面组的 kept patch 会改代码；本组重新 plan。
             if a.group_mode == "components" and gi > 1:
@@ -1122,6 +1135,26 @@ def main() -> int:
                     p = plan(u)
                     if p is not None:
                         patches[u.unit_id] = p
+            group_files = set()
+            for u in group_units:
+                pl = plans.get(u.unit_id)
+                if pl is not None:
+                    group_files |= set(pl.touched_assets or [])
+            if a.group_mode == "components" and (group_files & applied_files):
+                conflict = sorted(group_files & applied_files)
+                print("group acceptance: plan conflict", gi, conflict)
+                for u in group_units:
+                    cf_records.append({
+                        "unit_id": u.unit_id, "status": "plan_conflict",
+                        "measurement_status": "unmeasured", "window": "",
+                        "before_n": 3, "after_n": 0,
+                        "reason": "replan files intersect already kept patches"})
+                results.append({"group": gi,
+                                "units": [u.unit_id for u in group_units],
+                                "before_n": 3,
+                                "plan_conflict": conflict,
+                                "result": {}})
+                continue
             bm: list[dict] = []
             bw: list[dict] = []
             for i in range(3):
@@ -1150,12 +1183,14 @@ def main() -> int:
                             "units": [u.unit_id for u in group_units],
                             "before_n": len(bm),
                             "result": res.__dict__})
+            applied_files |= group_files
         (run_dir / "group_acceptance.json").write_text(json.dumps(
             {"mode": a.group_mode, "groups": results},
             ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),
             encoding="utf-8")
+        write_acceptance_compare()
         verified = sum(len(r["result"].get("verified") or []) for r in results)
         run.stop_reason = f"groups={len(results)}:verified={verified}"
         save_run(run)
@@ -1195,6 +1230,7 @@ def main() -> int:
         if not active:
             break
     flow.enter("record", verified=sorted(all_verified), route="done")
+    write_acceptance_compare()
     try:
         (run_dir / "counterfactual.jsonl").write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in cf_records),

@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from upi.core.acceptance import (absolute, decide, environment,  # noqa: E402
-                                 group_by_overlap, relative, verdict)
+                                 group_by_overlap, relative, status_compare,
+                                 verdict)
 
 PASS, FAIL = [], []
 
@@ -73,6 +74,15 @@ no_overlap = group_by_overlap([
     {"id": "b", "window_ids": ["cmd-2-y"], "files": ["B.cs"]},
 ])
 ok("无交集不合并", len(no_overlap) == 2, no_overlap)
+
+cmp = status_compare([
+    {"status": "needs_recheck", "acceptance": {"status": "verified"}},
+    {"status": "unmeasured", "acceptance": {"status": "unassessed"}},
+    {"status": "verified", "acceptance": {"status": "verified"}},
+])
+ok("status_compare n", cmp["n"] == 2, cmp)
+ok("status_compare changed", cmp["changed"] == 1, cmp)
+ok("status_compare 跳 unassessed", "unmeasured -> unassessed" not in cmp["pairs"], cmp)
 
 print(f"\n==== I27 acceptance: {len(PASS)} ok, {len(FAIL)} failed")
 if FAIL:

@@ -115,6 +115,28 @@ def group_by_overlap(items: list[dict]) -> list[list[dict]]:
     return [groups[k] for k in sorted(groups)]
 
 
+def status_compare(records: list[dict]) -> dict:
+    """对比旧 status 与 acceptance.status，供决定是否默认开启三轴。"""
+    from collections import Counter
+    pairs: Counter = Counter()
+    old_counts: Counter = Counter()
+    new_counts: Counter = Counter()
+    changed = 0
+    for r in records or []:
+        old = str(r.get("status") or "")
+        acc = (r.get("acceptance") or {}).get("status") or ""
+        if not old or not acc or acc == "unassessed":
+            continue
+        pairs[f"{old} -> {acc}"] += 1
+        old_counts[old] += 1
+        new_counts[acc] += 1
+        if old != acc:
+            changed += 1
+    return {"n": sum(old_counts.values()), "changed": changed,
+            "pairs": dict(pairs), "old": dict(old_counts),
+            "new": dict(new_counts)}
+
+
 def verdict(unit_id: str, *, before: Iterable[float], after: Iterable[float],
             control_before: Iterable[float] = (),
             control_after: Iterable[float] = (),
